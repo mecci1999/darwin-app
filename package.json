@@ -1,0 +1,17 @@
+{
+  "name": "gateway",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start:dev": "nodemon ./src/index.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "node-universe": "^0.0.2",
+    "node-universe-gateway": "^0.0.1",
+    "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
