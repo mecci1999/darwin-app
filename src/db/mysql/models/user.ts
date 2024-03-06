@@ -5,11 +5,12 @@ import { DataTypes, Model, Optional, Sequelize } from "sequelize";
 import { DataBaseTableNames } from "typings/enum";
 
 export interface IUserTableAttributes {
-  id: number;
+  id?: number;
   userId: string;
   username: string;
   password: string;
   phone?: string;
+  email?: string;
 }
 
 export class UserTable
@@ -21,6 +22,7 @@ export class UserTable
   public username!: string; // 用户名
   public password!: string; // 用户密码，非明文保存
   public phone: string | undefined; // 用户手机号
+  public email: string | undefined; // 用户邮箱
   public readonly createdTime!: Date; // 创建时间
   public readonly updatedTime!: Date; // 更新时间
 }
@@ -28,11 +30,12 @@ export class UserTable
 export default function (sequelize: Sequelize) {
   const model = UserTable.init(
     {
-      id: { type: DataTypes.INTEGER, autoIncrement: true },
-      userId: { type: DataTypes.STRING(32), primaryKey: true },
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+      userId: { type: DataTypes.STRING(32) },
       username: { type: DataTypes.STRING(255) },
       password: { type: DataTypes.STRING(255) },
       phone: { type: DataTypes.STRING(32) },
+      email: { type: DataTypes.STRING(255) },
     },
     {
       sequelize,

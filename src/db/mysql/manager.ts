@@ -8,8 +8,7 @@ import getModels from "./models";
 export class DataBaseConnectionManager {
   public static SequelizeStatic = SequelizeStatic;
 
-  public connections: { connection: SequelizeStatic.Sequelize; id: string }[] =
-    [];
+  public connections: { connection: SequelizeStatic.Sequelize }[] = [];
 
   constructor(public options?: any) {}
 
@@ -24,15 +23,14 @@ export class DataBaseConnectionManager {
    * @param models
    */
   public getConnection(
-    id: string,
     options: SequelizeStatic.Options = {},
-    { models = [] } = {},
+    { models = [] as string[] } = {},
   ): SequelizeStatic.Sequelize {
     const connection = new SequelizeStatic.Sequelize(
       deepmerge(
         {
           dialect: "mysql",
-          host: "localhost",
+          host: "0.0.0.0",
           port: 3306,
           database: "darwin_app",
           username: "darwin",
@@ -51,7 +49,7 @@ export class DataBaseConnectionManager {
     // 创建数据库的表格
     getModels(connection, models);
 
-    this.connections.push({ connection, id });
+    this.connections.push({ connection });
 
     return connection;
   }

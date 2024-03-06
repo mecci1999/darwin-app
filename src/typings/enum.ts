@@ -1,3 +1,3 @@
 export enum DataBaseTableNames {
-  User = "User",
+  User = "user",
 }
