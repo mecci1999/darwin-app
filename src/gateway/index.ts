@@ -1,5 +1,5 @@
-import Universe from "../../dist2";
-import { UniverseWeb } from "../../dist";
+import Universe from "node-universe";
+import { UniverseWeb } from "node-universe-gateway/dist";
 
 const star = new Universe.Star({
   namespace: "darwin-app",
