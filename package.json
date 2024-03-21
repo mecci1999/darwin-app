@@ -10,8 +10,9 @@
   "dependencies": {
     "deepmerge": "^4.3.1",
     "mysql2": "^3.9.2",
-    "node-universe": "^1.0.0",
-    "node-universe-gateway": "^1.0.1",
+    "node-universe": "^1.0.2",
+    "node-universe-gateway": "^1.0.2",
+    "pino-rotate-file": "^1.0.3",
     "sequelize": "^6.37.1",
     "typescript": "^5.3.3"
   },

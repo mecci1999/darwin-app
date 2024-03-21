@@ -1,7 +1,7 @@
-import Universe from "node-universe";
+import Universe from "node-universe/dist";
 import { UniverseWeb } from "node-universe-gateway/dist";
-import { rotate } from "../../dist";
-import { getMilliseconds } from "utils/getMilliseconds";
+import { rotate } from "pino-rotate-file/dist";
+import moment from "moment-timezone";
 
 // 微服务名
 const appName = "gateway";
@@ -11,6 +11,9 @@ rotate({
   maxAgeDays: 1, // 按照1天的作为分割，分别存储目录
   path: `./logs/${appName}`, // 日志文件存储目录
   mkdir: true,
+  prettyOptions: {
+    colorize: true,
+  },
 }).then((_destination) => {
   const star = new Universe.Star({
     namespace: "darwin-app",
@@ -21,14 +24,21 @@ rotate({
     },
     // 日志模块
     logger: {
+      name: "gateway",
       type: "pino",
       options: {
         pino: {
           options: {
             level: "info", // 日志级别
             timestamp: () =>
-              `[${new Date().toLocaleString("zh-CN", { hour12: false })}:${getMilliseconds()}]`, // 日志时间展示
-            flushInterval: 1000,
+              `,"time": "${moment().tz("Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss:SSS")}"`, // 日志时间展示
+            flushInterval: 10 * 1000,
+            useLevelLabels: true,
+            formatters: {
+              level(lable: string, number: number) {
+                return { level: lable };
+              },
+            },
           },
           destination: _destination,
         },
