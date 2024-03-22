@@ -13,6 +13,25 @@ rotate({
   mkdir: true,
   prettyOptions: {
     colorize: true,
+    // [2019-08-31 08:40:53.481] INFO STAR: Universe is creating...
+    customPrettifiers: {
+      time: () =>
+        `[${moment().tz("Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss:SSS")}]`,
+      level: (inputData, key, log, extras) => `${extras.labelColorized}`,
+      name: (value) => `${value}`,
+      pid: (value) => `PID-${value}`,
+      mod: (value, key, log, extras) =>
+        `${extras.colors ? extras.colors.green(value.toLocaleUpperCase()) : value.toLocaleUpperCase()}`,
+      nodeID: (value, key, log, extras) =>
+        `${extras.colors ? extras.colors.green(value) : value}`,
+      namespace: (value, key, log, extras) =>
+        `${extras.colors ? extras.colors.green(value) : value}`,
+      svc: (value, key, log, extras) =>
+        `${extras.colors ? extras.colors.green(value) : value}`,
+      version: (value, key, log, extras) =>
+        `${extras.colors ? extras.colors.green(value) : value}`,
+      messageKey: (inputData, key, log, extras) => `${inputData}`,
+    } as any,
   },
 }).then((_destination) => {
   const star = new Universe.Star({
@@ -29,6 +48,7 @@ rotate({
       options: {
         pino: {
           options: {
+            name: appName.toLocaleUpperCase(),
             level: "info", // 日志级别
             timestamp: () =>
               `,"time": "${moment().tz("Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss:SSS")}"`, // 日志时间展示
@@ -82,7 +102,7 @@ rotate({
       routes: [
         // 配置路由，将 REST 请求映射到对应的微服务
         {
-          path: "/:service[胜利]ersion/:action",
+          path: "/:service/version/:action",
           authorization: false,
           // whitelist: [], // 路由白名单
           // 路由跨域配置
