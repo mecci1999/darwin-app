@@ -30,4 +30,4 @@ function showPinoLogFile(path: string) {
   });
 }
 
-showPinoLogFile("./logs/gateway/2024_03_22.log");
+showPinoLogFile("./logs/gateway/2024_03_25.log");

@@ -2,6 +2,7 @@ import Universe from "node-universe/dist";
 import { UniverseWeb } from "node-universe-gateway/dist";
 import { rotate } from "pino-rotate-file/dist";
 import moment from "moment-timezone";
+import { noAuthTokenWhiteList } from "./white";
 
 // 微服务名
 const appName = "gateway";
@@ -50,9 +51,7 @@ rotate({
           options: {
             name: appName.toLocaleUpperCase(),
             level: "info", // 日志级别
-            timestamp: () =>
-              `,"time": "${moment().tz("Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss:SSS")}"`, // 日志时间展示
-            flushInterval: 10 * 1000,
+            flushInterval: 30 * 1000,
             useLevelLabels: true,
             formatters: {
               level(lable: string, number: number) {
@@ -102,7 +101,7 @@ rotate({
       routes: [
         // 配置路由，将 REST 请求映射到对应的微服务
         {
-          path: "/:service/version/:action",
+          path: "/:service/:version/:action",
           authorization: false,
           // whitelist: [], // 路由白名单
           // 路由跨域配置
@@ -117,10 +116,14 @@ rotate({
           // bodyParsers: {
           //   json: true,
           // },
-          // onBeforeCall(ctx, route, req, res) {
-          //  this.logger.info("onBeforeCall in protected route");
-          //  ctx.meta.authToken = req.headers["authorization"];
-          // },
+          onBeforeCall(ctx, route, req, res) {
+            console.log(
+              "onBeforeCall in protected route",
+              req.connection.remoteAddress
+            );
+            //  ctx.meta.authToken = req.headers["authorization"];
+            return ctx;
+          },
 
           // onAfterCall(ctx, route, req, res, data) {
           //  this.logger.info("onAfterCall in protected route");
@@ -139,9 +142,21 @@ rotate({
     actions: {
       // 网关服务的 dispatch 动作将请求转发到相应的微服务
       dispatch: {
-        handler(ctx) {
+        handler(ctx, route, req, res) {
+          // 获取到不需要做token校验的动作白名单
           const { service, version, action } = ctx.params;
           const params = ctx.params || {};
+          const sourceIpAdress = req.headers;
+          star.logger.info("sourceIp:", sourceIpAdress);
+          // 获取到ip地址黑名单，如果该ip地址存在于黑名单中，则不做请求
+
+          if (
+            noAuthTokenWhiteList.includes(`${service}/${version}/${action}`)
+          ) {
+            // 转发请求到相应的微服务
+            return ctx.call(`${service}.${version}.${action}`, params);
+          }
+          // 获取token
           // 转发请求到相应的微服务
           return ctx.call(`${service}.${version}.${action}`, params);
         },
@@ -149,7 +164,7 @@ rotate({
     },
     methods: {
       /**
-       * Authorize the request
+       * token校验,判断是否是管理员，判断是否是用户
        */
       // authorize(ctx, route, req) {
       //  let token;
