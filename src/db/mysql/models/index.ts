@@ -2,9 +2,11 @@ import { Sequelize } from "sequelize";
 import { UserTable } from "./user";
 import * as fs from "fs";
 import * as path from "path";
+import { ConfigTable } from "./config";
 
 export interface IDatabaseTables {
   user?: UserTable;
+  config?: ConfigTable;
 }
 
 export default function (

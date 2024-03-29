@@ -23,8 +23,8 @@ export class UserTable
   public password!: string; // 用户密码，非明文保存
   public phone: string | undefined; // 用户手机号
   public email: string | undefined; // 用户邮箱
-  public readonly createdTime!: Date; // 创建时间
-  public readonly updatedTime!: Date; // 更新时间
+  public readonly createdAt!: Date; // 创建时间
+  public readonly updatedAt!: Date; // 更新时间
 }
 
 export default function (sequelize: Sequelize) {

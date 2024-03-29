@@ -4,9 +4,23 @@ import { spawn } from "child_process";
 /**
  * 用来在控制台展示pino生成的文件日志
  */
-function showPinoLogFile(path: string) {
-  // 根据路径获取到对应的日志文件
-  if (!path) return;
+function showPinoLogFile() {
+  console.log(process.argv);
+  // 日志模块名
+  let moduleName = "";
+  // 日志日期
+  let date = "";
+  // 找到要展示的日志名
+  const moduleIndex = process.argv.indexOf("--module");
+  if (moduleIndex !== -1) {
+    moduleName = process.argv[moduleIndex + 1];
+  }
+  const dateIndex = process.argv.indexOf("--date");
+  if (dateIndex !== -1) {
+    date = process.argv[dateIndex + 1];
+  }
+
+  const path = `./logs/${moduleName}/${date}.log`;
 
   // 文件不存在
   if (!fs.existsSync(path)) return;
@@ -30,4 +44,4 @@ function showPinoLogFile(path: string) {
   });
 }
 
-showPinoLogFile("./logs/gateway/2024_03_29.log");
+showPinoLogFile();

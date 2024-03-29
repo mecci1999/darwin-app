@@ -1,10 +1,12 @@
-import Universe from "../../dist";
+import Universe from "node-universe";
 import { UniverseWeb } from "node-universe-gateway";
 import { noAuthTokenWhiteList } from "./white";
 import { pinoLoggerOptions } from "config";
 
 // 微服务名
 const appName = "gateway";
+
+// ip地址黑名单，存储至内存中，每隔30分钟拉取本地数据库同步一次
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
   const star = new Universe.Star({
@@ -46,11 +48,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         credentials: true,
         maxAge: null,
       },
-      // rateLimit: {
-      //  window: 10 * 1000,
-      //  limit: 10,
-      //  headers: true
-      // },
+      rateLimit: {
+        window: 10 * 1000,
+        limit: 10,
+        headers: true,
+      },
       path: "/api",
       routes: [
         // 配置路由，将 REST 请求映射到对应的微服务
@@ -70,14 +72,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           // bodyParsers: {
           //   json: true,
           // },
-          onBeforeCall(ctx, route, req, res) {
-            console.log(
-              "onBeforeCall in protected route",
-              req.connection.remoteAddress
-            );
-            //  ctx.meta.authToken = req.headers["authorization"];
-            return ctx;
-          },
+          // onBeforeCall(ctx, route, req, res) {
+          // console.log(
+          //   "onBeforeCall in protected route",
+          //   req.connection.remoteAddress,
+          // );
+          //  ctx.meta.authToken = req.headers["authorization"];
+          // },
 
           // onAfterCall(ctx, route, req, res, data) {
           //  this.logger.info("onAfterCall in protected route");
@@ -85,11 +86,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           //  return data;
           // },
           // Route error handler
-          // onError(req, res, err) {
-          //   res.setHeader("Content-Type", "text/plain");
-          //   res.writeHead(err.code || 500);
-          //   res.end({ result: "Route error: " + err.message });
-          // },
+          onError(req, res, err) {
+            // 如果触发了RateLimitExceeded报错，将该ip地址进行封禁，并将ip地址存储到数据库中，启动网关微服务的时候，从数据库中拉取ip地址封禁名单
+
+            res.setHeader("Content-Type", "text/plain");
+            res.writeHead(err.code || 500);
+            res.end({ result: "Route error: " + err.message });
+          },
         },
         // 日志下载服务
         {
@@ -146,6 +149,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
   // 启动网关微服务
   star.start().then(() => {
-    star.logger.info(`微服务[${appName.toUpperCase()}]启动成功`);
+    console.log(`微服务[${appName.toUpperCase()}]启动成功`);
   });
 });
