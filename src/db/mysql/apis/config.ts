@@ -1,7 +1,7 @@
+import { ConfigKeysMap, IConfig } from "typings/config";
 import { DataBaseTableNames } from "typings/enum";
 import { mainConnection } from "..";
-import { IConfigTableAttributes, ConfigTable } from "../models/config";
-import { ConfigKeysMap, IConfig } from "typings/config";
+import { ConfigTable } from "../models/config";
 
 /**
  * 批量新增配置项
@@ -65,6 +65,8 @@ export async function getAllConfigList() {
       return res.map((item) => {
         return item.toJSON();
       });
+    } else {
+      return [];
     }
   });
 }

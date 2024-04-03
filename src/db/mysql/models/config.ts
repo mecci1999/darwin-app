@@ -1,7 +1,7 @@
 /**
  * 微服务相关的配置表
  */
-import { DataTypes, Model, Optional, Sequelize } from "sequelize";
+import { DataTypes, Model, Sequelize } from "sequelize";
 import { IConfig } from "typings/config";
 import { DataBaseTableNames } from "typings/enum";
 

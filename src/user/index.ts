@@ -1,8 +1,6 @@
 import { queryAllUsers, saveOrUpdateUsers } from "db/mysql/apis/user";
 import Universe from "node-universe/dist";
 import { generateUserId } from "utils/generateUserId";
-import * as dbConnections from "../db/mysql/index";
-
 import { pinoLoggerOptions } from "config";
 
 // 微服务名
@@ -72,21 +70,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           };
         },
       },
-    },
-
-    async started() {
-      // 启动时连接数据库
-      // await dbConnections.mainConnection.bindManinConnection({
-      //   benchmark: true,
-      //   logging(sql, timing) {
-      //     if (timing && timing > 1000) {
-      //       // 如果查询时间大于1s，将进行日志打印
-      //       star.logger.warn(
-      //         `mysql operation is timeout, sql: ${sql}, timing: ${timing}`
-      //       );
-      //     }
-      //   },
-      // });
     },
   });
 

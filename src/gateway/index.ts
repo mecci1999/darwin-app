@@ -1,12 +1,25 @@
+import { pinoLoggerOptions } from "config";
 import Universe from "node-universe";
 import { UniverseWeb } from "node-universe-gateway";
+import * as dbConnections from "../db/mysql/index";
 import { noAuthTokenWhiteList } from "./white";
-import { pinoLoggerOptions } from "config";
+import {
+  getAllIpBlackList,
+  saveOrUpdateIpBlackList,
+} from "db/mysql/apis/ipBlackList";
+import _ from "lodash";
+import { getAllConfigList } from "db/mysql/apis/config";
+import { ConfigKeysMap, IConfig } from "typings/config";
+import { IIPBlackListTableAttributes } from "db/mysql/models/ipBlackList";
 
 // 微服务名
 const appName = "gateway";
 
 // ip地址黑名单，存储至内存中，每隔30分钟拉取本地数据库同步一次
+let ips: string[] = [];
+let ipBlackList: IIPBlackListTableAttributes[] = [];
+let configs: IConfig[] = [];
+let ipTimer: any; // ip同步更新定时器
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
   const star = new Universe.Star({
@@ -144,6 +157,48 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       //    ctx.meta.user = user;
       //   });
       // }
+    },
+    // 创建时操作
+    async created() {
+      // 连接数据库
+      await dbConnections.mainConnection.bindManinConnection({
+        benchmark: true,
+        logging(sql, timing) {
+          if (timing && timing > 1000) {
+            // 如果查询时间大于1s，将进行日志打印
+            star.logger.warn(
+              `mysql operation is timeout, sql: ${sql}, timing: ${timing}`,
+            );
+          }
+        },
+      });
+
+      // 拉取配置项
+      configs = await getAllConfigList();
+    },
+
+    // 启动时操作
+    async started() {
+      // 获取到ip地址黑名单列表
+      ipBlackList = await getAllIpBlackList();
+      ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ""));
+      // 获取IP地址黑名单相关配置
+      const IPConfig = JSON.parse(configs[ConfigKeysMap.IPAccessBlackList]);
+      ipTimer = setInterval(
+        async () => {
+          // 定时更新ip黑名单数据库
+          await saveOrUpdateIpBlackList(ipBlackList);
+        },
+        IPConfig?.updateTimer * 60 * 1000 || 30 * 60 * 1000,
+      );
+    },
+
+    // 结束时操作
+    async stopped() {
+      // 断开数据库连接
+
+      // 清除定时器，避免内存泄漏
+      clearInterval(ipTimer);
     },
   });
 

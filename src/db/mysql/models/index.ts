@@ -1,8 +1,8 @@
-import { Sequelize } from "sequelize";
-import { UserTable } from "./user";
 import * as fs from "fs";
 import * as path from "path";
+import { Sequelize } from "sequelize";
 import { ConfigTable } from "./config";
+import { UserTable } from "./user";
 
 export interface IDatabaseTables {
   user?: UserTable;

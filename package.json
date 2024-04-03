@@ -10,6 +10,7 @@
   "license": "MIT",
   "dependencies": {
     "deepmerge": "^4.3.1",
+    "lodash": "^4.17.21",
     "mysql2": "^3.9.2",
     "node-universe": "^1.0.3",
     "node-universe-gateway": "^1.0.5",
@@ -18,6 +19,7 @@
     "typescript": "^5.3.3"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.0",
     "nodemon": "^3.1.0",
     "prettier-eslint": "^16.3.0",
     "ts-node": "^10.9.2",
