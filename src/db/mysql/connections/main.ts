@@ -37,7 +37,11 @@ class MainDatabaseConnection {
    */
   public getConnectionByOptions(options: Sequelize.Options = {}) {
     return databaseConnectionManager.getConnection(options, {
-      models: [DataBaseTableNames.User],
+      models: [
+        DataBaseTableNames.User,
+        DataBaseTableNames.Config,
+        DataBaseTableNames.IPBlackList,
+      ],
     });
   }
 

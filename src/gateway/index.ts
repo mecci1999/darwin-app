@@ -11,6 +11,8 @@ import _ from "lodash";
 import { getAllConfigList } from "db/mysql/apis/config";
 import { ConfigKeysMap, IConfig } from "typings/config";
 import { IIPBlackListTableAttributes } from "db/mysql/models/ipBlackList";
+import { IPAddressBanStatus, ResponseErrorCode } from "typings/enum";
+import { IPNotPermissionAccess } from "error";
 
 // 微服务名
 const appName = "gateway";
@@ -62,8 +64,8 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         maxAge: null,
       },
       rateLimit: {
-        window: 10 * 1000,
-        limit: 10,
+        window: 30 * 1000,
+        limit: 30,
         headers: true,
       },
       path: "/api",
@@ -85,26 +87,46 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           // bodyParsers: {
           //   json: true,
           // },
-          // onBeforeCall(ctx, route, req, res) {
-          // console.log(
-          //   "onBeforeCall in protected route",
-          //   req.connection.remoteAddress,
-          // );
-          //  ctx.meta.authToken = req.headers["authorization"];
-          // },
-
-          // onAfterCall(ctx, route, req, res, data) {
-          //  this.logger.info("onAfterCall in protected route");
-          //  res.setHeader("X-Custom-Header", "Authorized path");
-          //  return data;
-          // },
+          onBeforeCall(ctx, route, req, res) {
+            if (req?.connection?.remoteAddress) {
+              // 查看请求的ip地址是否被黑名单
+              if (ips.includes(req.connection.remoteAddress)) {
+                // 被黑名单禁用，直接返回404状态码
+                throw new IPNotPermissionAccess();
+              }
+            }
+            ctx.meta.authToken = req.headers["authorization"];
+          },
+          onAfterCall(ctx, route, req, res, data) {
+            return data;
+          },
           // Route error handler
           onError(req, res, err) {
             // 如果触发了RateLimitExceeded报错，将该ip地址进行封禁，并将ip地址存储到数据库中，启动网关微服务的时候，从数据库中拉取ip地址封禁名单
-
+            if (err.code === 429 && req?.connection?.remoteAddress) {
+              if (!ips.includes(req.connection.remoteAddress)) {
+                // 触发请求限制错误，直接封禁ip
+                ips.push(req.connection.remoteAddress);
+                ipBlackList.push({
+                  ipv4: req.connection.remoteAddress,
+                  reason: "频繁请求",
+                  status: IPAddressBanStatus.active,
+                  isArtificial: false,
+                });
+              }
+            }
             res.setHeader("Content-Type", "text/plain");
             res.writeHead(err.code || 500);
-            res.end({ result: "Route error: " + err.message });
+            res.end(
+              JSON.stringify({
+                status: err.code || 500,
+                data: {
+                  code: err?.data?.code || 0,
+                  message: err.message,
+                  content: err?.data?.content || null,
+                },
+              }),
+            );
           },
         },
         // 日志下载服务
@@ -120,7 +142,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           // 获取到不需要做token校验的动作白名单
           const { service, version, action } = ctx.params;
           const params = ctx.params || {};
-          // 获取到ip地址黑名单，如果该ip地址存在于黑名单中，则不做请求
 
           if (
             noAuthTokenWhiteList.includes(`${service}/${version}/${action}`)
@@ -170,9 +191,10 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               `mysql operation is timeout, sql: ${sql}, timing: ${timing}`,
             );
           }
+
+          star.logger.info(`mysql connection is success!`);
         },
       });
-
       // 拉取配置项
       configs = await getAllConfigList();
     },
@@ -183,7 +205,10 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       ipBlackList = await getAllIpBlackList();
       ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ""));
       // 获取IP地址黑名单相关配置
-      const IPConfig = JSON.parse(configs[ConfigKeysMap.IPAccessBlackList]);
+      const IPConfig = configs[ConfigKeysMap.IPAccessBlackList]
+        ? JSON.parse(configs[ConfigKeysMap.IPAccessBlackList])
+        : {};
+      // 设置轮询
       ipTimer = setInterval(
         async () => {
           // 定时更新ip黑名单数据库
@@ -196,6 +221,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     // 结束时操作
     async stopped() {
       // 断开数据库连接
+      await dbConnections.mainConnection.destroy();
 
       // 清除定时器，避免内存泄漏
       clearInterval(ipTimer);
@@ -204,6 +230,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
   // 启动网关微服务
   star.start().then(() => {
-    console.log(`微服务[${appName.toUpperCase()}]启动成功`);
+    console.log(`微服务 ${appName.toUpperCase()} 启动成功`);
   });
 });

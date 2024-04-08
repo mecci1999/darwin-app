@@ -3,10 +3,12 @@ import * as path from "path";
 import { Sequelize } from "sequelize";
 import { ConfigTable } from "./config";
 import { UserTable } from "./user";
+import { IPBlackListTable } from "./ipBlackList";
 
 export interface IDatabaseTables {
   user?: UserTable;
   config?: ConfigTable;
+  ipBlackList?: IPBlackListTable;
 }
 
 export default function (

@@ -40,7 +40,7 @@ export async function saveOrUpdateIpBlackList(
   // 批量创建不存在的配置
   if (toCreate.length) {
     await model.bulkCreate(toCreate, {
-      updateOnDuplicate: ["ipv4", "ipv6", "reason", "status"],
+      updateOnDuplicate: ["ipv4", "ipv6", "reason", "status", "isArtificial"],
     });
   }
 
@@ -67,7 +67,9 @@ export async function getAllIpBlackList() {
   );
 
   return model
-    .findAll({ attributes: ["id", "ipv4", "ipv6", "reason", "status"] })
+    .findAll({
+      attributes: ["id", "ipv4", "ipv6", "reason", "status", "isArtificial"],
+    })
     .then((res) => {
       if (res) {
         return res.map((item) => {

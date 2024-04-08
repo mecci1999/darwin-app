@@ -5,11 +5,12 @@ import { DataTypes, Model, Optional, Sequelize } from "sequelize";
 import { DataBaseTableNames, IPAddressBanStatus } from "typings/enum";
 
 export interface IIPBlackListTableAttributes {
-  id: number;
+  id?: number;
   ipv4?: string;
   ipv6?: string;
   reason?: string; // 封禁原因
-  status?: IPAddressBanStatus; // 当前状态
+  status: IPAddressBanStatus; // 当前状态
+  isArtificial: boolean; // 是否人为操作
 }
 
 export class IPBlackListTable
@@ -24,6 +25,7 @@ export class IPBlackListTable
   ipv6!: string;
   reason!: string; // 封禁原因
   status!: IPAddressBanStatus; // 当前状态
+  isArtificial!: boolean; // 是否人为操作
   public readonly createdAt!: Date; // 创建时间
   public readonly updatedAt!: Date; // 更新时间
 }
@@ -40,11 +42,15 @@ export default function (sequelize: Sequelize) {
         allowNull: false,
         defaultValue: IPAddressBanStatus.active,
       },
+      isArtificial: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
     },
     {
       sequelize,
-      tableName: DataBaseTableNames.User,
-      modelName: DataBaseTableNames.User,
+      tableName: DataBaseTableNames.IPBlackList,
+      modelName: DataBaseTableNames.IPBlackList,
     },
   );
 
