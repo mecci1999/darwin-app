@@ -49,7 +49,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
   // 创建网关服务
   star.createService({
-    name: "gateway",
+    name: appName,
     mixins: UniverseWeb,
     settings: {
       port: 4000,

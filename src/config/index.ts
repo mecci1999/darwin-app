@@ -39,7 +39,7 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
     })
       .then((_destination) => {
         const options = {
-          name: "gateway",
+          name: appName,
           type: "pino",
           options: {
             pino: {

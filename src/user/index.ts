@@ -27,7 +27,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
   });
 
   star.createService({
-    name: "user",
+    name: appName,
     methods: {},
     actions: {
       // 网关服务的 dispatch 动作将请求转发到相应的微服务
