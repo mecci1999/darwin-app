@@ -84,9 +84,9 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             // 例如，将 /api/blog/v2/create 映射到 blog 服务的 v2 版本的 create 动作
             "/": "gateway.dispatch",
           },
-          // bodyParsers: {
-          //   json: true,
-          // },
+          bodyParsers: {
+            json: true,
+          },
           onBeforeCall(ctx, route, req, res) {
             if (req?.connection?.remoteAddress) {
               // 查看请求的ip地址是否被黑名单
