@@ -24,6 +24,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     //   },
     // },
     logger: pinoOptions,
+    metrics: {
+      enabled: true,
+      reporter: {
+        type: "Prometheus",
+        options: {
+          port: 3030,
+        },
+      },
+    },
   });
 
   star.createService({

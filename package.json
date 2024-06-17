@@ -12,7 +12,7 @@
     "deepmerge": "^4.3.1",
     "lodash": "^4.17.21",
     "mysql2": "^3.9.2",
-    "node-universe": "^1.0.3",
+    "node-universe": "^1.0.6",
     "node-universe-gateway": "^1.0.5",
     "pino-rotate-file": "^1.0.4",
     "sequelize": "^6.37.1",

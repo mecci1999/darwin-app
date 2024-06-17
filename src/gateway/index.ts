@@ -33,7 +33,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       host: "localhost:9092",
     },
     // 日志模块
-    logger: pinoOptions,
+    // logger: pinoOptions,
     // cacher: {
     //   type: "Redis",
     //   clone: true,
@@ -42,9 +42,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     //     host: "localhost",
     //   },
     // },
-    // metric: {
-    //   enabled: true,
-    // },
+    metrics: {
+      enabled: true,
+      reporter: {
+        type: "Prometheus",
+        options: {
+          port: 3030,
+        },
+      },
+    },
   });
 
   // 创建网关服务

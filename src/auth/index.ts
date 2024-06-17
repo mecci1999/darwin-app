@@ -16,6 +16,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       host: "localhost:9092",
     },
     logger: pinoOptions,
+    metrics: {
+      enabled: true,
+      reporter: {
+        type: "Prometheus",
+        options: {},
+      },
+    },
   });
 
   star.createService({
