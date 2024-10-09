@@ -20,4 +20,6 @@ export enum IPAddressBanStatus {
  */
 export enum ResponseErrorCode {
   IPNotAccess = 30001, // ip被封禁
+  NotLogin = 30002, // 用户未登录
+  ERR_INVALID_TOKEN = 30003, // 无效token
 }

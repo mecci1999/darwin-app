@@ -1,21 +1,17 @@
-import { pinoLoggerOptions } from "config";
-import Universe from "node-universe";
-import { UniverseWeb } from "node-universe-gateway";
-import * as dbConnections from "../db/mysql/index";
-import { noAuthTokenWhiteList } from "./white";
-import {
-  getAllIpBlackList,
-  saveOrUpdateIpBlackList,
-} from "db/mysql/apis/ipBlackList";
-import _ from "lodash";
-import { getAllConfigList } from "db/mysql/apis/config";
-import { ConfigKeysMap, IConfig } from "typings/config";
-import { IIPBlackListTableAttributes } from "db/mysql/models/ipBlackList";
-import { IPAddressBanStatus, ResponseErrorCode } from "typings/enum";
-import { IPNotPermissionAccess } from "error";
+import { pinoLoggerOptions } from 'config';
+import Universe from 'node-universe';
+import { UniverseWeb } from 'node-universe-gateway';
+import * as dbConnections from '../db/mysql/index';
+import { getAllIpBlackList, saveOrUpdateIpBlackList } from 'db/mysql/apis/ipBlackList';
+import _ from 'lodash';
+import { getAllConfigList } from 'db/mysql/apis/config';
+import { ConfigKeysMap, IConfig } from 'typings/config';
+import { IIPBlackListTableAttributes } from 'db/mysql/models/ipBlackList';
+import { IPAddressBanStatus, ResponseErrorCode } from 'typings/enum';
+import { IPNotPermissionAccess, UnAuthorizedError, UserNotLoginError } from 'error';
 
 // 微服务名
-const appName = "gateway";
+const appName = 'gateway';
 
 // ip地址黑名单，存储至内存中，每隔30分钟拉取本地数据库同步一次
 let ips: string[] = [];
@@ -25,12 +21,12 @@ let ipTimer: any; // ip同步更新定时器
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
   const star = new Universe.Star({
-    namespace: "darwin-app",
+    namespace: 'darwin-app',
     // KAFKA通信模块
     transporter: {
-      type: "KAFKA",
+      type: 'KAFKA',
       debug: true,
-      host: "localhost:9092",
+      host: 'localhost:9092',
     },
     // 日志模块
     // logger: pinoOptions,
@@ -42,15 +38,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     //     host: "localhost",
     //   },
     // },
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: "Prometheus",
-        options: {
-          port: 3030,
-        },
-      },
-    },
+    // metrics: {
+    //   enabled: true,
+    //   reporter: {
+    //     type: 'Prometheus',
+    //     options: {
+    //       port: 3030,
+    //     },
+    //   },
+    // },
   });
 
   // 创建网关服务
@@ -58,13 +54,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     name: appName,
     mixins: UniverseWeb,
     settings: {
-      port: 4000,
-      ip: "0.0.0.0",
+      port: 6666,
+      ip: '0.0.0.0',
       // 全局跨域配置
       cors: {
-        origin: "*",
-        methods: ["GET", "OPTIONS", "POST", "PUT", "DELETE"],
-        allowedHeaders: "*",
+        origin: '*',
+        methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
+        allowedHeaders: '*',
         //exposedHeaders: "*",
         credentials: true,
         maxAge: null,
@@ -74,11 +70,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         limit: 30,
         headers: true,
       },
-      path: "/api",
+      path: '/api',
       routes: [
         // 配置路由，将 REST 请求映射到对应的微服务
         {
-          path: "/:service/:version/:action",
+          path: '/:service/:version/:action',
           authorization: false,
           // whitelist: [], // 路由白名单
           // 路由跨域配置
@@ -88,12 +84,12 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           // },
           aliases: {
             // 例如，将 /api/blog/v2/create 映射到 blog 服务的 v2 版本的 create 动作
-            "/": "gateway.dispatch",
+            '/': 'gateway.dispatch',
           },
           bodyParsers: {
             json: true,
           },
-          onBeforeCall(ctx, route, req, res) {
+          async onBeforeCall(ctx, route, req, res) {
             if (req?.connection?.remoteAddress) {
               // 查看请求的ip地址是否被黑名单
               if (ips.includes(req.connection.remoteAddress)) {
@@ -101,9 +97,44 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 throw new IPNotPermissionAccess();
               }
             }
-            ctx.meta.authToken = req.headers["authorization"];
+            // 获取服务注册表信息，通过服务名获取到该服务是否需要token校验
+            const actions = star.registry?.actions.list() || [];
+            const action = actions.find(
+              (item) =>
+                item.name === `${ctx.params.service}.${ctx.params.version}.${ctx.params.action}`,
+            );
+
+            // 需要token校验的接口
+            if (!(action && action?.metadata && action.metadata?.auth === false)) {
+              // 从cookie中获取token
+              const cookie = req.headers['Cookie'] || req.headers['cookie'];
+              const token1 = cookie
+                ?.split(';')
+                .find((item) => item.includes('ACCESS_TOKEN'))
+                .split('=')[1];
+              // 直接从头部authorization中获取token
+              const authorization =
+                req.headers['Authorization'] || req.headers['authorization'] || '';
+              const token2 = authorization?.split(' ')[1];
+
+              if (!token1 && !token2) {
+                // 直接返回没有登录的状态
+                throw new UserNotLoginError();
+              }
+
+              // 将token传递到ctx.meta中，在微服务中获取
+              ctx.meta.authToken = token1 || token2;
+              try {
+                // 直接做token校验
+                await (this as any).authorize(ctx, ctx.meta.authToken);
+              } catch (error) {
+                throw new UnAuthorizedError();
+              }
+            }
           },
           onAfterCall(ctx, route, req, res, data) {
+            // 请求成功后，对服务返回的数据进行二次处理
+
             return data;
           },
           // Route error handler
@@ -115,13 +146,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 ips.push(req.connection.remoteAddress);
                 ipBlackList.push({
                   ipv4: req.connection.remoteAddress,
-                  reason: "频繁请求",
+                  reason: '频繁请求',
                   status: IPAddressBanStatus.active,
                   isArtificial: false,
                 });
               }
             }
-            res.setHeader("Content-Type", "text/plain");
+            res.setHeader('Content-Type', 'text/plain');
             res.writeHead(err.code || 500);
             res.end(
               JSON.stringify({
@@ -135,9 +166,9 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             );
           },
         },
-        // 日志下载服务
+        // 日志服务
         {
-          path: "/logs/download",
+          path: '/logs/:service/:action',
         },
       ],
     },
@@ -145,17 +176,9 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       // 网关服务的 dispatch 动作将请求转发到相应的微服务
       dispatch: {
         handler(ctx, route, req, res) {
-          // 获取到不需要做token校验的动作白名单
           const { service, version, action } = ctx.params;
           const params = ctx.params || {};
 
-          if (
-            noAuthTokenWhiteList.includes(`${service}/${version}/${action}`)
-          ) {
-            // 转发请求到相应的微服务
-            return ctx.call(`${service}.${version}.${action}`, params);
-          }
-          // 获取token
           // 转发请求到相应的微服务
           return ctx.call(`${service}.${version}.${action}`, params);
         },
@@ -164,26 +187,21 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     methods: {
       /**
        * token校验,判断是否是管理员，判断是否是用户
+       * 1、判断token是否有效
+       * 2、获取到token对应的user数据，并携带到其他服务中
        */
-      // authorize(ctx, route, req) {
-      //  let token;
-      //  if (req.headers.authorization) {
-      //   let type = req.headers.authorization.split(" ")[0];
-      //   if (type === "Token") {
-      //    token = req.headers.authorization.split(" ")[1];
-      //   }
-      //  }
-      //  if (!token) {
-      //   return Promise.reject(new UnAuthorizedError(ERR_NO_TOKEN));
-      //  }
-      //  // Verify JWT token
-      //  return ctx.call("auth.resolveToken", { token })
-      //   .then(user => {
-      //    if (!user)
-      //     return Promise.reject(new UnAuthorizedError(ERR_INVALID_TOKEN));
-      //    ctx.meta.user = user;
-      //   });
-      // }
+      authorize(ctx: any, token: string) {
+        if (!token) {
+          return Promise.reject(new UserNotLoginError());
+        }
+        // Verify JWT token
+        return ctx.call("auth.resolveToken", { token })
+          .then(user => {
+            if (!user)
+              // return Promise.reject(new UnAuthorizedError(ERR_INVALID_TOKEN));
+              ctx.meta.user = user;
+          });
+      }
     },
     // 创建时操作
     async created() {
@@ -193,9 +211,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         logging(sql, timing) {
           if (timing && timing > 1000) {
             // 如果查询时间大于1s，将进行日志打印
-            star.logger.warn(
-              `mysql operation is timeout, sql: ${sql}, timing: ${timing}`,
-            );
+            star.logger.warn(`mysql operation is timeout, sql: ${sql}, timing: ${timing}`);
           }
 
           star.logger.info(`mysql connection is success!`);
@@ -209,17 +225,16 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     async started() {
       // 获取到ip地址黑名单列表
       ipBlackList = await getAllIpBlackList();
-      ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ""));
+      ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ''));
       // 获取IP地址黑名单相关配置
       const IPConfig = configs[ConfigKeysMap.IPAccessBlackList]
         ? JSON.parse(configs[ConfigKeysMap.IPAccessBlackList])
         : {};
       // 设置轮询
       ipTimer = setInterval(
-        async () => {
+        () =>
           // 定时更新ip黑名单数据库
-          await saveOrUpdateIpBlackList(ipBlackList);
-        },
+          saveOrUpdateIpBlackList(ipBlackList),
         IPConfig?.updateTimer * 60 * 1000 || 30 * 60 * 1000,
       );
     },
