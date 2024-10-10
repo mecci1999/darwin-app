@@ -10,6 +10,8 @@
  */
 import { pinoLoggerOptions } from 'config';
 import Universe from 'node-universe';
+import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 
 // 微服务名
 const appName = 'auth';
@@ -21,6 +23,14 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       type: 'KAFKA',
       debug: true,
       host: 'localhost:9092',
+    },
+    cacher: {
+      type: 'Redis',
+      clone: true,
+      options: {
+        port: 6379, // Redis port
+        host: 'localhost',
+      },
     },
     logger: pinoOptions,
     // metrics: {
@@ -37,22 +47,60 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     methods: {
       // 验证token是否有效
       resolveToken(ctx, route, req, res) {
+        return new Promise((resolve, reject) => {});
+      },
+      // 发送验证码
+      sendVerifyCodeEmail(email: string) {
         return new Promise((resolve, reject) => {
+          // 创建邮箱发送对象
+          const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+              user: 'darwinandcc@gmail.com',
+              pass: 'leo19870624',
+            },
+          });
 
-        })
-      }
+          // 随机生成6位验证码
+          const generateCode = crypto.randomInt(100000, 999999).toString();
+
+          // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+          star.cacher.set(`verifyCode:${email}`, generateCode, 5 * 60);
+
+          const mailOptions = {
+            from: 'darwinandcc@gmail.com', // 发件人邮箱
+            to: email, // 收件人邮箱
+            subject: '这是一张来自进入Darwin宇宙的飞船船票',
+            html: `<p>您好，欢迎您来到Darwin的宇宙</p>
+            <span>您的船票验证码是</span><span style="font-size: 20px; font-weight: bold; margin-left: 8px; margin-right: 8px;">${generateCode}</span><span>，5分钟内有效，请勿向他人透露。</span>`,
+          };
+
+          transporter.sendMail(mailOptions, (error) => {
+            if (error) {
+              console.log('发送失败', error);
+              reject(error);
+            } else {
+              resolve({ code: 200, message: '验证码已发送' });
+            }
+          });
+        });
+      },
     },
     actions: {
       'v1.verifyCode': {
-        // 获取验证码
+        // 获取验证码，需要将验证码存储到redis中
         async handler(ctx, route, req, res) {
           return new Promise((resolve, reject) => {
-
+            // 发送验证码
+            (this as any).sendVerifyCodeEmail(req.body.email).then((data) => {
+              resolve({ code: 200, message: '验证码已发送', data });
+            });
           });
         },
         metadata: {
           auth: false,
         },
+        cache: {},
       },
       'v1.login': {
         metadata: {
@@ -60,7 +108,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         },
         async handler(ctx, route, req, res) {
           // 密码登录接口，再进行密码验证
-
         },
       },
       'v1.publicKey': {

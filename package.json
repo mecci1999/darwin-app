@@ -15,12 +15,14 @@
     "mysql2": "^3.9.2",
     "node-universe": "^1.1.0",
     "node-universe-gateway": "^1.0.5",
+    "nodemailer": "^6.9.15",
     "pino-rotate-file": "^1.0.4",
     "sequelize": "^6.37.1",
     "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.0",
+    "@types/nodemailer": "^6.4.16",
     "nodemon": "^3.1.0",
     "prettier-eslint": "^16.3.0",
     "ts-node": "^10.9.2",
