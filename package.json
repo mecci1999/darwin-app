@@ -5,6 +5,7 @@
   "scripts": {
     "start:gateway": "nodemon ./src/gateway/index.ts",
     "start:user": "nodemon ./src/user/index.ts",
+    "start:auth": "nodemon ./src/auth/index.ts",
     "log": "nodemon ./src/utils/showPinoLogFile.ts"
   },
   "license": "MIT",

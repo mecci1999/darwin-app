@@ -97,15 +97,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 throw new IPNotPermissionAccess();
               }
             }
+
             // 获取服务注册表信息，通过服务名获取到该服务是否需要token校验
             const actions = star.registry?.actions.list() || [];
             const action = actions.find(
               (item) =>
-                item.name === `${ctx.params.service}.${ctx.params.version}.${ctx.params.action}`,
+                item.name === `${req.$params.service}.${req.$params.version}.${req.$params.action}`,
             );
-
             // 需要token校验的接口
-            if (!(action && action?.metadata && action.metadata?.auth === false)) {
+            if (!!action?.action?.metadata?.auth) {
               // 从cookie中获取token
               const cookie = req.headers['Cookie'] || req.headers['cookie'];
               const token1 = cookie
@@ -195,13 +195,12 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           return Promise.reject(new UserNotLoginError());
         }
         // Verify JWT token
-        return ctx.call("auth.resolveToken", { token })
-          .then(user => {
-            if (!user)
-              // return Promise.reject(new UnAuthorizedError(ERR_INVALID_TOKEN));
-              ctx.meta.user = user;
-          });
-      }
+        return ctx.call('auth.resolveToken', { token }).then((user) => {
+          if (!user)
+            // return Promise.reject(new UnAuthorizedError(ERR_INVALID_TOKEN));
+            ctx.meta.user = user;
+        });
+      },
     },
     // 创建时操作
     async created() {

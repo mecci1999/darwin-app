@@ -81,7 +81,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       },
       'v1.list': {
         metadata: {
-          auth: true,
+          auth: false,
         },
         async handler(ctx) {
           const list = await queryAllUsers();
