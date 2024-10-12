@@ -13,6 +13,7 @@ import Universe from 'node-universe';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { HttpResponseItem } from 'typings/response';
+import { verifyCodeOptions } from 'typings/auth';
 
 // 微服务名
 const appName = 'auth';
@@ -51,7 +52,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         return new Promise((resolve, reject) => {});
       },
       // 发送验证码
-      sendVerifyCodeEmail(email: string) {
+      sendVerifyCodeEmail(email: string, mode: string, options: verifyCodeOptions, code: string) {
         return new Promise((resolve, reject) => {
           // 创建邮箱发送对象
           const transporter = nodemailer.createTransport({
@@ -62,23 +63,12 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             },
           });
 
-          // 随机生成6位验证码
-          const generateCode = crypto.randomInt(100000, 999999).toString();
-
           // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
-          star.cacher.set(`verifyCode:${email}`, generateCode, 5 * 60);
+          star.cacher.set(`verifyCode:${email};mode:${mode}`, code, 5 * 60);
 
-          const mailOptions = {
-            from: 'mecci1999@163.com', // 发件人邮箱
-            to: email, // 收件人邮箱
-            subject: '这是一张进入Darwin宇宙的飞船船票',
-            html: `<p>您好，欢迎您来到Darwin的小宇宙</p>
-            <span>您的船票验证码是</span><span style="font-size: 20px; font-weight: bold; margin-left: 8px; margin-right: 8px;">${generateCode}</span><span>，5分钟内有效，请勿向他人透露。</span>`,
-          };
-
-          transporter.sendMail(mailOptions, (error) => {
+          transporter.sendMail(options as any, (error) => {
             if (error) {
-              star.logger.error('发送邮件失败', mailOptions, error);
+              star.logger.error('发送邮件失败', options, error);
               reject(error);
             } else {
               resolve({ code: 200, message: '验证码已发送' });
@@ -95,8 +85,24 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           if (!ctx.params.email)
             return { status: 401, data: { content: null, message: '请提供有效的邮箱', code: 401 } };
 
+          // 随机生成6位验证码
+          const generateCode = crypto.randomInt(100000, 999999).toString();
+
+          const mailOptions = {
+            from: 'mecci1999@163.com', // 发件人邮箱
+            to: ctx.params.email, // 收件人邮箱
+            subject: '这是一张飞往Darwin宇宙的飞船船票',
+            html: `<p>您好，欢迎您来到Darwin的小宇宙</p>
+              <span>您的船票验证码是</span><span style="font-size: 20px; font-weight: bold; margin-left: 8px; margin-right: 8px;">${generateCode}</span><span>，5分钟内有效，请勿向他人透露。</span>`,
+          };
+
           // 发送邮件
-          const res = await (this as any).sendVerifyCodeEmail(ctx.params.email);
+          const res = await (this as any).sendVerifyCodeEmail(
+            ctx.params.email,
+            'login',
+            mailOptions,
+            generateCode,
+          );
 
           return {
             status: 200,
