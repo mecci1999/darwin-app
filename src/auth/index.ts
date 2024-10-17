@@ -63,15 +63,25 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             },
           });
 
-          // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
-          star.cacher.set(`verifyCode:${email};mode:${mode}`, code, 5 * 60);
-
-          transporter.sendMail(options as any, (error) => {
-            if (error) {
-              star.logger.error('发送邮件失败', options, error);
-              reject(error);
+          star.cacher.get(`verifyCode:${email};mode:${mode}`).then((cacheCode: string) => {
+            // 获取redis缓存
+            if (cacheCode) {
+              // 存在缓存
+              // star.logger.info(`verifyCode:${email};mode:${mode}: ${cacheCode.toString()}`);
+              resolve({ code: 200, message: '验证码已经发送至您的邮箱，请确认邮箱地址是否正确' });
             } else {
-              resolve({ code: 200, message: '验证码已发送' });
+              // 缓存不存在或者已过期
+              // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+              star.cacher.set(`verifyCode:${email};mode:${mode}`, code, 5 * 60);
+
+              transporter.sendMail(options as any, (error) => {
+                if (error) {
+                  star.logger.error('发送邮件失败', options, error);
+                  reject(error);
+                } else {
+                  resolve({ code: 200, message: '验证码已发送' });
+                }
+              });
             }
           });
         });
@@ -118,10 +128,62 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           auth: false,
         },
         async handler(ctx, route, req, res) {
+          // 先判断验证码是否正确
+          // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
+          // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
+
           // 密码登录接口，再进行密码验证
           return {
             status: 200,
-            data: { message: '发送验证码成功', content: null },
+            data: { message: '', content: null },
+          };
+        },
+      },
+      'v1.qrCode.login': {
+        metadata: {
+          auth: false,
+        },
+        async handler(ctx, route, req, res) {
+          // 先判断验证码是否正确
+          // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
+          // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
+
+          // 密码登录接口，再进行密码验证
+          return {
+            status: 200,
+            data: { message: '', content: null },
+          };
+        },
+      },
+      'v1.qrCode.getKey': {
+        metadata: {
+          auth: false,
+        },
+        async handler(ctx, route, req, res) {
+          // 先判断验证码是否正确
+          // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
+          // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
+
+          // 密码登录接口，再进行密码验证
+          return {
+            status: 200,
+            data: { message: '', content: null },
+          };
+        },
+      },
+      'v1.qrCode.getStatus': {
+        metadata: {
+          auth: false,
+        },
+        async handler(ctx, route, req, res) {
+          // 先判断验证码是否正确
+          // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
+          // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
+
+          // 密码登录接口，再进行密码验证
+          return {
+            status: 200,
+            data: { message: '', content: null },
           };
         },
       },

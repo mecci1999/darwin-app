@@ -176,8 +176,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       // 网关服务的 dispatch 动作将请求转发到相应的微服务
       dispatch: {
         handler(ctx, route, req, res) {
-          const { service, version, action } = ctx.params;
+          let { service, version, action } = ctx.params;
           const params = ctx.params || {};
+
+          // 对action进行url处理
+          if (action.includes('/')) {
+            action = action.split('/').join('.');
+          }
 
           // 转发请求到相应的微服务
           return ctx.call(`${service}.${version}.${action}`, params);
