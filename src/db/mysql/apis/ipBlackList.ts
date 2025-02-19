@@ -65,6 +65,7 @@ export async function getAllIpBlackList() {
   const model = await mainConnection.getModel<IPBlackListTable>(
     DataBaseTableNames.IPBlackList,
   );
+  if(!model) return;
 
   return model
     .findAll({
@@ -88,6 +89,7 @@ export async function queryIpBlackList(ipList: string[]) {
   const model = await mainConnection.getModel<IPBlackListTable>(
     DataBaseTableNames.IPBlackList,
   );
+  if(!model) return [];
 
   return await model.findAll({
     where: {

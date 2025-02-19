@@ -10,7 +10,7 @@ export async function saveOrUpdateConfigs(configs: IConfig[]) {
   const model = await mainConnection.getModel<ConfigTable>(
     DataBaseTableNames.Config,
   );
-
+  if(!model) return [];
   // 先尝试找到所有已存在的记录
   const existingKeys = configs.map((config) => config.key);
   const existingConfigs = await model.findAll({
@@ -59,6 +59,7 @@ export async function getAllConfigList() {
   const model = await mainConnection.getModel<ConfigTable>(
     DataBaseTableNames.Config,
   );
+  if(!model) return [];
 
   return model.findAll({ attributes: ["key", "value"] }).then((res) => {
     if (res) {
@@ -78,6 +79,7 @@ export async function queryConfigs(keys: ConfigKeysMap[] | string[]) {
   const model = await mainConnection.getModel<ConfigTable>(
     DataBaseTableNames.Config,
   );
+  if(!model) return [];
 
   return await model.findAll({
     where: {

@@ -1,8 +1,13 @@
 {
   "extends": "./tsconfig.json",
-  "baseUrl": "./src",
   "compilerOptions": {
-    "module": "ESNext"
-  },
-  "include": ["./src"]
+    "target": "es6",
+    "module": "es6",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@src/*": ["./src/*"]
+    }
+  }
 }

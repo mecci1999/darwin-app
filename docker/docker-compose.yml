@@ -1,0 +1,75 @@
+version: '2'
+
+services:
+  # Zookeeper Service
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_ENABLE_AUTH: "no"
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    networks:
+      - app_network
+
+  # Kafka Service
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    expose:
+      - "9093"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_CREATE_TOPICS: "test:1:1"
+      KAFKA_MESSAGE_MAX_BYTES: "5242880" # Set message size to 5MB
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - zookeeper
+    networks:
+      - app_network
+
+  # MySQL Service
+  mysql:
+    image: mysql:latest
+    container_name: mysql_server
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: leo19870624
+      MYSQL_DATABASE: darwin_app
+      MYSQL_USER: darwin
+      MYSQL_PASSWORD: darwin19990709
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - app_network
+  # Node.js Service
+  # nodejs-service:
+  #   # build:
+  #   #  context: .
+  #   #  dockerfile: Dockerfile  # Ensure this path is correct
+  #   image: fengyuserver_v1:20241223
+  #   container_name: nodejs_service
+  #   ports:
+  #     - "6666:6666" # Adjust port as needed for your Node.js app
+  #   environment:
+  #     - NODE_ENV=production
+  #   # depends_on:
+  #   #   - kafka
+  #   #   - mysql
+  #   networks:
+  #     - app_network
+  #   restart: always
+
+networks:
+  app_network:
+    driver: bridge # Ensure all services are on the same network

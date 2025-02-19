@@ -228,8 +228,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     // 启动时操作
     async started() {
       // 获取到ip地址黑名单列表
-      ipBlackList = await getAllIpBlackList();
-      ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ''));
+      ipBlackList = (await getAllIpBlackList()) || [];
+
+      if (ipBlackList.length > 0) {
+        ips = _.compact(ipBlackList.map((ip) => ip?.ipv4 || ip?.ipv6 || ''));
+      }
       // 获取IP地址黑名单相关配置
       const IPConfig = configs[ConfigKeysMap.IPAccessBlackList]
         ? JSON.parse(configs[ConfigKeysMap.IPAccessBlackList])

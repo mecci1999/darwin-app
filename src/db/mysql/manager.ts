@@ -1,9 +1,9 @@
 /**
  * 管理数据库的连接和断开
  */
-import * as SequelizeStatic from "sequelize";
-import deepmerge from "deepmerge";
-import getModels from "./models";
+import * as SequelizeStatic from 'sequelize';
+import deepmerge from 'deepmerge';
+import getModels from './models';
 
 export class DataBaseConnectionManager {
   public static SequelizeStatic = SequelizeStatic;
@@ -29,12 +29,12 @@ export class DataBaseConnectionManager {
     const connection = new SequelizeStatic.Sequelize(
       deepmerge(
         {
-          dialect: "mysql",
-          host: "0.0.0.0",
+          dialect: 'mysql',
+          host: 'localhost',
           port: 3306,
-          database: "darwin_app",
-          username: "darwin",
-          password: "darwin19990709",
+          database: 'darwin_app',
+          username: 'darwin',
+          password: 'darwin19990709',
           define: {
             underscored: true,
             alter: { drop: false }, // 有新增字段  会自动加上
@@ -59,9 +59,7 @@ export class DataBaseConnectionManager {
    * @param connection
    */
   public closeConnection(connection) {
-    const index = this.connections.findIndex(
-      (conn) => conn.connection === connection,
-    );
+    const index = this.connections.findIndex((conn) => conn.connection === connection);
     if (index !== -1) {
       this.connections[index].connection.close();
       this.connections.splice(index, 1);

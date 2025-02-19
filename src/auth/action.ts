@@ -1,5 +1,5 @@
 import { HttpResponseItem } from 'typings/response';
-import crypto from 'crypto';
+import { customAlphabet } from 'nanoid';
 
 /**
  * 验证微服务的动作
@@ -17,7 +17,7 @@ const authAction = (star: any) => {
           return { status: 401, data: { content: null, message: '请提供有效的邮箱', code: 401 } };
 
         // 随机生成6位验证码
-        const generateCode = crypto.randomInt(100000, 999999).toString();
+        const generateCode = customAlphabet('0123456789', 6).toString();
 
         const mailOptions = {
           from: 'mecci1999@163.com', // 发件人邮箱

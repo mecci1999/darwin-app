@@ -27,7 +27,10 @@ const authMethod = (star: any) => {
           if (cacheCode) {
             // 存在缓存
             // star.logger.info(`verifyCode:${email};mode:${mode}: ${cacheCode.toString()}`);
-            resolve({ code: 200, message: '验证码已经发送至您的邮箱，请确认邮箱地址是否正确' });
+            resolve({
+              code: 200,
+              message: '验证码已发送至您的邮箱，若没收到，请确认邮箱地址是否正确',
+            });
           } else {
             // 缓存不存在或者已过期
             // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟

@@ -28,6 +28,7 @@ export async function queryAllUsers() {
     const model = await mainConnection.getModel<UserTable>(
       DataBaseTableNames.User,
     );
+    if(!model) return [];
     return model
       .findAll({ attributes: ["userId", "username", "email"] })
       .then((res) => {

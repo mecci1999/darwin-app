@@ -24,14 +24,14 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       debug: true,
       host: 'localhost:9092',
     },
-    cacher: {
-      type: 'Redis',
-      clone: true,
-      options: {
-        port: 6379, // Redis port
-        host: 'localhost',
-      },
-    },
+    // cacher: {
+    //   type: 'Redis',
+    //   clone: true,
+    //   options: {
+    //     port: 6379, // Redis port
+    //     host: 'localhost',
+    //   },
+    // },
     // logger: pinoOptions,
     // metrics: {
     //   enabled: true,
