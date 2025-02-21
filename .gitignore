@@ -2,5 +2,4 @@ dist
 dist2
 node_modules
 logs
-*.lock
 mysql_data

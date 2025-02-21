@@ -4,7 +4,7 @@
 import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
 import { DataBaseTableNames } from 'typings/enum';
 
-export interface IUserTableAttributes {
+export interface IWxUserTableAttributes {
   id?: number;
   userId: string;
   username: string;
@@ -14,8 +14,8 @@ export interface IUserTableAttributes {
 }
 
 export class UserTable
-  extends Model<IUserTableAttributes, Optional<IUserTableAttributes, 'id'>>
-  implements IUserTableAttributes
+  extends Model<IWxUserTableAttributes, Optional<IWxUserTableAttributes, 'id'>>
+  implements IWxUserTableAttributes
 {
   public id!: number; // id
   public userId!: string; // 用户id，可以用作展示
@@ -39,8 +39,8 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
-      tableName: DataBaseTableNames.User,
-      modelName: DataBaseTableNames.User,
+      tableName: DataBaseTableNames.WxUser,
+      modelName: DataBaseTableNames.WxUser,
     },
   );
 

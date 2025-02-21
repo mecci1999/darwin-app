@@ -13,7 +13,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "crypto-js": "^4.2.0",
     "deepmerge": "^4.3.1",
     "lodash": "^4.17.21",
     "mysql2": "^3.9.2",
@@ -34,7 +33,6 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.0",
     "@rollup/plugin-typescript": "^12.1.2",
-    "@types/crypto-js": "^4.2.2",
     "@types/lodash": "^4.17.0",
     "@types/nodemailer": "^6.4.16",
     "node-gyp": "^11.0.0",
