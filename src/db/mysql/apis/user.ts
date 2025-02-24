@@ -1,18 +1,16 @@
-import { DataBaseTableNames } from "typings/enum";
-import { mainConnection } from "..";
-import { IUserTableAttributes, UserTable } from "../models/user";
+import { DataBaseTableNames } from 'typings/enum';
+import { mainConnection } from '..';
+import { IUserTableAttributes, UserTable } from '../models/user';
 
 /**
  * 用户表相关数据库操作
  */
 export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
   try {
-    const model = await mainConnection.getModel<UserTable>(
-      DataBaseTableNames.User,
-    );
+    const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
     return model
       .bulkCreate(users, {
-        updateOnDuplicate: ["userId", "username", "password", "phone", "email"],
+        updateOnDuplicate: ['userId', 'nickname', 'avatar', 'status', 'source'],
       })
       .then(() => users);
   } catch (error) {
@@ -25,12 +23,10 @@ export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
  */
 export async function queryAllUsers() {
   try {
-    const model = await mainConnection.getModel<UserTable>(
-      DataBaseTableNames.User,
-    );
-    if(!model) return [];
+    const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
+    if (!model) return [];
     return model
-      .findAll({ attributes: ["userId", "username", "email"] })
+      .findAll({ attributes: ['userId', 'nickname', 'avatar', 'status', 'source'] })
       .then((res) => {
         if (res) {
           return res.map((item) => {

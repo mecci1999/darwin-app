@@ -1,8 +1,6 @@
-import Sequelize, { Model } from "sequelize";
-import databaseConnectionManager, {
-  DataBaseConnectionManager,
-} from "../manager";
-import { DataBaseTableNames } from "typings/enum";
+import Sequelize, { Model } from 'sequelize';
+import databaseConnectionManager, { DataBaseConnectionManager } from '../manager';
+import { DataBaseTableNames } from 'typings/enum';
 
 class MainDatabaseConnection {
   public connection: Sequelize.Sequelize | null = null;
@@ -17,19 +15,15 @@ class MainDatabaseConnection {
    * @param modelName
    * @returns
    */
-  public getModel<T extends Model>(
-    modelName: string,
-  ): Promise<Sequelize.ModelCtor<T>> {
-    return this.getConnection().then(
-      (connection) => connection.models[modelName] as Sequelize.ModelCtor<T>,
-    );
+  public async getModel<T extends Model>(modelName: string): Promise<Sequelize.ModelCtor<T>> {
+    const connection = await this.getConnection();
+    return connection.models[modelName] as Sequelize.ModelCtor<T>;
   }
 
   public getConnection(): Promise<Sequelize.Sequelize> {
-    if (this.promise !== null)
-      return this.promise.then(() => this.connection as any);
+    if (this.promise !== null) return this.promise.then(() => this.connection as any);
 
-    throw new Error("请先调用bindMember方法，建立连接");
+    throw new Error('请先调用bindMember方法，建立连接');
   }
 
   /**
@@ -41,6 +35,9 @@ class MainDatabaseConnection {
         DataBaseTableNames.User,
         DataBaseTableNames.Config,
         DataBaseTableNames.IPBlackList,
+        DataBaseTableNames.EmailAuth,
+        DataBaseTableNames.WechatAuth,
+        DataBaseTableNames.ScanAuth,
       ],
     });
   }

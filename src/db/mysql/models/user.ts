@@ -5,59 +5,110 @@ import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
 import { DataBaseTableNames } from 'typings/enum';
 
 export interface IUserTableAttributes {
-  id?: number; // id
-  userId: string; // 用户id，用作外键作为标识，全局唯一
-  username: string; // 用户名，可以使用username登录
-  password: string; // 用户密码，非明文保存
-  phone?: string; // 用户手机号
-  email: string; // 用户邮箱，必须使用邮箱注册，邮箱可以作为登录名
-  nickname: string; // 用户昵称，可以作为展示
-  avatar?: string; // 用户头像
-  status: number; // 账户状态 0-正常 1-禁用 2-未激活
-  source: string; // 注册来源（web/app/第三方）
-  deletedAt?: Date; // 删除时间
+  id: number; // 新增自增主键（提升索引性能）
+  userId: string; // 保持UUID对外暴露
+  nickname?: string; // 显示名称（增加长度限制）
+  avatar?: string; // 增加CDN格式校验
+  status: number; // 改为枚举类型
+  source: string; // 明确注册来源枚举
+  timezone?: string; // 新增时区支持
+  locale?: string; // 新增语言偏好
+  lastActiveAt?: Date; // 新增最后活跃时间
+  meta?: object; // 扩展元数据
+  version: number; // 乐观锁版本控制
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date;
 }
 
-export class UserTable
-  extends Model<IUserTableAttributes, Optional<IUserTableAttributes, 'id'>>
-  implements IUserTableAttributes
-{
-  public id!: number; // id
-  public userId!: string; // 用户id，可以用作展示
-  public username!: string; // 用户名，不作为登录名，只作为展示
-  public password!: string; // 用户密码，非明文保存
-  public phone: string | undefined; // 用户手机号
-  public email!: string; // 用户邮箱
-  public nickname!: string; // 用户昵称，可以作为展示
-  public avatar?: string; // 用户头像
-  public status!: number; // 账户状态 0-正常 1-禁用 2-未激活
-  public source!: string; // 注册来源（web/app/第三方）
-  public readonly createdAt!: Date; // 创建时间
-  public readonly updatedAt!: Date; // 更新时间
-  public deletedAt?: Date; // 删除时间
+export class UserTable extends Model<IUserTableAttributes> implements IUserTableAttributes {
+  public id!: number;
+  public userId!: string;
+  public nickname!: string | undefined;
+  public avatar!: string | undefined;
+  public status!: number;
+  public source!: string;
+  public timezone!: string | undefined;
+  public locale!: string | undefined;
+  public lastActiveAt!: Date | undefined;
+  public meta!: object | undefined;
+  public version!: number;
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+  public deletedAt!: Date | undefined;
 }
 
 export default function (sequelize: Sequelize) {
-  const model = UserTable.init(
+  return UserTable.init(
     {
-      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-      userId: { type: DataTypes.STRING(32) },
-      username: { type: DataTypes.STRING(255) },
-      password: { type: DataTypes.STRING(255) },
-      phone: { type: DataTypes.STRING(32) },
-      email: { type: DataTypes.STRING(255) },
-      nickname: { type: DataTypes.STRING(255) },
-      avatar: { type: DataTypes.STRING(255) },
-      status: { type: DataTypes.INTEGER, defaultValue: 0 },
-      source: { type: DataTypes.STRING(255) },
-      deletedAt: { type: DataTypes.DATE },
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        field: 'user_id',
+        unique: true,
+      },
+      nickname: {
+        type: DataTypes.STRING(64), // 限制长度
+        validate: {
+          len: [1, 64], // 防止超长昵称
+        },
+      },
+      avatar: {
+        type: DataTypes.STRING(512),
+        validate: {
+          isUrl: true, // 验证URL格式
+          // contains: 'cdn.com', // 限制CDN域名
+        },
+      },
+      status: {
+        type: DataTypes.ENUM('active', 'disabled', 'unverified'),
+        defaultValue: 'unverified',
+      },
+      source: {
+        type: DataTypes.ENUM('system', 'wechat', 'email', 'invite'),
+        defaultValue: 'system',
+      },
+      timezone: DataTypes.STRING(64),
+      locale: {
+        type: DataTypes.STRING(16),
+        defaultValue: 'zh-CN',
+      },
+      lastActiveAt: DataTypes.DATE,
+      meta: DataTypes.JSON,
+      version: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+      },
+      createdAt: DataTypes.DATE,
+      updatedAt: DataTypes.DATE,
+      deletedAt: DataTypes.DATE,
     },
     {
       sequelize,
+      paranoid: true,
       tableName: DataBaseTableNames.User,
       modelName: DataBaseTableNames.User,
+      indexes: [
+        { fields: ['created_at'] },
+        { fields: ['status'] },
+        { fields: ['last_active_at'] },
+        { fields: ['source', 'created_at'] }, // 联合索引
+        {
+          fields: ['user_id'],
+          unique: true,
+          using: 'HASH', // 对UUID字段优化
+        },
+      ],
+      hooks: {
+        beforeUpdate: (user: UserTable) => {
+          user.version += 1; // 乐观锁版本控制
+        },
+      },
     },
   );
-
-  return model;
 }
