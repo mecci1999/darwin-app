@@ -37,7 +37,7 @@ export default function (sequelize: Sequelize, tables: string[]) {
   // 从根目录和auth目录加载
   const rootModels = loadModelsRecursive(__dirname, sequelize, tables);
   const authModels = loadModelsRecursive(path.join(__dirname, 'auth'), sequelize, tables);
-  console.log(rootModels, authModels);
+
   return {
     ...rootModels,
     ...authModels,
