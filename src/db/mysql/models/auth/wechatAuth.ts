@@ -27,11 +27,13 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.STRING(32),
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
         allowNull: false,
+        unique: true,
         references: {
           model: UserTable,
-          key: 'userId',
+          key: 'user_id',
         },
         onDelete: 'CASCADE',
       },
@@ -39,8 +41,8 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.STRING(128),
         unique: true,
       },
-      unionid: DataTypes.STRING(128),
-      sessionKey: DataTypes.STRING(255),
+      unionid: { type: DataTypes.STRING(128) },
+      sessionKey: { type: DataTypes.STRING(255) },
     },
     {
       sequelize,
@@ -48,14 +50,13 @@ export default function (sequelize: Sequelize) {
       indexes: [
         { fields: ['openid'], unique: true },
         { fields: ['unionid'] },
-        { fields: ['userId'] },
+        { fields: ['user_id'], name: 'wechat_auth_user_id_index' },
       ],
     },
   );
 
   model.belongsTo(UserTable, {
-    foreignKey: 'userId',
-    targetKey: 'userId',
+    foreignKey: 'user_id',
   });
 
   return model;

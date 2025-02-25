@@ -209,20 +209,23 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     },
     // 创建时操作
     async created() {
-      // 连接数据库
-      await dbConnections.mainConnection.bindManinConnection({
-        benchmark: true,
-        logging(sql, timing) {
-          if (timing && timing > 1000) {
-            // 如果查询时间大于1s，将进行日志打印
-            star.logger.warn(`mysql operation is timeout, sql: ${sql}, timing: ${timing}`);
-          }
-
-          star.logger.info(`mysql connection is success!`);
-        },
-      });
-      // 拉取配置项
-      configs = await getAllConfigList();
+      try {
+        // 连接数据库
+        await dbConnections.mainConnection.bindManinConnection({
+          benchmark: true,
+          logging(sql, timing) {
+            if (timing && timing > 1000) {
+              // 如果查询时间大于1s，将进行日志打印
+              star.logger.warn(`Mysql operation is timeout, sql: ${sql}, timing: ${timing}ms`);
+            }
+          },
+        });
+        star.logger.info('Mysql connection is success!');
+        // 拉取配置项
+        configs = await getAllConfigList();
+      } catch (error) {
+        star.logger.error('gateway_app is created fail~');
+      }
     },
 
     // 启动时操作

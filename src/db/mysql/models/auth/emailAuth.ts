@@ -29,12 +29,13 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.STRING(32),
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
         allowNull: false,
         unique: true,
         references: {
           model: UserTable,
-          key: 'userId',
+          key: 'user_id',
         },
         onDelete: 'CASCADE',
       },
@@ -69,14 +70,14 @@ export default function (sequelize: Sequelize) {
           name: 'email_auth_email_unique',
         },
         {
-          fields: ['userId'],
+          fields: ['user_id'],
           name: 'email_auth_user_id_index',
         },
       ],
     },
   );
 
-  model.belongsTo(UserTable, { foreignKey: 'userId' });
+  model.belongsTo(UserTable, { foreignKey: 'user_id' });
 
   model.addHook('beforeValidate', (instance: EmailAuthTable) => {
     if (instance.email) {

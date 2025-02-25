@@ -12,13 +12,9 @@ const loadModelsRecursive = (
 
   fs.readdirSync(directoryPath).forEach((file) => {
     const fullPath = path.join(directoryPath, file);
-    const stat = fs.statSync(fullPath);
+    // const stat = fs.statSync(fullPath);
 
-    if (stat.isDirectory()) {
-      // 递归处理子目录（如auth目录）
-      const subModels = loadModelsRecursive(fullPath, sequelize, tables);
-      Object.assign(models, subModels);
-    } else if (file.endsWith('.ts') && !file.endsWith('.d.ts')) {
+    if (file.endsWith('.ts') && !file.endsWith('.d.ts')) {
       // 统一处理模型文件
       const fileName = path.parse(file).name;
       const modelKey = fileName.endsWith('Table') ? fileName.replace('Table', '') : fileName;
@@ -41,7 +37,7 @@ export default function (sequelize: Sequelize, tables: string[]) {
   // 从根目录和auth目录加载
   const rootModels = loadModelsRecursive(__dirname, sequelize, tables);
   const authModels = loadModelsRecursive(path.join(__dirname, 'auth'), sequelize, tables);
-
+  console.log(rootModels, authModels);
   return {
     ...rootModels,
     ...authModels,

@@ -26,38 +26,37 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        // 修改字段定义
-        type: DataTypes.STRING(32), // 与user表类型一致
-        allowNull: true, // 初始状态无用户关联
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        allowNull: false,
+        unique: true,
         references: {
-          // 添加外键关联
           model: UserTable,
-          key: 'userId',
+          key: 'user_id',
         },
-        onDelete: 'CASCADE', // 级联删除
+        onDelete: 'CASCADE',
       },
       status: {
         type: DataTypes.ENUM('pending', 'confirmed', 'expired'),
         defaultValue: 'pending',
       },
-      deviceInfo: DataTypes.JSON,
-      expiresAt: DataTypes.DATE,
+      deviceInfo: { type: DataTypes.JSON },
+      expiresAt: { type: DataTypes.DATE },
     },
     {
       sequelize,
       tableName: DataBaseTableNames.ScanAuth,
       indexes: [
-        { fields: ['expiresAt'] },
+        { fields: ['expires_at'] },
         { fields: ['status'] },
-        { fields: ['userId'] }, // 新增用户ID索引
+        { fields: ['user_id'], name: 'scan_auth_user_id_index' }, // 新增用户ID索引
       ],
     },
   );
 
   // 建立模型关联
   model.belongsTo(UserTable, {
-    foreignKey: 'userId',
-    targetKey: 'userId',
+    foreignKey: 'user_id',
   });
 
   return model;

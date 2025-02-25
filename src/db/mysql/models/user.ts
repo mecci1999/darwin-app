@@ -51,6 +51,7 @@ export default function (sequelize: Sequelize) {
         defaultValue: DataTypes.UUIDV4,
         field: 'user_id',
         unique: true,
+        allowNull: false,
       },
       nickname: {
         type: DataTypes.STRING(64), // 限制长度
@@ -78,15 +79,18 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.STRING(16),
         defaultValue: 'zh-CN',
       },
-      lastActiveAt: DataTypes.DATE,
-      meta: DataTypes.JSON,
+      lastActiveAt: { type: DataTypes.DATE },
+      meta: { type: DataTypes.JSON },
       version: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
       },
-      createdAt: DataTypes.DATE,
-      updatedAt: DataTypes.DATE,
-      deletedAt: DataTypes.DATE,
+      createdAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+      updatedAt: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+      },
+      deletedAt: { type: DataTypes.DATE },
     },
     {
       sequelize,
@@ -109,6 +113,7 @@ export default function (sequelize: Sequelize) {
           user.version += 1; // 乐观锁版本控制
         },
       },
+      timestamps: true,
     },
   );
 }

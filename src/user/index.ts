@@ -59,22 +59,22 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             };
           }
 
-          const user = await saveOrUpdateUsers([
-            {
-              userId,
-              username: params.username,
-              password: params.password,
-              phone: params?.phone,
-              email: params?.email,
-            },
-          ]);
+          // const user = await saveOrUpdateUsers([
+          //   {
+          //     userId,
+          //     username: params.username,
+          //     password: params.password,
+          //     phone: params?.phone,
+          //     email: params?.email,
+          //   },
+          // ]);
 
-          // 例如，将接收到的参数存储到数据库中
+          // // 例如，将接收到的参数存储到数据库中
           return {
             status: 201,
             data: {
               message: 'user is creating~',
-              content: { user: user },
+              content: { user: '' },
             },
           };
         },

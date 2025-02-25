@@ -5,9 +5,9 @@ export enum DataBaseTableNames {
   User = 'user',
   Config = 'config',
   IPBlackList = 'ipBlackList',
-  EmailAuth = 'EmailAuth',
-  WechatAuth = 'WechatAuth',
-  ScanAuth = 'ScanAuth',
+  EmailAuth = 'emailAuth',
+  WechatAuth = 'wechatAuth',
+  ScanAuth = 'scanAuth',
 }
 
 /**
