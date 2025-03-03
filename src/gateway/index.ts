@@ -216,15 +216,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           logging(sql, timing) {
             if (timing && timing > 1000) {
               // 如果查询时间大于1s，将进行日志打印
-              star.logger.warn(`Mysql operation is timeout, sql: ${sql}, timing: ${timing}ms`);
+              star.logger?.warn(`Mysql operation is timeout, sql: ${sql}, timing: ${timing}ms`);
             }
           },
         });
-        star.logger.info('Mysql connection is success!');
+        star.logger?.info('Mysql connection is success!');
         // 拉取配置项
         configs = await getAllConfigList();
       } catch (error) {
-        star.logger.error('gateway_app is created fail~');
+        star.logger?.error('gateway_app is created fail~', 'error:', error);
       }
     },
 

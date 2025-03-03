@@ -198,7 +198,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               index = 0;
               if (!fs.existsSync(writepath)) {
                 // 创建excel
-                star.logger.info(`创建excel文件：${writepath}`);
+                star.logger?.info(`创建excel文件：${writepath}`);
                 const newExcel = xlsx.utils.book_new();
                 const newSheet = xlsx.utils.aoa_to_sheet([['call_id', 'intent_list', 'answer']]);
                 xlsx.utils.book_append_sheet(newExcel, newSheet, 'Sheet1');
@@ -211,7 +211,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 const batch = data.slice(index, index + BATCH_SIZE);
                 await processBatch(batch, writepath, cookie);
                 index += BATCH_SIZE;
-                star.logger.info(`已完成${index}条数据`);
+                star.logger?.info(`已完成${index}条数据`);
               }
             } catch (error) {
               console.error(error);

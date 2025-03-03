@@ -17,7 +17,7 @@
     "lodash": "^4.17.21",
     "mysql2": "^3.9.2",
     "moment-timezone": "^0.5.46",
-    "node-universe": "^1.1.0",
+    "node-universe": "^1.2.0",
     "node-universe-gateway": "^1.0.5",
     "nodemailer": "^6.9.15",
     "nanoid": "^5.0.8",

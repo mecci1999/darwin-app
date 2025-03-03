@@ -10,8 +10,9 @@
  */
 import { pinoLoggerOptions } from 'config';
 import Universe from 'node-universe';
-import authMethod from './method';
-import authAction from './action';
+import authMethod from './method/index';
+import authAction from './action/index';
+// import authEvent from './event/index';
 
 // 微服务名
 const appName = 'auth';
