@@ -28,6 +28,9 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       debug: true,
       host: 'localhost:9092',
     },
+    // serializer: {
+    //   type: 'NotePack',
+    // },
     // 日志模块
     // logger: pinoOptions,
     // cacher: {
@@ -61,7 +64,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         origin: '*',
         methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
         allowedHeaders: '*',
-        //exposedHeaders: "*",
+        // exposedHeaders: '*',
         credentials: true,
         maxAge: null,
       },
@@ -261,6 +264,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
   // 启动网关微服务
   star.start().then(() => {
-    console.log(`微服务 ${appName.toUpperCase()} 启动成功`);
+    star.logger?.info(`微服务 ${appName.toUpperCase()} 启动成功`);
   });
 });

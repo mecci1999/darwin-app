@@ -116,6 +116,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
   // 启动网关微服务
   star.start().then(() => {
-    console.log(`微服务 ${appName.toUpperCase()} 启动成功`);
+    star.logger?.info(`微服务 ${appName.toUpperCase()} 启动成功`);
   });
 });
