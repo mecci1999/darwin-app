@@ -9,19 +9,20 @@ import { handlerActionSchema } from 'utils/base';
 const authAction = (star: any) => {
   const verifyCodeAction = verifyCode(star);
 
-  // 将相同版本的动作合并到一个数组中，直接生成最后的对象
-  const actions = handlerActionSchema([verifyCodeAction]);
+  // // 将相同版本的动作合并到一个数组中，直接生成最后的对象
+  // const actions = handlerActionSchema([verifyCodeAction]);
 
-  return Object.keys(actions).reduce((previous, current) => {
-    const value = actions[current];
-    value.forEach((item) => {
-      previous[`${current}.${item.name}`] = item.action;
-    });
+  // return Object.keys(actions).reduce((previous, current) => {
+  //   const value = actions[current];
+  //   value.forEach((item) => {
+  //     previous[`${current}.${item.name}`] = item.action;
+  //   });
 
-    return previous;
-  }, {});
+  //   return previous;
+  // }, {});
 
   return {
+    ...verifyCodeAction,
     'v1.login': {
       metadata: {
         auth: false,
