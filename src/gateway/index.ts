@@ -28,19 +28,19 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       debug: true,
       host: 'localhost:9092',
     },
-    // serializer: {
-    //   type: 'NotePack',
-    // },
+    serializer: {
+      type: 'NotePack',
+    },
     // 日志模块
     // logger: pinoOptions,
-    // cacher: {
-    //   type: "Redis",
-    //   clone: true,
-    //   options: {
-    //     port: 6379, // Redis port
-    //     host: "localhost",
-    //   },
-    // },
+    cacher: {
+      type: 'Redis',
+      clone: true,
+      options: {
+        port: 6379, // Redis port
+        host: 'localhost',
+      },
+    },
     // metrics: {
     //   enabled: true,
     //   reporter: {

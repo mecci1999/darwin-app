@@ -1,17 +1,16 @@
+/**
+ * 用户注册接口
+ */
 import { HttpResponseItem } from 'typings/response';
 import { customAlphabet } from 'nanoid';
 import { RequestParamInvalidError } from 'error';
 
-/**
- * 通过邮箱发送验证码，需要区分验证码的类型，例如：登录、注册、找回密码等。
- */
-export default function verifyCode(star: any) {
+export default function register(star: any) {
   return {
-    'v1.verifyCode': {
+    'v1.register': {
       metadata: {
         auth: false,
       },
-      // 获取验证码，需要将验证码存储到redis中
       async handler(ctx: any): Promise<HttpResponseItem> {
         // 排除极端情况
         if (!ctx.params.email || !ctx.params.type) {

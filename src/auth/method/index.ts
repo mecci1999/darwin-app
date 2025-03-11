@@ -28,21 +28,20 @@ const authMethod = (star: any) => {
         });
 
         star.cacher
-          .get(`verifyCode:${options.email};mode:${options.type}`)
+          .get(`verifyCode:${options.email};type:${options.type}`)
           .then((cacheCode: string) => {
             // 获取redis缓存
             if (cacheCode) {
               // 存在缓存
-              // star.logger.info(`verifyCode:${email};mode:${mode}: ${cacheCode.toString()}`);
+              star.logger.info(`验证码存在缓存`);
               resolve({
                 code: 200,
-                message: '验证码已发送至您的邮箱，若没收到，请确认邮箱地址是否正确',
+                message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
               });
             } else {
-              // 缓存不存在或者已过期
-              // 将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+              // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
               star.cacher.set(
-                `verifyCode:${options.email};mode:${options.type}`,
+                `verifyCode:${options.email};type:${options.type}`,
                 options.code,
                 5 * 60,
               );

@@ -52,6 +52,47 @@ services:
       - "3306:3306"
     networks:
       - app_network
+
+  # Redis Service
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - app_network
+
+  # prometheus:
+  #   image: bitnami/prometheus:latest
+  #   ports:
+  #     - 9090:9090
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #   restart: always
+  #   environment:
+  #     - HOST_DOCKER_INTERNAL=host.docker.internal
+  #   networks:
+  #     - app_network
+
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   ports:
+  #     - 3000:3000
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   restart: always
+  #   environment:
+  #     - HOST_DOCKER_INTERNAL=host.docker.internal
+  #   networks:
+  #     - app_network
+
   # Node.js Service
   # nodejs-service:
   #   # build:
