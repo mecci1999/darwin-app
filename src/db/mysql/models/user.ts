@@ -5,19 +5,19 @@ import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
 import { DataBaseTableNames } from 'typings/enum';
 
 export interface IUserTableAttributes {
-  id: number; // 新增自增主键（提升索引性能）
+  id?: number; // 新增自增主键（提升索引性能）
   userId: string; // 保持UUID对外暴露
   nickname?: string; // 显示名称（增加长度限制）
   avatar?: string; // 增加CDN格式校验
-  status: number; // 改为枚举类型
+  status: string; // 改为枚举类型
   source: string; // 明确注册来源枚举
   timezone?: string; // 新增时区支持
   locale?: string; // 新增语言偏好
   lastActiveAt?: Date; // 新增最后活跃时间
   meta?: object; // 扩展元数据
-  version: number; // 乐观锁版本控制
-  createdAt: Date;
-  updatedAt: Date;
+  version?: number; // 乐观锁版本控制
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -26,7 +26,7 @@ export class UserTable extends Model<IUserTableAttributes> implements IUserTable
   public userId!: string;
   public nickname!: string | undefined;
   public avatar!: string | undefined;
-  public status!: number;
+  public status!: string;
   public source!: string;
   public timezone!: string | undefined;
   public locale!: string | undefined;
@@ -61,10 +61,11 @@ export default function (sequelize: Sequelize) {
       },
       avatar: {
         type: DataTypes.STRING(512),
-        validate: {
-          isUrl: true, // 验证URL格式
-          // contains: 'cdn.com', // 限制CDN域名
-        },
+        defaultValue: '',
+        // validate: {
+        //   isUrl: true, // 验证URL格式
+        //   // contains: 'cdn.com', // 限制CDN域名
+        // },
       },
       status: {
         type: DataTypes.ENUM('active', 'disabled', 'unverified'),
@@ -74,7 +75,7 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.ENUM('system', 'wechat', 'email', 'invite'),
         defaultValue: 'system',
       },
-      timezone: DataTypes.STRING(64),
+      timezone: { type: DataTypes.STRING(64), defaultValue: 'UTC+8' },
       locale: {
         type: DataTypes.STRING(16),
         defaultValue: 'zh-CN',

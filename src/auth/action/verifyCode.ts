@@ -22,6 +22,8 @@ export default function verifyCode(star: any) {
         // 随机生成6位验证码
         const generateCode = customAlphabet('0123456789', 6)(6);
 
+        star.logger.debug('generateCode', generateCode);
+
         const mailOptions = {
           from: 'mecci1999@163.com', // 发件人邮箱
           to: ctx.params.email, // 收件人邮箱

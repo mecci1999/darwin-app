@@ -13,6 +13,7 @@ import Universe from 'node-universe';
 import authMethod from './method/index';
 import authAction from './action/index';
 // import authEvent from './event/index';
+import * as dbConnections from '../db/mysql/index';
 
 // 微服务名
 const appName = 'auth';
@@ -50,6 +51,24 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     name: appName,
     methods: authMethod(star),
     actions: authAction(this),
+    async created() {
+      try {
+        // 连接数据库
+        await dbConnections.mainConnection.bindManinConnection({
+          benchmark: true,
+          logging(sql, timing) {
+            if (timing && timing > 1000) {
+              // 如果查询时间大于1s，将进行日志打印
+              star.logger?.warn(`mysql operation is timeout, sql: ${sql}, timing: ${timing}`);
+            }
+          },
+        });
+
+        star.logger?.info('Mysql connection is success!');
+      } catch (error) {
+        star.logger?.error('auth_app is created fail~, error:', error);
+      }
+    },
   });
 
   // 启动身份校验微服务

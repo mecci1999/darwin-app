@@ -1,9 +1,10 @@
 import { queryAllUsers, saveOrUpdateUsers } from 'db/mysql/apis/user';
 import Universe from 'node-universe/dist';
-import { generateUserId } from 'utils/generateUserId';
 import { pinoLoggerOptions } from 'config';
 import * as dbConnections from '../db/mysql/index';
 import { HttpResponseItem } from '../typings/response';
+import { ResponseErrorCode } from 'typings/enum';
+import { customAlphabet } from 'nanoid';
 
 // 微服务名
 const appName = 'user';
@@ -15,6 +16,19 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       type: 'KAFKA',
       debug: true,
       host: 'localhost:9092',
+    },
+    serializer: {
+      type: 'NotePack',
+    },
+    // 日志模块
+    // logger: pinoOptions,
+    cacher: {
+      type: 'Redis',
+      clone: true,
+      options: {
+        port: 6379, // Redis port
+        host: 'localhost',
+      },
     },
     // cacher: {
     //   type: "Redis",
@@ -47,34 +61,40 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         },
         async handler(ctx, route, req, res): Promise<HttpResponseItem> {
           const params = ctx.params;
-          // 生成userID，生成规则，
-          const userId = generateUserId();
+
           // 在此处理 create 动作的逻辑
-          if (!params?.username || !params?.password) {
+          if (!params.userId || !params.source) {
             return {
               status: 400,
               data: {
+                content: null,
                 message: 'Invalid request body',
+                code: ResponseErrorCode.ParamsError,
               },
             };
           }
 
-          // const user = await saveOrUpdateUsers([
-          //   {
-          //     userId,
-          //     username: params.username,
-          //     password: params.password,
-          //     phone: params?.phone,
-          //     email: params?.email,
-          //   },
-          // ]);
+          const id = customAlphabet('0123456789')(7);
 
-          // // 例如，将接收到的参数存储到数据库中
+          // 生成用户名
+          const defaultNickname = `星际公民1${id}`;
+
+          const user = await saveOrUpdateUsers([
+            {
+              userId: params.userId,
+              nickname: defaultNickname,
+              source: params.source,
+              status: 'active',
+            },
+          ]);
+
+          // 将接收到的参数存储到数据库中
           return {
             status: 201,
             data: {
               message: 'user is creating~',
-              content: { user: '' },
+              content: { user },
+              code: ResponseErrorCode.Success,
             },
           };
         },
@@ -109,7 +129,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
         star.logger?.info('Mysql connection is success!');
       } catch (error) {
-        star.logger?.error('gateway_app is created fail~, error:', error);
+        star.logger?.error('user_app is created fail~, error:', error);
       }
     },
   });

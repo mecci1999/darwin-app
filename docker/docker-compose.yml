@@ -39,7 +39,7 @@ services:
   # MySQL Service
   mysql:
     image: mysql:latest
-    container_name: mysql_server
+    container_name: mysql
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: leo19870624

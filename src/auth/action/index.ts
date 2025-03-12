@@ -1,6 +1,7 @@
 import { HttpResponseItem } from 'typings/response';
 import { customAlphabet } from 'nanoid';
 import verifyCode from './verifyCode';
+import register from './register';
 import { handlerActionSchema } from 'utils/base';
 
 /**
@@ -8,6 +9,7 @@ import { handlerActionSchema } from 'utils/base';
  */
 const authAction = (star: any) => {
   const verifyCodeAction = verifyCode(star);
+  const registerAction = register(star);
 
   // // 将相同版本的动作合并到一个数组中，直接生成最后的对象
   // const actions = handlerActionSchema([verifyCodeAction]);
@@ -23,6 +25,7 @@ const authAction = (star: any) => {
 
   return {
     ...verifyCodeAction,
+    ...registerAction,
     'v1.login': {
       metadata: {
         auth: false,
