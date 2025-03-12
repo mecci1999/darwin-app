@@ -47,6 +47,7 @@ export default function (sequelize: Sequelize) {
     {
       sequelize,
       tableName: DataBaseTableNames.WechatAuth,
+      modelName: DataBaseTableNames.WechatAuth,
       indexes: [
         { fields: ['openid'], unique: true },
         { fields: ['unionid'] },

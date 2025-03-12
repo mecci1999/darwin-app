@@ -1,7 +1,6 @@
 /**
  * 登录校验方法
  */
-import {} from 'sequelize';
 import { DataBaseTableNames } from 'typings/enum';
 import { mainConnection } from '..';
 
@@ -9,9 +8,11 @@ import { mainConnection } from '..';
 export async function findEmailIsExist(email: string): Promise<boolean> {
   if (!email) return false;
 
-  const model = mainConnection.getModel(DataBaseTableNames.EmailAuth);
+  const model = await mainConnection.getModel(DataBaseTableNames.EmailAuth);
 
-  const result = (await model).findOne({ where: { email } });
+  console.log(model);
+
+  const result = await model.findOne({ where: { email } });
 
   return !!result;
 }
@@ -24,10 +25,10 @@ export async function saveOrUpdateEmailAuth(params: {
   userId: string;
 }) {
   try {
-    const model = mainConnection.getModel(DataBaseTableNames.EmailAuth);
+    const model = await mainConnection.getModel(DataBaseTableNames.EmailAuth);
     const data = { ...params, isVerified: true };
 
-    return (await model)
+    return await model
       .bulkCreate([data], {
         updateOnDuplicate: ['email', 'passwordHash', 'salt', 'userId'],
       })

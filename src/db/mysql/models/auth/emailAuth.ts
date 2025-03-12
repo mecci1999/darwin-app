@@ -63,6 +63,7 @@ export default function (sequelize: Sequelize) {
     {
       sequelize,
       tableName: DataBaseTableNames.EmailAuth,
+      modelName: DataBaseTableNames.EmailAuth,
       indexes: [
         {
           fields: ['email'],

@@ -46,6 +46,7 @@ export default function (sequelize: Sequelize) {
     {
       sequelize,
       tableName: DataBaseTableNames.ScanAuth,
+      modelName: DataBaseTableNames.ScanAuth,
       indexes: [
         { fields: ['expires_at'] },
         { fields: ['status'] },

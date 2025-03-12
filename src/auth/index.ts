@@ -50,7 +50,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
   star.createService({
     name: appName,
     methods: authMethod(star),
-    actions: authAction(this),
+    actions: authAction(star),
     async created() {
       try {
         // 连接数据库

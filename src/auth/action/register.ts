@@ -8,6 +8,7 @@ import { findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
 import crypto from 'crypto';
 import { decryptPassword } from 'utils';
 import { generateUserId } from 'utils/generateUserId';
+import CryptoJS from 'crypto-js';
 import { ResponseErrorCode } from 'typings/enum';
 
 export default function register(star: any) {
@@ -57,7 +58,9 @@ export default function register(star: any) {
           const secretKey = 'E9CC7F1A9661D6824589279A8D465'; // 直接写死
 
           // 解密
-          const decryptedPassword = decryptPassword(ctx.params.hash, secretKey);
+          const decryptedPassword = decryptPassword(ctx.params.hash, secretKey).toString();
+
+          star.logger.debug('decryptedPassword', decryptedPassword);
 
           // 生成盐值
           const salt = crypto.randomBytes(16).toString('hex');
