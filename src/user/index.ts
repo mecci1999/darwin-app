@@ -74,7 +74,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             };
           }
 
-          const id = customAlphabet('0123456789')(7);
+          const id = customAlphabet('0123456789')(9);
 
           // 生成用户名
           const defaultNickname = `星际公民1${id}`;
@@ -131,6 +131,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       } catch (error) {
         star.logger?.error('user_app is created fail~, error:', error);
       }
+    },
+    // 结束时操作
+    async stopped() {
+      // 断开数据库连接
+      await dbConnections.mainConnection.destroy();
     },
   });
 

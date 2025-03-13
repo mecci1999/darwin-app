@@ -69,6 +69,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         star.logger?.error('auth_app is created fail~, error:', error);
       }
     },
+    // 结束时操作
+    async stopped() {
+      // 断开数据库连接
+      await dbConnections.mainConnection.destroy();
+    },
   });
 
   // 启动身份校验微服务

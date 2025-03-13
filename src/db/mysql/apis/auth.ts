@@ -30,7 +30,7 @@ export async function saveOrUpdateEmailAuth(params: {
 
     return await model
       .bulkCreate([data], {
-        updateOnDuplicate: ['email', 'passwordHash', 'salt', 'userId'],
+        updateOnDuplicate: ['email', 'userId', 'passwordHash', 'salt', 'isVerified'],
       })
       .then(() => true);
   } catch (error) {

@@ -47,8 +47,7 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
+        type: DataTypes.STRING(512),
         field: 'user_id',
         unique: true,
         allowNull: false,
@@ -106,7 +105,7 @@ export default function (sequelize: Sequelize) {
         {
           fields: ['user_id'],
           unique: true,
-          using: 'HASH', // 对UUID字段优化
+          // using: 'HASH', // 对UUID字段优化
         },
       ],
       hooks: {

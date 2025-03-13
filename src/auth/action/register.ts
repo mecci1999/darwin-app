@@ -30,7 +30,11 @@ export default function register(star: any) {
           if (!reg.test(ctx.params.email)) {
             return {
               status: 200,
-              data: { content: null, message: '邮箱格式不正确', code: 0 },
+              data: {
+                content: null,
+                message: '邮箱格式不正确',
+                code: 20004,
+              },
             };
           }
 
@@ -40,7 +44,11 @@ export default function register(star: any) {
           if (isExist) {
             return {
               status: 200,
-              data: { content: null, message: '该邮箱已注册', code: 0 },
+              data: {
+                content: null,
+                message: '该邮箱已注册',
+                code: ResponseErrorCode.UserEmailAlreadyExist,
+              },
             };
           }
 
@@ -50,7 +58,11 @@ export default function register(star: any) {
           if (verifyCode !== ctx.params.code) {
             return {
               status: 200,
-              data: { content: null, message: '邮箱验证码错误', code: 0 },
+              data: {
+                content: null,
+                message: '邮箱验证码已失效，请重新生成～',
+                code: ResponseErrorCode.UserEmailCodeIsError,
+              },
             };
           }
 
@@ -59,8 +71,6 @@ export default function register(star: any) {
 
           // 解密
           const decryptedPassword = decryptPassword(ctx.params.hash, secretKey).toString();
-
-          star.logger.debug('decryptedPassword', decryptedPassword);
 
           // 生成盐值
           const salt = crypto.randomBytes(16).toString('hex');
@@ -91,8 +101,8 @@ export default function register(star: any) {
           const isSuccess = await saveOrUpdateEmailAuth({
             email: ctx.params.email,
             passwordHash: passwordHash,
-            salt,
-            userId,
+            salt: salt,
+            userId: userId,
           });
 
           if (isSuccess) {

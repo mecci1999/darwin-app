@@ -27,8 +27,7 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
+        type: DataTypes.STRING(512),
         allowNull: false,
         unique: true,
         references: {

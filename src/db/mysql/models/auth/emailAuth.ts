@@ -29,8 +29,7 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
+        type: DataTypes.STRING(512),
         allowNull: false,
         unique: true,
         references: {
@@ -48,11 +47,11 @@ export default function (sequelize: Sequelize) {
         },
       },
       passwordHash: {
-        type: DataTypes.STRING(255),
+        type: DataTypes.STRING(512),
         allowNull: false,
       },
       salt: {
-        type: DataTypes.STRING(64),
+        type: DataTypes.STRING(128),
         allowNull: false,
       },
       isVerified: {

@@ -34,6 +34,7 @@ export enum ResponseErrorCode {
   UserEmailAuthError = 20007, // 用户邮箱认证错误
   UserWechatAuthError = 20008, // 用户微信认证错误
   UserScanAuthError = 20009, // 用户扫码认证错误
+  UserEmailCodeIsError = 20010, // 邮箱验证码错误
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
   ERR_INVALID_TOKEN = 30003, // 无效token
