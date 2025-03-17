@@ -27,7 +27,7 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.STRING(512),
+        type: DataTypes.STRING(64),
         allowNull: false,
         unique: true,
         references: {
@@ -55,9 +55,7 @@ export default function (sequelize: Sequelize) {
     },
   );
 
-  model.belongsTo(UserTable, {
-    foreignKey: 'user_id',
-  });
+  model.belongsTo(UserTable, { foreignKey: 'userId' });
 
   return model;
 }

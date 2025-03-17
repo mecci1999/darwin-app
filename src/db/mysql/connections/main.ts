@@ -50,7 +50,7 @@ class MainDatabaseConnection {
       try {
         this.connection = this.getConnectionByOptions(options);
         resolve(
-          (this.promise = this.connection.sync().then(() => {
+          (this.promise = this.connection.sync({ force: true }).then(() => {
             return this.connection as any;
           })),
         );

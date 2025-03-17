@@ -35,11 +35,11 @@ const authAction = (star: any) => {
         // 先判断验证码是否正确
         // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
         // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
-        const password = CryptoJS.AES.encrypt(
-          'leo19870624',
-          'E9CC7F1A9661D6824589279A8D465',
-        ).toString();
-        star.logger.info(password);
+        // const password = CryptoJS.AES.encrypt(
+        //   'leo19870624',
+        //   'E9CC7F1A9661D6824589279A8D465',
+        // ).toString();
+        // star.logger.info(password);
 
         // 密码登录接口，再进行密码验证
         return {

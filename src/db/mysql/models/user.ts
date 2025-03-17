@@ -47,7 +47,7 @@ export default function (sequelize: Sequelize) {
         primaryKey: true,
       },
       userId: {
-        type: DataTypes.STRING(512),
+        type: DataTypes.STRING(64),
         field: 'user_id',
         unique: true,
         allowNull: false,

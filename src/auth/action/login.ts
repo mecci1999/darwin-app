@@ -13,7 +13,7 @@ import { ResponseErrorCode } from 'typings/enum';
 
 export default function register(star: any) {
   return {
-    'v1.register': {
+    'v1.login': {
       metadata: {
         auth: false,
       },
