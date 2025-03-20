@@ -19,9 +19,9 @@ export enum IPAddressBanStatus {
 }
 
 /**
- * 错误码
+ * 请求响应码
  */
-export enum ResponseErrorCode {
+export enum ResponseCode {
   Success = 0, // 成功
   ServiceActionFaild = 10000, // 服务操作失败
   ParamsError = 10001, // 参数错误

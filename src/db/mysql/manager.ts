@@ -4,7 +4,13 @@
 import * as SequelizeStatic from 'sequelize';
 import deepmerge from 'deepmerge';
 import getModels from './models';
-import { MYSQL_HOST } from 'config/index';
+import {
+  MYSQL_HOST,
+  MYSQL_PORT,
+  MYSQL_DATABASE,
+  MYSQL_PASSWORD,
+  MYSQL_USERNAME,
+} from 'config/index';
 
 export class DataBaseConnectionManager {
   public static SequelizeStatic = SequelizeStatic;
@@ -32,10 +38,10 @@ export class DataBaseConnectionManager {
         {
           dialect: 'mysql',
           host: MYSQL_HOST,
-          port: 3306,
-          database: 'darwin_app',
-          username: 'darwin',
-          password: 'darwin19990709',
+          port: MYSQL_PORT ? Number(MYSQL_PORT) : 3306,
+          database: MYSQL_DATABASE,
+          username: MYSQL_USERNAME,
+          password: MYSQL_PASSWORD,
           define: {
             underscored: true,
             alter: { drop: false }, // 有新增字段  会自动加上
@@ -60,9 +66,7 @@ export class DataBaseConnectionManager {
    * @param connection
    */
   public closeConnection(connection) {
-    const index = this.connections.findIndex(
-      (conn) => conn.connection === connection,
-    );
+    const index = this.connections.findIndex((conn) => conn.connection === connection);
     if (index !== -1) {
       this.connections[index].connection.close();
       this.connections.splice(index, 1);

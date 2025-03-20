@@ -8,7 +8,15 @@ import dotenv from 'dotenv';
 dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
 
 // 相关配置
-export const { MYSQL_HOST } = process.env;
+export const {
+  MYSQL_HOST,
+  MYSQL_PORT,
+  MYSQL_DATABASE,
+  MYSQL_USERNAME,
+  MYSQL_PASSWORD,
+  PASSWORD_SECRET_KEY,
+  TOKEN_SECRET_KET,
+} = process.env;
 
 /**
  * pino日志配置
@@ -23,8 +31,7 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
         colorize: true,
         // [2019-08-31 08:40:53.481] INFO STAR: Universe is creating...
         customPrettifiers: {
-          time: () =>
-            `[${moment().tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss:SSS')}]`,
+          time: () => `[${moment().tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss:SSS')}]`,
           level: (inputData, key, log, extras) => `${extras.labelColorized}`,
           name: (value) => `${value}`,
           pid: (value) => `PID-${value}`,
@@ -34,8 +41,7 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
             `${extras.colors ? extras.colors.green(value) : value}`,
           namespace: (value, key, log, extras) =>
             `${extras.colors ? extras.colors.green(value) : value}`,
-          svc: (value, key, log, extras) =>
-            `${extras.colors ? extras.colors.green(value) : value}`,
+          svc: (value, key, log, extras) => `${extras.colors ? extras.colors.green(value) : value}`,
           version: (value, key, log, extras) =>
             `${extras.colors ? extras.colors.green(value) : value}`,
           // messageKey: (inputData, key, log, extras) => `${inputData}`,

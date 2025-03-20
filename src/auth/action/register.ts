@@ -9,7 +9,8 @@ import crypto from 'crypto';
 import { decryptPassword } from 'utils';
 import { generateUserId } from 'utils/generateUserId';
 import CryptoJS from 'crypto-js';
-import { ResponseErrorCode } from 'typings/enum';
+import { ResponseCode } from 'typings/enum';
+import { PASSWORD_SECRET_KEY } from 'config';
 
 export default function register(star: any) {
   return {
@@ -47,15 +48,13 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '该邮箱已注册',
-                code: ResponseErrorCode.UserEmailAlreadyExist,
+                code: ResponseCode.UserEmailAlreadyExist,
               },
             };
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(
-            `verifyCode:${ctx.params.email};type:register`,
-          );
+          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:register`);
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -63,18 +62,15 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '邮箱验证码已失效，请重新生成～',
-                code: ResponseErrorCode.UserEmailCodeIsError,
+                code: ResponseCode.UserEmailCodeIsError,
               },
             };
           }
 
-          // 解密的密钥
-          const secretKey = 'E9CC7F1A9661D6824589279A8D465'; // 直接写死
-
           // 解密
           const decryptedPassword = decryptPassword(
             ctx.params.hash,
-            secretKey,
+            `${PASSWORD_SECRET_KEY}`,
           ).toString();
 
           // 生成盐值
@@ -100,7 +96,7 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '注册账号失败，请稍后重试～',
-                code: ResponseErrorCode.ServiceActionFaild,
+                code: ResponseCode.ServiceActionFaild,
               },
             };
           }
@@ -115,16 +111,14 @@ export default function register(star: any) {
 
           if (isSuccess) {
             // 直接删除验证码对应的缓存
-            await star.cacher.delete(
-              `verifyCode:${ctx.params.email};type:register`,
-            );
+            await star.cacher.delete(`verifyCode:${ctx.params.email};type:register`);
 
             return {
               status: 200,
               data: {
                 content: { userId },
                 message: '注册账号成功',
-                code: ResponseErrorCode.Success,
+                code: ResponseCode.Success,
               },
             };
           }
@@ -134,7 +128,7 @@ export default function register(star: any) {
             data: {
               content: null,
               message: '注册账号失败，请稍后重试～',
-              code: ResponseErrorCode.ServiceActionFaild,
+              code: ResponseCode.ServiceActionFaild,
             },
           };
         } catch (error) {
@@ -143,7 +137,7 @@ export default function register(star: any) {
             data: {
               content: null,
               message: `${error}`,
-              code: ResponseErrorCode.ServiceActionFaild,
+              code: ResponseCode.ServiceActionFaild,
             },
           };
         }

@@ -7,7 +7,7 @@ import _ from 'lodash';
 import { getAllConfigList } from 'db/mysql/apis/config';
 import { ConfigKeysMap, IConfig } from 'typings/config';
 import { IIPBlackListTableAttributes } from 'db/mysql/models/ipBlackList';
-import { IPAddressBanStatus, ResponseErrorCode } from 'typings/enum';
+import { IPAddressBanStatus, ResponseCode } from 'typings/enum';
 import { IPNotPermissionAccess, UnAuthorizedError, UserNotLoginError } from 'error';
 
 // 微服务名
@@ -202,6 +202,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         if (!token) {
           return Promise.reject(new UserNotLoginError());
         }
+
         // Verify JWT token
         return ctx.call('auth.resolveToken', { token }).then((user) => {
           if (!user)

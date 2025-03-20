@@ -1,14 +1,14 @@
-import { Erros } from "node-universe-gateway";
-import { ResponseErrorCode } from "typings/enum";
+import { Erros } from 'node-universe-gateway';
+import { ResponseCode } from 'typings/enum';
 
 /**
  * IP被被封禁报错
  */
 export class IPNotPermissionAccess extends Erros.StarClientError {
   constructor(type?: string, data?: any) {
-    super("该IP地址已被封禁", 404, type, {
+    super('该IP地址已被封禁', 404, type, {
       content: data,
-      code: ResponseErrorCode.IPNotAccess,
+      code: ResponseCode.IPNotAccess,
     });
   }
 }
@@ -18,7 +18,7 @@ export class IPNotPermissionAccess extends Erros.StarClientError {
  */
 export class RequestParamInvalidError extends Erros.StarClientError {
   constructor(type?: string, data?: any) {
-    super("Invalid request body ", 400, type, { content: data });
+    super('Invalid request body ', 400, type, { content: data });
   }
 }
 
@@ -27,7 +27,7 @@ export class RequestParamInvalidError extends Erros.StarClientError {
  */
 export class NoPermissionError extends Erros.StarClientError {
   constructor(type?: string, data?: any) {
-    super("No permission to access", 403, type, { content: data });
+    super('No permission to access', 403, type, { content: data });
   }
 }
 
@@ -36,9 +36,9 @@ export class NoPermissionError extends Erros.StarClientError {
  */
 export class UserNotLoginError extends Erros.StarClientError {
   constructor(type?: string, data?: any) {
-    super("请先登录~", 200, type, {
+    super('请先登录~', 200, type, {
       content: data,
-      code: ResponseErrorCode.NotLogin,
+      code: ResponseCode.NotLogin,
     });
   }
 }
@@ -48,9 +48,9 @@ export class UserNotLoginError extends Erros.StarClientError {
  */
 export class UnAuthorizedError extends Erros.StarClientError {
   constructor(type?: string, data?: any) {
-    super("Token无效", 200, type, {
+    super('Token无效', 200, type, {
       content: data,
-      code: ResponseErrorCode.ERR_INVALID_TOKEN,
+      code: ResponseCode.ERR_INVALID_TOKEN,
     });
   }
 }

@@ -2,6 +2,7 @@ import { HttpResponseItem } from 'typings/response';
 import verifyCode from './verifyCode';
 import register from './register';
 import login from './login';
+import rsa from './rsa';
 
 /**
  * 验证微服务的动作
@@ -10,11 +11,13 @@ const authAction = (star: any) => {
   const verifyCodeAction = verifyCode(star);
   const registerAction = register(star);
   const loginAction = login(star);
+  const rsaAction = rsa(star);
 
   return {
     ...verifyCodeAction,
     ...registerAction,
     ...loginAction,
+    ...rsaAction,
     'v1.qrCode.changeStatus': {
       metadata: {
         auth: true,

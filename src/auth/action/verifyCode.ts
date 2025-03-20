@@ -1,7 +1,7 @@
 import { HttpResponseItem } from 'typings/response';
 import { customAlphabet } from 'nanoid';
 import { RequestParamInvalidError } from 'error';
-import { ResponseErrorCode } from 'typings/enum';
+import { ResponseCode } from 'typings/enum';
 
 /**
  * 通过邮箱发送验证码，需要区分验证码的类型，例如：登录、注册、找回密码等。
@@ -51,7 +51,7 @@ export default function verifyCode(star: any) {
             data: {
               content: null,
               message: '验证码发送失败，请重试～',
-              code: ResponseErrorCode.ServiceActionFaild,
+              code: ResponseCode.ServiceActionFaild,
             },
           };
         }

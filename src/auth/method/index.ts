@@ -1,14 +1,65 @@
 import { verifyCodeOptions } from 'typings/auth';
 import nodemailer from 'nodemailer';
+import jwt from 'jsonwebtoken';
+import { queryConfigs } from 'db/mysql/apis/config';
 
 /**
  * 验证微服务的方法
  */
 const authMethod = (star: any) => {
   return {
-    // 验证token是否有效
-    resolveToken(ctx: any, route, req, res) {
-      return new Promise((resolve, reject) => {});
+    // 生成token
+    async generateToken(options: { userId: string }) {
+      try {
+        if (!options.userId) return;
+
+        const payload = { userId: options.userId };
+
+        // 获取密钥
+        const result = (await queryConfigs(['rsa'])) || [];
+        const rsa = JSON.parse(result[0].value);
+
+        if (!rsa) return;
+
+        const privateKey = rsa.privateKey;
+
+        return jwt.sign(payload, privateKey, { expiresIn: '2h', algorithm: 'RS256' });
+      } catch (error) {
+        star.logger.error('generateToken', '生成token失败', error);
+      }
+    },
+    // 验证token
+    async resolveToken(token: string) {
+      try {
+        if (!token) return;
+
+        // 获取公钥
+        const result = (await queryConfigs(['rsa'])) || [];
+        const rsa = JSON.parse(result[0].value);
+
+        if (!rsa) return;
+
+        const publicKey = rsa.publicKey;
+
+        const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] }) as {
+          userId: string;
+          exp: number;
+        };
+
+        // 获取过期时间
+        const expirationTime = decoded.exp * 1000; // 转换为毫秒
+        const currentTime = Date.now();
+
+        return { userId: decoded.userId, expirationTime, isExpired: currentTime > expirationTime };
+      } catch (error: any) {
+        if (error.name === 'TokenExpiredError') {
+          star.logger.error('resolveToken', 'token已过期', error);
+          // 处理 token 过期的逻辑，例如返回特定的错误信息
+          return { error: 'Token has expired' };
+        } else {
+          star.logger.error('resolveToken', '验证token失败', error);
+        }
+      }
     },
     // 发送验证码
     sendVerifyCodeEmail(params: {

@@ -4,16 +4,13 @@
 import { HttpResponseItem } from 'typings/response';
 import { customAlphabet } from 'nanoid';
 import { RequestParamInvalidError } from 'error';
-import {
-  findEmailAuthByEmail,
-  findEmailIsExist,
-  saveOrUpdateEmailAuth,
-} from 'db/mysql/apis/auth';
+import { findEmailAuthByEmail, findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
 import crypto from 'crypto';
 import { decryptPassword } from 'utils';
 import { generateUserId } from 'utils/generateUserId';
 import CryptoJS from 'crypto-js';
-import { ResponseErrorCode } from 'typings/enum';
+import { ResponseCode } from 'typings/enum';
+import { PASSWORD_SECRET_KEY } from 'config';
 
 export default function register(star: any) {
   return {
@@ -51,15 +48,13 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '邮箱错误或未注册',
-                code: ResponseErrorCode.UserEmailError,
+                code: ResponseCode.UserEmailError,
               },
             };
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(
-            `verifyCode:${ctx.params.email};type:login`,
-          );
+          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:login`);
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -67,18 +62,15 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '邮箱验证码已失效，请重新生成～',
-                code: ResponseErrorCode.UserEmailError,
+                code: ResponseCode.UserEmailError,
               },
             };
           }
 
-          // 解密的密钥
-          const secretKey = 'E9CC7F1A9661D6824589279A8D465'; // 直接写死
-
           // 解密
           const decryptedPassword = decryptPassword(
             ctx.params.hash,
-            secretKey,
+            `${PASSWORD_SECRET_KEY}`,
           ).toString();
 
           // 查询数据库获取盐值和加密后的密码
@@ -90,7 +82,7 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '服务查询报错',
-                code: ResponseErrorCode.ServiceActionFaild,
+                code: ResponseCode.ServiceActionFaild,
               },
             };
 
@@ -105,7 +97,7 @@ export default function register(star: any) {
               data: {
                 content: null,
                 message: '密码错误',
-                code: ResponseErrorCode.UserPasswordError,
+                code: ResponseCode.UserPasswordError,
               },
             };
           }
@@ -117,7 +109,7 @@ export default function register(star: any) {
             data: {
               content: null,
               message: '注册账号失败，请稍后重试～',
-              code: ResponseErrorCode.ServiceActionFaild,
+              code: ResponseCode.ServiceActionFaild,
             },
           };
         } catch (error) {
@@ -126,7 +118,7 @@ export default function register(star: any) {
             data: {
               content: null,
               message: `${error}`,
-              code: ResponseErrorCode.ServiceActionFaild,
+              code: ResponseCode.ServiceActionFaild,
             },
           };
         }

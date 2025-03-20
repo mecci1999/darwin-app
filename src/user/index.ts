@@ -3,7 +3,7 @@ import Universe from 'node-universe/dist';
 import { pinoLoggerOptions } from 'config';
 import * as dbConnections from '../db/mysql/index';
 import { HttpResponseItem } from '../typings/response';
-import { ResponseErrorCode } from 'typings/enum';
+import { ResponseCode } from 'typings/enum';
 import { customAlphabet } from 'nanoid';
 
 // 微服务名
@@ -69,7 +69,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               data: {
                 content: null,
                 message: 'Invalid request body',
-                code: ResponseErrorCode.ParamsError,
+                code: ResponseCode.ParamsError,
               },
             };
           }
@@ -94,7 +94,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             data: {
               message: 'user is creating~',
               content: { user },
-              code: ResponseErrorCode.Success,
+              code: ResponseCode.Success,
             },
           };
         },

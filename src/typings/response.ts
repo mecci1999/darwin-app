@@ -1,4 +1,4 @@
-import { ResponseErrorCode } from "./enum";
+import { ResponseCode } from './enum';
 
 /**
  * 请求返回的响应类型
@@ -6,7 +6,7 @@ import { ResponseErrorCode } from "./enum";
 export interface HttpResponseItem {
   status: number; // http状态码
   data: {
-    code?: ResponseErrorCode | number; // 响应码
+    code?: ResponseCode | number; // 响应码
     content?: any; // 响应主体
     message?: string; // 消息
   };
