@@ -17,7 +17,7 @@ export async function findEmailIsExist(email: string): Promise<boolean> {
   return !!result;
 }
 
-// 新增数据
+// 新增邮箱验证信息
 export async function saveOrUpdateEmailAuth(params: {
   email: string;
   passwordHash: string;
@@ -30,10 +30,28 @@ export async function saveOrUpdateEmailAuth(params: {
 
     return await model
       .bulkCreate([data], {
-        updateOnDuplicate: ['email', 'userId', 'passwordHash', 'salt', 'isVerified'],
+        updateOnDuplicate: [
+          'email',
+          'userId',
+          'passwordHash',
+          'salt',
+          'isVerified',
+        ],
       })
       .then(() => true);
   } catch (error) {
     console.log(error);
   }
+}
+
+// 根据邮箱获取用户邮箱验证表中的信息
+export async function findEmailAuthByEmail(email: string) {
+  const model = await mainConnection.getModel(DataBaseTableNames.EmailAuth);
+
+  const result = await model.findOne({
+    where: { email },
+    attributes: ['salt', 'passwordHash'],
+  });
+
+  return result;
 }

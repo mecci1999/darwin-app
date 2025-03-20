@@ -1,9 +1,7 @@
 import { HttpResponseItem } from 'typings/response';
-import { customAlphabet } from 'nanoid';
 import verifyCode from './verifyCode';
 import register from './register';
-import { handlerActionSchema } from 'utils/base';
-import CryptoJS from 'crypto-js';
+import login from './login';
 
 /**
  * 验证微服务的动作
@@ -11,43 +9,12 @@ import CryptoJS from 'crypto-js';
 const authAction = (star: any) => {
   const verifyCodeAction = verifyCode(star);
   const registerAction = register(star);
-
-  // // 将相同版本的动作合并到一个数组中，直接生成最后的对象
-  // const actions = handlerActionSchema([verifyCodeAction]);
-
-  // return Object.keys(actions).reduce((previous, current) => {
-  //   const value = actions[current];
-  //   value.forEach((item) => {
-  //     previous[`${current}.${item.name}`] = item.action;
-  //   });
-
-  //   return previous;
-  // }, {});
+  const loginAction = login(star);
 
   return {
     ...verifyCodeAction,
     ...registerAction,
-    'v1.login': {
-      metadata: {
-        auth: false,
-      },
-      async handler(ctx, route, req, res) {
-        // 先判断验证码是否正确
-        // 在判断数据库中是否存在该用户，调用user服务中的查询用户方法
-        // 如果不存在该用户，返回对应的信息，并交给前端进行跳转
-        // const password = CryptoJS.AES.encrypt(
-        //   'leo19870624',
-        //   'E9CC7F1A9661D6824589279A8D465',
-        // ).toString();
-        // star.logger.info(password);
-
-        // 密码登录接口，再进行密码验证
-        return {
-          status: 200,
-          data: { message: '', content: null },
-        };
-      },
-    },
+    ...loginAction,
     'v1.qrCode.changeStatus': {
       metadata: {
         auth: true,

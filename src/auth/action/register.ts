@@ -53,7 +53,9 @@ export default function register(star: any) {
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:register`);
+          const verifyCode = await star.cacher.get(
+            `verifyCode:${ctx.params.email};type:register`,
+          );
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -70,7 +72,10 @@ export default function register(star: any) {
           const secretKey = 'E9CC7F1A9661D6824589279A8D465'; // 直接写死
 
           // 解密
-          const decryptedPassword = decryptPassword(ctx.params.hash, secretKey).toString();
+          const decryptedPassword = decryptPassword(
+            ctx.params.hash,
+            secretKey,
+          ).toString();
 
           // 生成盐值
           const salt = crypto.randomBytes(16).toString('hex');
@@ -84,7 +89,10 @@ export default function register(star: any) {
           const userId = generateUserId();
 
           // 调用user服务，新增用户动作
-          const createUser = await ctx.call('user.v1.create', { userId, source: 'email' });
+          const createUser = await ctx.call('user.v1.create', {
+            userId,
+            source: 'email',
+          });
 
           if (createUser.status !== 201) {
             return {
@@ -107,7 +115,9 @@ export default function register(star: any) {
 
           if (isSuccess) {
             // 直接删除验证码对应的缓存
-            await star.cacher.delete(`verifyCode:${ctx.params.email};type:register`);
+            await star.cacher.delete(
+              `verifyCode:${ctx.params.email};type:register`,
+            );
 
             return {
               status: 200,

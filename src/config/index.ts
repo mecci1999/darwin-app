@@ -1,8 +1,14 @@
 /**
  * 配置相关的方法
  */
-import { rotate } from "pino-rotate-file";
-import moment from "moment-timezone";
+import { rotate } from 'pino-rotate-file';
+import moment from 'moment-timezone';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
+
+// 相关配置
+export const { MYSQL_HOST } = process.env;
 
 /**
  * pino日志配置
@@ -18,7 +24,7 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
         // [2019-08-31 08:40:53.481] INFO STAR: Universe is creating...
         customPrettifiers: {
           time: () =>
-            `[${moment().tz("Asia/Shanghai").format("YYYY-MM-DD HH:mm:ss:SSS")}]`,
+            `[${moment().tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss:SSS')}]`,
           level: (inputData, key, log, extras) => `${extras.labelColorized}`,
           name: (value) => `${value}`,
           pid: (value) => `PID-${value}`,
@@ -40,7 +46,7 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
       .then((_destination) => {
         const options = {
           name: appName,
-          type: "pino",
+          type: 'pino',
           options: {
             pino: {
               options: {
@@ -66,14 +72,14 @@ export function pinoLoggerOptions(appName: string): Promise<any> {
                   logMethod(inputArgs: any[], method, level) {
                     if (inputArgs.length > 1) {
                       let result: any = {
-                        msg: "",
+                        msg: '',
                       };
 
                       for (const arg of inputArgs) {
                         // 排除undefined和null类型
                         if (!arg) {
                           continue;
-                        } else if (typeof arg === "object") {
+                        } else if (typeof arg === 'object') {
                           result.err = arg;
                         } else {
                           result.msg = result.msg + arg;

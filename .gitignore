@@ -4,3 +4,4 @@ node_modules
 logs
 mysql_data
 file
+.env.production

@@ -4,6 +4,7 @@
 import * as SequelizeStatic from 'sequelize';
 import deepmerge from 'deepmerge';
 import getModels from './models';
+import { MYSQL_HOST } from 'config/index';
 
 export class DataBaseConnectionManager {
   public static SequelizeStatic = SequelizeStatic;
@@ -30,7 +31,7 @@ export class DataBaseConnectionManager {
       deepmerge(
         {
           dialect: 'mysql',
-          host: 'localhost',
+          host: MYSQL_HOST,
           port: 3306,
           database: 'darwin_app',
           username: 'darwin',
@@ -59,7 +60,9 @@ export class DataBaseConnectionManager {
    * @param connection
    */
   public closeConnection(connection) {
-    const index = this.connections.findIndex((conn) => conn.connection === connection);
+    const index = this.connections.findIndex(
+      (conn) => conn.connection === connection,
+    );
     if (index !== -1) {
       this.connections[index].connection.close();
       this.connections.splice(index, 1);
