@@ -1,7 +1,7 @@
-import { HttpResponseItem } from 'typings/response';
-import { customAlphabet } from 'nanoid';
 import { RequestParamInvalidError } from 'error';
+import { customAlphabet } from 'nanoid';
 import { ResponseCode } from 'typings/enum';
+import { HttpResponseItem } from 'typings/response';
 
 /**
  * 通过邮箱发送验证码，需要区分验证码的类型，例如：登录、注册、找回密码等。

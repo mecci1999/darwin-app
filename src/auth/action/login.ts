@@ -1,16 +1,13 @@
 /**
  * 用户注册接口
  */
-import { HttpResponseItem } from 'typings/response';
-import { customAlphabet } from 'nanoid';
-import { RequestParamInvalidError } from 'error';
-import { findEmailAuthByEmail, findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
-import crypto from 'crypto';
-import { decryptPassword } from 'utils';
-import { generateUserId } from 'utils/generateUserId';
-import CryptoJS from 'crypto-js';
-import { ResponseCode } from 'typings/enum';
 import { PASSWORD_SECRET_KEY } from 'config';
+import crypto from 'crypto';
+import { findEmailAuthByEmail, findEmailIsExist } from 'db/mysql/apis/auth';
+import { RequestParamInvalidError } from 'error';
+import { ResponseCode } from 'typings/enum';
+import { HttpResponseItem } from 'typings/response';
+import { decryptPassword } from 'utils';
 
 export default function register(star: any) {
   return {
@@ -18,7 +15,7 @@ export default function register(star: any) {
       metadata: {
         auth: false,
       },
-      async handler(ctx: any): Promise<HttpResponseItem> {
+      async handler(ctx: any, route, req, res): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.hash || !ctx.params.code) {
@@ -54,7 +51,9 @@ export default function register(star: any) {
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:login`);
+          const verifyCode = await star.cacher.get(
+            `verifyCode:${ctx.params.email};type:login`,
+          );
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -103,6 +102,20 @@ export default function register(star: any) {
           }
 
           // 生成token
+          const token = (this as any).generateToken({ userId: data.userId });
+
+          if (token) {
+            res.
+
+            return {
+              status: 200,
+              data: {
+                content: null,
+                message: '登录成功',
+                code: ResponseCode.Success,
+              },
+            };
+          }
 
           return {
             status: 200,

@@ -1,16 +1,14 @@
 /**
  * 用户注册接口
  */
-import { HttpResponseItem } from 'typings/response';
-import { customAlphabet } from 'nanoid';
-import { RequestParamInvalidError } from 'error';
-import { findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
+import { PASSWORD_SECRET_KEY } from 'config';
 import crypto from 'crypto';
+import { findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
+import { RequestParamInvalidError } from 'error';
+import { ResponseCode } from 'typings/enum';
+import { HttpResponseItem } from 'typings/response';
 import { decryptPassword } from 'utils';
 import { generateUserId } from 'utils/generateUserId';
-import CryptoJS from 'crypto-js';
-import { ResponseCode } from 'typings/enum';
-import { PASSWORD_SECRET_KEY } from 'config';
 
 export default function register(star: any) {
   return {
@@ -54,7 +52,9 @@ export default function register(star: any) {
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:register`);
+          const verifyCode = await star.cacher.get(
+            `verifyCode:${ctx.params.email};type:register`,
+          );
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -111,7 +111,9 @@ export default function register(star: any) {
 
           if (isSuccess) {
             // 直接删除验证码对应的缓存
-            await star.cacher.delete(`verifyCode:${ctx.params.email};type:register`);
+            await star.cacher.delete(
+              `verifyCode:${ctx.params.email};type:register`,
+            );
 
             return {
               status: 200,

@@ -1,8 +1,7 @@
-import { HttpResponseItem } from 'typings/response';
-import verifyCode from './verifyCode';
-import register from './register';
 import login from './login';
+import register from './register';
 import rsa from './rsa';
+import verifyCode from './verifyCode';
 
 /**
  * 验证微服务的动作

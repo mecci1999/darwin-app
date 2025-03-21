@@ -1,7 +1,7 @@
-import { verifyCodeOptions } from 'typings/auth';
-import nodemailer from 'nodemailer';
-import jwt from 'jsonwebtoken';
 import { queryConfigs } from 'db/mysql/apis/config';
+import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
+import { verifyCodeOptions } from 'typings/auth';
 
 /**
  * 验证微服务的方法
@@ -23,7 +23,10 @@ const authMethod = (star: any) => {
 
         const privateKey = rsa.privateKey;
 
-        return jwt.sign(payload, privateKey, { expiresIn: '2h', algorithm: 'RS256' });
+        return jwt.sign(payload, privateKey, {
+          expiresIn: '2h',
+          algorithm: 'RS256',
+        });
       } catch (error) {
         star.logger.error('generateToken', '生成token失败', error);
       }
@@ -41,7 +44,9 @@ const authMethod = (star: any) => {
 
         const publicKey = rsa.publicKey;
 
-        const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] }) as {
+        const decoded = jwt.verify(token, publicKey, {
+          algorithms: ['RS256'],
+        }) as {
           userId: string;
           exp: number;
         };
@@ -50,7 +55,11 @@ const authMethod = (star: any) => {
         const expirationTime = decoded.exp * 1000; // 转换为毫秒
         const currentTime = Date.now();
 
-        return { userId: decoded.userId, expirationTime, isExpired: currentTime > expirationTime };
+        return {
+          userId: decoded.userId,
+          expirationTime,
+          isExpired: currentTime > expirationTime,
+        };
       } catch (error: any) {
         if (error.name === 'TokenExpiredError') {
           star.logger.error('resolveToken', 'token已过期', error);
@@ -84,10 +93,11 @@ const authMethod = (star: any) => {
             // 获取redis缓存
             if (cacheCode) {
               // 存在缓存
-              star.logger.info(`验证码存在缓存`);
+              star.logger.info(`验证码存在缓存`, `email: ${params.email}`);
               resolve({
                 code: 200,
-                message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
+                message:
+                  '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
               });
             } else {
               // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟

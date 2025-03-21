@@ -1,4 +1,4 @@
-import { GenericObject } from 'typings/base';
+import { GenericObject } from 'typings/index';
 import { cloneDeep } from 'lodash';
 
 export function handlerActionSchema(actions: Array<GenericObject>) {

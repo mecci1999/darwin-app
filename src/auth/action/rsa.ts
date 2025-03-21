@@ -1,8 +1,7 @@
-import { HttpResponseItem } from 'typings/response';
-import { customAlphabet } from 'nanoid';
-import { ResponseCode } from 'typings/enum';
 import { generateKeyPairSync } from 'crypto';
 import { queryConfigs, saveOrUpdateConfigs } from 'db/mysql/apis/config';
+import { ResponseCode } from 'typings/enum';
+import { HttpResponseItem } from 'typings/response';
 
 /**
  * RSA密钥对相关动作
@@ -54,8 +53,14 @@ export default function rsa(star: any) {
           });
 
           // 生成RSA密钥对
-          const publicKeyBuffer = publicKey.export({ type: 'spki', format: 'pem' });
-          const privateKeyBuffer = privateKey.export({ type: 'pkcs8', format: 'pem' });
+          const publicKeyBuffer = publicKey.export({
+            type: 'spki',
+            format: 'pem',
+          });
+          const privateKeyBuffer = privateKey.export({
+            type: 'pkcs8',
+            format: 'pem',
+          });
 
           // 将密钥对转换成字符串
           const publicKeyText = publicKeyBuffer.toString('utf-8');
@@ -64,7 +69,9 @@ export default function rsa(star: any) {
           const data = { publicKey: publicKeyText, privateKey: privateKeyText };
 
           // 将密钥存储至config表中
-          await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(data) }]);
+          await saveOrUpdateConfigs([
+            { key: 'rsa', value: JSON.stringify(data) },
+          ]);
 
           return {
             status: 200,
