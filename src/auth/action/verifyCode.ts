@@ -2,18 +2,26 @@ import { RequestParamInvalidError } from 'error';
 import { customAlphabet } from 'nanoid';
 import { ResponseCode } from 'typings/enum';
 import { HttpResponseItem } from 'typings/response';
+import { Context, Star } from 'node-universe';
+import { GatewayResponse, IncomingRequest, Route } from 'typings';
 
 /**
  * 通过邮箱发送验证码，需要区分验证码的类型，例如：登录、注册、找回密码等。
  */
-export default function verifyCode(star: any) {
+export default function verifyCode(star: Star) {
   return {
     'v1.verifyCode': {
       metadata: {
         auth: false,
       },
       // 获取验证码，需要将验证码存储到redis中
-      async handler(ctx: any): Promise<HttpResponseItem> {
+      async handler(
+        ctx: Context,
+        route: Route,
+        req: IncomingRequest,
+        res: GatewayResponse,
+        data: any,
+      ): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.type) {
@@ -33,7 +41,7 @@ export default function verifyCode(star: any) {
           };
 
           // 发送邮件
-          const res = await (this as any).sendVerifyCodeEmail({
+          const result = await (this as any).sendVerifyCodeEmail({
             email: ctx.params.email,
             type: ctx.params.type,
             options: mailOptions,
@@ -42,10 +50,10 @@ export default function verifyCode(star: any) {
 
           return {
             status: 200,
-            data: { content: null, message: res.message, code: res.code },
+            data: { content: null, message: result.message, code: result.code },
           };
         } catch (error) {
-          star.logger.error(error);
+          star.logger?.error(error);
           return {
             status: 500,
             data: {

@@ -5,17 +5,19 @@ import { PASSWORD_SECRET_KEY } from 'config';
 import crypto from 'crypto';
 import { findEmailAuthByEmail, findEmailIsExist } from 'db/mysql/apis/auth';
 import { RequestParamInvalidError } from 'error';
+import { Context, Star } from 'node-universe';
+import { GatewayResponse, IncomingRequest, Route } from 'typings';
 import { ResponseCode } from 'typings/enum';
 import { HttpResponseItem } from 'typings/response';
 import { decryptPassword } from 'utils';
 
-export default function register(star: any) {
+export default function register(star: Star) {
   return {
     'v1.login': {
       metadata: {
         auth: false,
       },
-      async handler(ctx: any, route, req, res): Promise<HttpResponseItem> {
+      async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.hash || !ctx.params.code) {
@@ -51,9 +53,7 @@ export default function register(star: any) {
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(
-            `verifyCode:${ctx.params.email};type:login`,
-          );
+          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:login`);
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -101,11 +101,14 @@ export default function register(star: any) {
             };
           }
 
+          star.logger?.debug('login', data);
+
           // 生成token
-          const token = (this as any).generateToken({ userId: data.userId });
+          const token = await (this as any).generateToken({ userId: data.userId });
 
           if (token) {
-            res.
+            // 设置cookies
+            (ctx.meta as any).token = token;
 
             return {
               status: 200,

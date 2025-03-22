@@ -1,19 +1,22 @@
 import { queryConfigs } from 'db/mysql/apis/config';
 import jwt from 'jsonwebtoken';
+import { Star } from 'node-universe';
 import nodemailer from 'nodemailer';
 import { verifyCodeOptions } from 'typings/auth';
 
 /**
  * 验证微服务的方法
  */
-const authMethod = (star: any) => {
+const authMethod = (star: Star) => {
   return {
     // 生成token
-    async generateToken(options: { userId: string }) {
+    async generateToken(params: { userId: string }) {
       try {
-        if (!options.userId) return;
+        star.logger?.debug('generateToken', 'params:', params);
 
-        const payload = { userId: options.userId };
+        if (!params.userId) return;
+
+        const payload = { userId: params.userId };
 
         // 获取密钥
         const result = (await queryConfigs(['rsa'])) || [];
@@ -23,12 +26,14 @@ const authMethod = (star: any) => {
 
         const privateKey = rsa.privateKey;
 
+        star.logger?.debug('generateToken', privateKey);
+
         return jwt.sign(payload, privateKey, {
           expiresIn: '2h',
           algorithm: 'RS256',
         });
       } catch (error) {
-        star.logger.error('generateToken', '生成token失败', error);
+        star.logger?.error('generateToken', '生成token失败', error);
       }
     },
     // 验证token
@@ -62,11 +67,11 @@ const authMethod = (star: any) => {
         };
       } catch (error: any) {
         if (error.name === 'TokenExpiredError') {
-          star.logger.error('resolveToken', 'token已过期', error);
+          star.logger?.error('resolveToken', 'token已过期', error);
           // 处理 token 过期的逻辑，例如返回特定的错误信息
           return { error: 'Token has expired' };
         } else {
-          star.logger.error('resolveToken', '验证token失败', error);
+          star.logger?.error('resolveToken', '验证token失败', error);
         }
       }
     },
@@ -93,11 +98,10 @@ const authMethod = (star: any) => {
             // 获取redis缓存
             if (cacheCode) {
               // 存在缓存
-              star.logger.info(`验证码存在缓存`, `email: ${params.email}`);
+              star.logger?.info(`验证码存在缓存`, `email: ${params.email}`);
               resolve({
                 code: 200,
-                message:
-                  '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
+                message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
               });
             } else {
               // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
@@ -109,7 +113,7 @@ const authMethod = (star: any) => {
 
               transporter.sendMail(params.options as any, (error) => {
                 if (error) {
-                  star.logger.error('发送邮件失败', params, error);
+                  star.logger?.error('发送邮件失败', params, error);
                   reject(error);
                 } else {
                   resolve({ code: 200, message: '验证码已发送' });

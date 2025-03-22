@@ -65,7 +65,7 @@ class MainDatabaseConnection {
    */
   public async destroy() {
     if (this.connection) {
-      await databaseConnectionManager.closeConnection(this.connection);
+      databaseConnectionManager.closeConnection(this.connection);
       this.connection = null;
       this.promise = null;
     }

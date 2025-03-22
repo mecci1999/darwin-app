@@ -30,13 +30,7 @@ export async function saveOrUpdateEmailAuth(params: {
 
     return await model
       .bulkCreate([data], {
-        updateOnDuplicate: [
-          'email',
-          'userId',
-          'passwordHash',
-          'salt',
-          'isVerified',
-        ],
+        updateOnDuplicate: ['email', 'userId', 'passwordHash', 'salt', 'isVerified'],
       })
       .then(() => true);
   } catch (error) {
@@ -50,8 +44,8 @@ export async function findEmailAuthByEmail(email: string) {
 
   const result = await model.findOne({
     where: { email },
-    attributes: ['salt', 'passwordHash'],
+    attributes: ['salt', 'passwordHash', 'userId'],
   });
 
-  return result;
+  return result ? result.dataValues : null;
 }

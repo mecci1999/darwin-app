@@ -1,5 +1,5 @@
 import { queryAllUsers, saveOrUpdateUsers } from 'db/mysql/apis/user';
-import Universe from 'node-universe/dist';
+import { Star } from 'node-universe';
 import { generateUserId } from 'utils/generateUserId';
 import { pinoLoggerOptions } from 'config';
 import * as dbConnections from '../db/mysql/index';
@@ -132,7 +132,7 @@ const processBatch = async (batch: any[], writepath: string, cookie: string) => 
 };
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
-  const star = new Universe.Star({
+  const star = new Star({
     namespace: 'darwin-app',
     transporter: {
       type: 'TCP',

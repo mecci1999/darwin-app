@@ -3733,10 +3733,10 @@ node-gyp@^11.0.0:
     tar "^7.4.3"
     which "^5.0.0"
 
-node-universe-gateway@^1.0.5:
-  version "1.0.5"
-  resolved "https://registry.yarnpkg.com/node-universe-gateway/-/node-universe-gateway-1.0.5.tgz#f24c8f1708f1294f71cfdda6f610e0fb004429d2"
-  integrity sha512-0YWDk6jID4qd0dv8lFBq9GUzk+lsdtoguUrvV3F50TPuVVB+eWEHV2ixL/nV1gVk3BQAMGXLR5F+dy4rqbBG1A==
+node-universe-gateway@^1.0.6:
+  version "1.0.6"
+  resolved "https://registry.yarnpkg.com/node-universe-gateway/-/node-universe-gateway-1.0.6.tgz#183dfed08d4f3594c886bcf44dfdea2bfb483bbd"
+  integrity sha512-qvMn9D4Nhn06pedeB+dDOsNYd4YYn8RhBwj7ZdIsIkjRFNUvwHfe2+T+taIyV+9V6xBr3kQSbDky5AoCaL7jyg==
   dependencies:
     "@fastify/busboy" "^2.1.0"
     body-parser "^1.20.2"
@@ -3747,15 +3747,15 @@ node-universe-gateway@^1.0.5:
     isstream "^0.1.2"
     kleur "^4.1.5"
     lodash "^4.17.21"
-    node-universe "^1.0.3"
+    node-universe "^1.4.2"
     path-to-regexp "^6.2.1"
     qs "^6.11.2"
     serve-static "^1.15.0"
 
-node-universe@^1.0.3, node-universe@^1.3.0:
-  version "1.3.0"
-  resolved "https://registry.yarnpkg.com/node-universe/-/node-universe-1.3.0.tgz#c8834b86ca4cd854a3c20e4802f6ef108b7e0223"
-  integrity sha512-qEi6GafpYZ9FldSb2IFluYV7MrM3jGAlXfDBgnBfkHK/WKECuY+2swjJOLqGxNcymPzQ7I9lSuAT6cbF6Gx/Tw==
+node-universe@^1.4.2:
+  version "1.4.2"
+  resolved "https://registry.yarnpkg.com/node-universe/-/node-universe-1.4.2.tgz#d98e7b6ff7a36c9aa011fa55b3d2eac3883681b2"
+  integrity sha512-PYcYM6h92+ukt3BlRXfHCTWfqsxDT4LaBX/S+GX8q/uBzEtKfnK4dpNZBdjGhcF/US6W7j986FEKXtIE319Q4A==
   dependencies:
     cbor-x "^1.5.3"
     crypto "^1.0.1"

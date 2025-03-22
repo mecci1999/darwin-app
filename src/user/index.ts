@@ -1,5 +1,5 @@
 import { queryAllUsers, saveOrUpdateUsers } from 'db/mysql/apis/user';
-import Universe from 'node-universe/dist';
+import { Star } from 'node-universe/dist';
 import { pinoLoggerOptions } from 'config';
 import * as dbConnections from '../db/mysql/index';
 import { HttpResponseItem } from '../typings/response';
@@ -10,7 +10,7 @@ import { customAlphabet } from 'nanoid';
 const appName = 'user';
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
-  const star = new Universe.Star({
+  const star = new Star({
     namespace: 'darwin-app',
     transporter: {
       type: 'KAFKA',

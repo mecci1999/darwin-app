@@ -1,3 +1,4 @@
+import { Star } from 'node-universe';
 import login from './login';
 import register from './register';
 import rsa from './rsa';
@@ -6,7 +7,7 @@ import verifyCode from './verifyCode';
 /**
  * 验证微服务的动作
  */
-const authAction = (star: any) => {
+const authAction = (star: Star) => {
   const verifyCodeAction = verifyCode(star);
   const registerAction = register(star);
   const loginAction = login(star);

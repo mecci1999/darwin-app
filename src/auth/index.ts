@@ -9,7 +9,7 @@
  * 4、注册服务
  */
 import { pinoLoggerOptions } from 'config';
-import Universe from 'node-universe';
+import { Star } from 'node-universe';
 import authMethod from './method/index';
 import authAction from './action/index';
 // import authEvent from './event/index';
@@ -19,7 +19,7 @@ import * as dbConnections from '../db/mysql/index';
 const appName = 'auth';
 
 pinoLoggerOptions(appName).then((pinoOptions) => {
-  const star = new Universe.Star({
+  const star = new Star({
     namespace: 'darwin-app',
     transporter: {
       type: 'KAFKA',
