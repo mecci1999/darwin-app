@@ -124,7 +124,7 @@ export default function register(star: Star) {
             status: 200,
             data: {
               content: null,
-              message: '注册账号失败，请稍后重试～',
+              message: '登录失败，请稍后重试～',
               code: ResponseCode.ServiceActionFaild,
             },
           };

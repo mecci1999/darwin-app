@@ -12,21 +12,23 @@ const authMethod = (star: Star) => {
     // 生成token
     async generateToken(params: { userId: string }) {
       try {
-        star.logger?.debug('generateToken', 'params:', params);
-
         if (!params.userId) return;
 
         const payload = { userId: params.userId };
 
         // 获取密钥
         const result = (await queryConfigs(['rsa'])) || [];
+
+        if (result.length === 0) {
+          star.logger?.error('generateToken', '获取rsa密钥对失败');
+          return;
+        }
+
         const rsa = JSON.parse(result[0].value);
 
         if (!rsa) return;
 
         const privateKey = rsa.privateKey;
-
-        star.logger?.debug('generateToken', privateKey);
 
         return jwt.sign(payload, privateKey, {
           expiresIn: '2h',
