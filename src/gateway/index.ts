@@ -100,12 +100,18 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             req: IncomingRequest,
             res: GatewayResponse,
           ) {
+            (ctx.meta as any).req = {
+              userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
+            };
+
             if (req?.socket?.remoteAddress) {
               // 查看请求的ip地址是否被黑名单
               if (ips.includes(req.socket.remoteAddress)) {
                 // 被黑名单禁用，直接返回404状态码
                 throw new IPNotPermissionAccess();
               }
+
+              (ctx.meta as any).req = { ...(ctx.meta as any).req, ip: req.socket.remoteAddress };
             }
 
             // 获取服务注册表信息，通过服务名获取到该服务是否需要token校验
@@ -114,6 +120,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               (item) =>
                 item.name === `${req.$params.service}.${req.$params.version}.${req.$params.action}`,
             );
+
             // 需要token校验的接口
             if (!!action?.action?.metadata?.auth) {
               // 从cookie中获取token

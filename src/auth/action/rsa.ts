@@ -2,18 +2,19 @@ import { generateKeyPairSync } from 'crypto';
 import { queryConfigs, saveOrUpdateConfigs } from 'db/mysql/apis/config';
 import { ResponseCode } from 'typings/enum';
 import { HttpResponseItem } from 'typings/response';
+import { Star, Context } from 'node-universe';
 
 /**
  * RSA密钥对相关动作
  */
-export default function rsa(star: any) {
+export default function rsa(star: Star) {
   return {
-    'v1.rsaGet': {
+    'v1.rsa.getKey': {
       metadata: {
         auth: false,
       },
       // 获取rsa密钥对
-      async handler(ctx: any): Promise<HttpResponseItem> {
+      async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const result = (await queryConfigs(['rsa'])) || [];
 
@@ -28,7 +29,7 @@ export default function rsa(star: any) {
             },
           };
         } catch (error) {
-          star.logger.error(error);
+          star.logger?.error(error);
           return {
             status: 500,
             data: {
@@ -41,7 +42,7 @@ export default function rsa(star: any) {
       },
     },
     // 创建并更新密钥对
-    'v1.rsaSave': {
+    'v1.rsa.save': {
       metadata: {
         auth: false,
       },
@@ -69,9 +70,7 @@ export default function rsa(star: any) {
           const data = { publicKey: publicKeyText, privateKey: privateKeyText };
 
           // 将密钥存储至config表中
-          await saveOrUpdateConfigs([
-            { key: 'rsa', value: JSON.stringify(data) },
-          ]);
+          await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(data) }]);
 
           return {
             status: 200,
@@ -82,7 +81,7 @@ export default function rsa(star: any) {
             },
           };
         } catch (error) {
-          star.logger.error(error);
+          star.logger?.error(error);
           return {
             status: 500,
             data: {

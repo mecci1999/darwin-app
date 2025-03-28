@@ -17,7 +17,7 @@ export async function findEmailIsExist(email: string): Promise<boolean> {
   return !!result;
 }
 
-// 新增邮箱验证信息
+// 新增或更新邮箱验证信息
 export async function saveOrUpdateEmailAuth(params: {
   email: string;
   passwordHash: string;
@@ -45,6 +45,18 @@ export async function findEmailAuthByEmail(email: string) {
   const result = await model.findOne({
     where: { email },
     attributes: ['salt', 'passwordHash', 'userId'],
+  });
+
+  return result ? result.dataValues : null;
+}
+
+// 根据UserId获取用户邮箱验证表中的信息
+export async function findEmailAuthByUserId(userId: string) {
+  const model = await mainConnection.getModel(DataBaseTableNames.EmailAuth);
+
+  const result = await model.findOne({
+    where: { userId },
+    attributes: ['salt', 'passwordHash', 'email'],
   });
 
   return result ? result.dataValues : null;

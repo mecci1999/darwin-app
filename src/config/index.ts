@@ -16,6 +16,7 @@ export const {
   MYSQL_PASSWORD,
   PASSWORD_SECRET_KEY,
   TOKEN_SECRET_KET,
+  QR_CODE_EXPIRE,
 } = process.env;
 
 /**

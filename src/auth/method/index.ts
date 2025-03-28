@@ -78,13 +78,13 @@ const authMethod = (star: Star) => {
       }
     },
     // 发送验证码
-    sendVerifyCodeEmail(params: {
+    async sendVerifyCodeEmail(params: {
       email: string;
       type: string;
       options: verifyCodeOptions;
       code: string;
     }) {
-      return new Promise((resolve, reject) => {
+      try {
         // 创建邮箱发送对象
         const transporter = nodemailer.createTransport({
           service: '163',
@@ -94,36 +94,35 @@ const authMethod = (star: Star) => {
           },
         });
 
-        star.cacher
-          .get(`verifyCode:${params.email};type:${params.type}`)
-          .then((cacheCode: string) => {
-            // 获取redis缓存
-            if (cacheCode) {
-              // 存在缓存
-              star.logger?.info(`验证码存在缓存`, `email: ${params.email}`);
-              resolve({
-                code: 200,
-                message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
-              });
-            } else {
-              // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
-              star.cacher.set(
-                `verifyCode:${params.email};type:${params.type}`,
-                params.code,
-                5 * 60,
-              );
+        const cacheCode = await star.cacher.get(`verifyCode:${params.email};type:${params.type}`);
 
-              transporter.sendMail(params.options as any, (error) => {
-                if (error) {
-                  star.logger?.error('发送邮件失败', params, error);
-                  reject(error);
-                } else {
-                  resolve({ code: 200, message: '验证码已发送' });
-                }
-              });
+        // 获取redis缓存
+        if (cacheCode) {
+          // 存在缓存
+          return {
+            code: 200,
+            message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
+          };
+        } else {
+          // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+          await star.cacher.set(
+            `verifyCode:${params.email};type:${params.type}`,
+            params.code,
+            5 * 60,
+          );
+
+          transporter.sendMail(params.options as any, (error) => {
+            if (error) {
+              star.logger?.error('发送邮件失败', params, error);
+              return { code: 500, error };
+            } else {
+              return { code: 200, message: '验证码已发送' };
             }
           });
-      });
+        }
+      } catch (error) {
+        return { code: 500, error };
+      }
     },
   };
 };

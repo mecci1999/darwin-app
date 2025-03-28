@@ -3,17 +3,15 @@ import { DataBaseTableNames } from 'typings/enum';
 import { UserTable } from '../user'; // 添加用户模型引用
 
 export interface IScanAuthAttributes {
-  token: string; // JWT格式临时令牌
-  userId?: string; // 扫码确认后关联
-  status: 'pending' | 'confirmed' | 'expired';
+  id: string; // 主健
+  userId: string; // 扫码确认后关联
   deviceInfo: object; // 扫码设备信息
   expiresAt: Date;
 }
 
 export class ScanAuthTable extends Model<IScanAuthAttributes> implements IScanAuthAttributes {
-  public token!: string; // token
-  public userId!: string | undefined; // 关联用户ID
-  public status!: 'pending' | 'confirmed' | 'expired'; // 状态
+  public id!: string; // 主键ID
+  public userId!: string; // 关联用户ID
   public deviceInfo!: object; // 扫码设备信息
   public expiresAt!: Date; // 过期时间
 }
@@ -21,8 +19,9 @@ export class ScanAuthTable extends Model<IScanAuthAttributes> implements IScanAu
 export default function (sequelize: Sequelize) {
   const model = ScanAuthTable.init(
     {
-      token: {
-        type: DataTypes.STRING(512),
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
         primaryKey: true,
       },
       userId: {
@@ -35,10 +34,6 @@ export default function (sequelize: Sequelize) {
         },
         onDelete: 'CASCADE',
       },
-      status: {
-        type: DataTypes.ENUM('pending', 'confirmed', 'expired'),
-        defaultValue: 'pending',
-      },
       deviceInfo: { type: DataTypes.JSON },
       expiresAt: { type: DataTypes.DATE },
     },
@@ -48,7 +43,6 @@ export default function (sequelize: Sequelize) {
       modelName: DataBaseTableNames.ScanAuth,
       indexes: [
         { fields: ['expires_at'] },
-        { fields: ['status'] },
         { fields: ['user_id'], name: 'scan_auth_user_id_index' }, // 新增用户ID索引
       ],
     },
