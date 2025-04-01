@@ -1,4 +1,5 @@
-import { Star } from 'node-universe';
+import { Context, Star } from 'node-universe';
+import { ResponseCode } from 'typings/enum';
 import forgetHash from './forgetHash';
 import login from './login';
 import register from './register';
@@ -24,6 +25,26 @@ const authAction = (star: Star) => {
     ...rsaAction,
     ...forgetHashAction,
     ...updateHashAction,
+    resolveToken: {
+      metadata: {
+        auth: true,
+      },
+      async handler(ctx: Context): Promise<any> {
+        const { token } = ctx.params;
+        if (!token) {
+          return {
+            status: 401,
+            data: {
+              content: null,
+              message: 'token不存在',
+              code: ResponseCode.ERR_INVALID_TOKEN,
+            },
+          };
+        }
+
+        return (this as any).resolveToken(token);
+      },
+    },
   };
 };
 

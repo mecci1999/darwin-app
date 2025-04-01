@@ -48,6 +48,7 @@ export class DataBaseConnectionManager {
           },
           transactionType: SequelizeStatic.Transaction.TYPES.IMMEDIATE,
           logging: false,
+          timezone: '+08:00', // 设置为东八区时间
         },
         options,
       ),

@@ -15,13 +15,7 @@ export default function verifyCode(star: Star) {
         auth: false,
       },
       // 获取验证码，需要将验证码存储到redis中
-      async handler(
-        ctx: Context,
-        route: Route,
-        req: IncomingRequest,
-        res: GatewayResponse,
-        data: any,
-      ): Promise<HttpResponseItem> {
+      async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.type) {

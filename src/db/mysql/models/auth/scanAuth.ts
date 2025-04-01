@@ -6,14 +6,14 @@ export interface IScanAuthAttributes {
   id: string; // 主健
   userId: string; // 扫码确认后关联
   deviceInfo: object; // 扫码设备信息
-  expiresAt: Date;
+  lastLoginAt: Date; // 上一次扫码登录成功时间
 }
 
 export class ScanAuthTable extends Model<IScanAuthAttributes> implements IScanAuthAttributes {
   public id!: string; // 主键ID
   public userId!: string; // 关联用户ID
   public deviceInfo!: object; // 扫码设备信息
-  public expiresAt!: Date; // 过期时间
+  public lastLoginAt!: Date; // 上一次扫码登录成功时间
 }
 
 export default function (sequelize: Sequelize) {
@@ -35,14 +35,14 @@ export default function (sequelize: Sequelize) {
         onDelete: 'CASCADE',
       },
       deviceInfo: { type: DataTypes.JSON },
-      expiresAt: { type: DataTypes.DATE },
+      lastLoginAt: { type: DataTypes.DATE },
     },
     {
       sequelize,
       tableName: DataBaseTableNames.ScanAuth,
       modelName: DataBaseTableNames.ScanAuth,
       indexes: [
-        { fields: ['expires_at'] },
+        { fields: ['last_login_at'] },
         { fields: ['user_id'], name: 'scan_auth_user_id_index' }, // 新增用户ID索引
       ],
     },

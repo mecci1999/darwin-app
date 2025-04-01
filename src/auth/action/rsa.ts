@@ -47,7 +47,7 @@ export default function rsa(star: Star) {
         auth: false,
       },
       //
-      async handler(ctx: any): Promise<HttpResponseItem> {
+      async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const { publicKey, privateKey } = generateKeyPairSync('rsa', {
             modulusLength: 2048, // 密钥长度

@@ -5,18 +5,19 @@ import { PASSWORD_SECRET_KEY } from 'config';
 import crypto from 'crypto';
 import { findEmailIsExist, saveOrUpdateEmailAuth } from 'db/mysql/apis/auth';
 import { RequestParamInvalidError } from 'error';
+import { Context, Star } from 'node-universe';
 import { ResponseCode } from 'typings/enum';
 import { HttpResponseItem } from 'typings/response';
 import { decryptPassword } from 'utils';
 import { generateUserId } from 'utils/generateUserId';
 
-export default function register(star: any) {
+export default function register(star: Star) {
   return {
     'v1.register': {
       metadata: {
         auth: false,
       },
-      async handler(ctx: any): Promise<HttpResponseItem> {
+      async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.hash || !ctx.params.code) {
@@ -52,9 +53,7 @@ export default function register(star: any) {
           }
 
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(
-            `verifyCode:${ctx.params.email};type:register`,
-          );
+          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:register`);
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -111,9 +110,7 @@ export default function register(star: any) {
 
           if (isSuccess) {
             // 直接删除验证码对应的缓存
-            await star.cacher.delete(
-              `verifyCode:${ctx.params.email};type:register`,
-            );
+            await star.cacher.delete(`verifyCode:${ctx.params.email};type:register`);
 
             return {
               status: 200,

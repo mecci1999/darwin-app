@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import { findEmailAuthByEmail, findEmailIsExist } from 'db/mysql/apis/auth';
 import { RequestParamInvalidError } from 'error';
 import { Context, Star } from 'node-universe';
-import { GatewayResponse, IncomingRequest, Route } from 'typings';
 import { ResponseCode } from 'typings/enum';
 import { HttpResponseItem } from 'typings/response';
 import { decryptPassword } from 'utils';

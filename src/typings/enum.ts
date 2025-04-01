@@ -25,6 +25,8 @@ export enum ResponseCode {
   Success = 0, // 成功
   ServiceActionFaild = 10000, // 服务操作失败
   ParamsError = 10001, // 参数错误
+  TooManyRequests = 10002, // 请求过于频繁
+  ERR_INVALID_TOKEN = 10003, // 无效token
   UserNotExist = 20001, // 用户不存在
   UserAlreadyExist = 20002, // 用户已存在
   UserPasswordError = 20003, // 用户密码错误
@@ -35,9 +37,9 @@ export enum ResponseCode {
   UserWechatAuthError = 20008, // 用户微信认证错误
   UserScanAuthError = 20009, // 用户扫码认证错误
   UserEmailCodeIsError = 20010, // 邮箱验证码错误
+  QrCodeExpired = 20011, // 二维码过期
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
-  ERR_INVALID_TOKEN = 30003, // 无效token
 }
 
 /**

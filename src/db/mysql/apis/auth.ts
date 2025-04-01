@@ -61,3 +61,18 @@ export async function findEmailAuthByUserId(userId: string) {
 
   return result ? result.dataValues : null;
 }
+
+// 新增或更新用户扫码验证信息
+export async function saveOrUpdateScanAuth(params: { userId: string; deviceInfo: any }) {
+  try {
+    const model = await mainConnection.getModel(DataBaseTableNames.ScanAuth);
+
+    return await model
+      .bulkCreate([params], {
+        updateOnDuplicate: ['userId', 'deviceInfo'],
+      })
+      .then(() => true);
+  } catch (error) {
+    console.log(error);
+  }
+}
