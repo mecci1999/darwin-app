@@ -48,7 +48,7 @@ export class UserNotLoginError extends Errors.StarClientError {
  */
 export class UnAuthorizedError extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
-    super('Token无效', 200, type || '', {
+    super('Token无效', 401, type || '', {
       content: data,
       code: ResponseCode.ERR_INVALID_TOKEN,
     });

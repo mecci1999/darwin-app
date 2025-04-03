@@ -240,9 +240,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
         // Verify JWT token
         return await ctx.call('auth.resolveToken', { token }).then((user) => {
-          if (!user)
-            // return Promise.reject(new UnAuthorizedError(ERR_INVALID_TOKEN));
+          if (!user) {
+            return Promise.reject(new UnAuthorizedError());
+          } else {
             (ctx.meta as any).user = user;
+          }
         });
       },
     },
