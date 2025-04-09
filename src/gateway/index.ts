@@ -78,7 +78,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
       routes: [
         // 配置路由，将 REST 请求映射到对应的微服务
         {
-          path: '/:service/:version/:action',
+          path: '/:service/:version/:action*',
           authorization: false,
           // whitelist: [], // 路由白名单
           // 路由跨域配置
@@ -218,8 +218,16 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           const params = ctx.params || {};
 
           // 对action进行url处理
-          if (action.includes('/')) {
-            action = action.split('/').join('.');
+          if (action) {
+            // 处理action可能是数组的情况（当使用*通配符时）
+            if (Array.isArray(action)) {
+              action = action.join('.');
+            }
+
+            // 处理action中包含斜杠的情况
+            if (typeof action === 'string' && action.includes('/')) {
+              action = action.split('/').join('.');
+            }
           }
 
           // 转发请求到相应的微服务
