@@ -1,3 +1,4 @@
+import { REFRESH_TOKEN_EXIPRE_TIME, TOKEN_EXIPRE_TIME } from 'config';
 import { queryConfigs } from 'db/mysql/apis/config';
 import jwt from 'jsonwebtoken';
 import { Star } from 'node-universe';
@@ -31,11 +32,40 @@ const authMethod = (star: Star) => {
         const privateKey = rsa.privateKey;
 
         return jwt.sign(payload, privateKey, {
-          expiresIn: '2h',
+          expiresIn: (TOKEN_EXIPRE_TIME as any) || '2h', // TOKEN过期时间
           algorithm: 'RS256',
         });
       } catch (error) {
         star.logger?.error('generateToken', '生成token失败', error);
+      }
+    },
+    // 生成续签token
+    async generateRefreshToken(params: { userId: string }) {
+      try {
+        if (!params.userId) return;
+
+        const payload = { userId: params.userId };
+
+        // 获取密钥
+        const result = (await queryConfigs(['rsa'])) || [];
+
+        if (result.length === 0) {
+          star.logger?.error('generateRefreshToken', '获取rsa密钥对失败');
+          return;
+        }
+
+        const rsa = JSON.parse(result[0].value);
+
+        if (!rsa) return;
+
+        const privateKey = rsa.privateKey;
+
+        return jwt.sign(payload, privateKey, {
+          expiresIn: (REFRESH_TOKEN_EXIPRE_TIME as any) || '3d', // TOKEN过期时间
+          algorithm: 'RS256',
+        });
+      } catch (error) {
+        star.logger?.error('generateRefreshToken', '生成refresh_token失败', error);
       }
     },
     // 验证token
@@ -71,7 +101,7 @@ const authMethod = (star: Star) => {
         if (error.name === 'TokenExpiredError') {
           star.logger?.error('resolveToken', 'token已过期', error);
           // 处理 token 过期的逻辑，例如返回特定的错误信息
-          return { error: 'Token has expired' };
+          return { error: 'Token has expired', code: 40001 };
         } else {
           star.logger?.error('resolveToken', '验证token失败', error);
         }

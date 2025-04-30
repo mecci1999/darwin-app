@@ -102,12 +102,18 @@ export default function login(star: Star) {
 
           star.logger?.debug('login', data);
 
-          // 生成token
-          const token = await (this as any).generateToken({ userId: data.userId });
+          // 生成token和refreshToken
+          const tokenResult = await Promise.all([
+            (this as any).generateToken({ userId: data.userId }),
+            (this as any).generateRefreshToken({ userId: data.userId }),
+          ]);
 
-          if (token) {
+          const [accessToken, refreshToken] = tokenResult;
+
+          if (accessToken) {
             // 设置cookies
-            (ctx.meta as any).token = token;
+            (ctx.meta as any).token = accessToken;
+            (ctx.meta as any).refreshToken = refreshToken;
 
             return {
               status: 200,

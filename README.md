@@ -1,6 +1,6 @@
 ## 微服务应用
 
-底层框架使用的是node-universe，是基于moleculer微服务框架开发的，使用TypeScript语言开发。
+底层框架使用的是node-universe，是基于moleculer微服务框架二次开发，使用TypeScript语言开发。
 
 ### 项目启动
 

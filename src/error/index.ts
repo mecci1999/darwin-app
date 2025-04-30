@@ -54,3 +54,15 @@ export class UnAuthorizedError extends Errors.StarClientError {
     });
   }
 }
+
+/**
+ * Token过期，续签
+ */
+export class TokenExpiredError extends Errors.StarClientError {
+  constructor(type?: string, data?: any) {
+    super('Token过期续签', 401, type || '', {
+      content: data,
+      code: ResponseCode.REFRESH_TOKEN,
+    });
+  }
+}

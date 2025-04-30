@@ -6,6 +6,7 @@ import register from './register';
 import rsa from './rsa';
 import updateHash from './updateHash';
 import verifyCode from './verifyCode';
+import refresh from './refresh';
 
 /**
  * 验证微服务的动作
@@ -17,6 +18,7 @@ const authAction = (star: Star) => {
   const rsaAction = rsa(star);
   const forgetHashAction = forgetHash(star);
   const updateHashAction = updateHash(star);
+  const refreshAction = refresh(star);
 
   return {
     ...verifyCodeAction,
@@ -25,6 +27,7 @@ const authAction = (star: Star) => {
     ...rsaAction,
     ...forgetHashAction,
     ...updateHashAction,
+    ...refreshAction,
     resolveToken: {
       metadata: {
         auth: true,

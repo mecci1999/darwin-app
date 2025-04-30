@@ -8,7 +8,12 @@ import { getAllConfigList } from 'db/mysql/apis/config';
 import { IConfig } from 'typings/config';
 import { IIPBlackListTableAttributes } from 'db/mysql/models/ipBlackList';
 import { ConfigKeysMap, IPAddressBanStatus, ResponseCode } from 'typings/enum';
-import { IPNotPermissionAccess, UnAuthorizedError, UserNotLoginError } from 'error';
+import {
+  IPNotPermissionAccess,
+  TokenExpiredError,
+  UnAuthorizedError,
+  UserNotLoginError,
+} from 'error';
 import { GatewayResponse, IncomingRequest, Route } from 'typings';
 
 // 微服务名
@@ -129,6 +134,11 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 ?.split(';')
                 .find((item) => item.includes('ACCESS_TOKEN'))
                 .split('=')[1];
+              // 从cookie中获取refreshToken
+              const refreshToken: any = cookie
+                ?.split(';')
+                .find((item) => item.includes('REFRESH_TOKEN'))
+                .split('=')[1];
               // 直接从头部authorization中获取token
               const authorization: any =
                 req.headers['Authorization'] || req.headers['authorization'] || '';
@@ -141,11 +151,17 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
 
               // 将token传递到ctx.meta中，在微服务中获取
               (ctx.meta as any).authToken = token1 || token2;
+              if (refreshToken) {
+                // 将token传递到ctx.meta中，在微服务中获取
+                (ctx.meta as any).refreshToken = refreshToken;
+              }
+
               try {
                 // 直接做token校验
                 await (this as any).authorize(ctx, (ctx.meta as any).authToken);
               } catch (error) {
-                throw new UnAuthorizedError();
+                // 抛出错误
+                throw error;
               }
             }
           },
@@ -161,7 +177,14 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             if ((ctx.meta as any)?.token) {
               res.setHeader(
                 'Set-Cookie',
-                `ACCESS_TOKEN=${(ctx.meta as any)?.token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=7200`,
+                `ACCESS_TOKEN=${(ctx.meta as any)?.token}; HttpOnly; Path=/; SameSite=Strict;`,
+              );
+            }
+
+            if ((ctx.meta as any)?.refreshToken) {
+              res.setHeader(
+                'Set-Cookie',
+                ` REFRESH_TOKEN=${(ctx.meta as any)?.refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
               );
             }
 
@@ -247,13 +270,26 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         }
 
         // Verify JWT token
-        return await ctx.call('auth.resolveToken', { token }).then((user) => {
-          if (!user) {
+        return await ctx
+          .call('auth.resolveToken', { token })
+          .then((user) => {
+            if (!user) {
+              return Promise.reject(new UnAuthorizedError());
+            } else {
+              if (user && user.isExpired) {
+                // token过期续签
+                return Promise.reject(new TokenExpiredError());
+              }
+              (ctx.meta as any).user = user;
+            }
+          })
+          .catch((err) => {
+            if (err.code === ResponseCode.REFRESH_TOKEN) {
+              return Promise.reject(new TokenExpiredError());
+            }
+            star.logger?.error('gateway_app authorize error~', 'error:', err);
             return Promise.reject(new UnAuthorizedError());
-          } else {
-            (ctx.meta as any).user = user;
-          }
-        });
+          });
       },
     },
     // 创建时操作

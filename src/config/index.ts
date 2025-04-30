@@ -17,6 +17,8 @@ export const {
   PASSWORD_SECRET_KEY,
   TOKEN_SECRET_KET,
   QR_CODE_EXPIRE,
+  TOKEN_EXIPRE_TIME,
+  REFRESH_TOKEN_EXIPRE_TIME,
 } = process.env;
 
 /**

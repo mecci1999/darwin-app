@@ -40,6 +40,7 @@ export enum ResponseCode {
   QrCodeExpired = 20011, // 二维码过期
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
+  REFRESH_TOKEN = 40001, // 续签
 }
 
 /**
