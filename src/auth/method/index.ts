@@ -141,17 +141,17 @@ const authMethod = (star: Star) => {
             5 * 60,
           );
 
-          transporter.sendMail(params.options as any, (error) => {
+          return transporter.sendMail(params.options as any, (error) => {
             if (error) {
               star.logger?.error('发送邮件失败', params, error);
-              return { code: 500, error };
+              return { code: 500, message: '验证码发送失败', error };
             } else {
               return { code: 200, message: '验证码已发送' };
             }
           });
         }
       } catch (error) {
-        return { code: 500, error };
+        return { code: 500, message: '验证码发送失败', error };
       }
     },
   };

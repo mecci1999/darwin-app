@@ -35,7 +35,7 @@ export default function verifyCode(star: Star) {
           };
 
           // 发送邮件
-          const result = await (this as any).sendVerifyCodeEmail({
+          await (this as any).sendVerifyCodeEmail({
             email: ctx.params.email,
             type: ctx.params.type,
             options: mailOptions,
@@ -44,7 +44,11 @@ export default function verifyCode(star: Star) {
 
           return {
             status: 200,
-            data: { content: null, message: result.message, code: result.code },
+            data: {
+              content: null,
+              message: '验证码已发送，请注意邮箱～',
+              code: ResponseCode.Success,
+            },
           };
         } catch (error) {
           star.logger?.error(error);

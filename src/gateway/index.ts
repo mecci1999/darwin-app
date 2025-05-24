@@ -174,17 +174,10 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             data: any,
           ) {
             // 判断是否触发身份验证，如果触发身份验证，则可以在请求响应头部中设置cookie
-            if ((ctx.meta as any)?.token) {
+            if ((ctx.meta as any)?.token && (ctx.meta as any)?.refreshToken) {
               res.setHeader(
                 'Set-Cookie',
-                `ACCESS_TOKEN=${(ctx.meta as any)?.token}; HttpOnly; Path=/; SameSite=Strict;`,
-              );
-            }
-
-            if ((ctx.meta as any)?.refreshToken) {
-              res.setHeader(
-                'Set-Cookie',
-                ` REFRESH_TOKEN=${(ctx.meta as any)?.refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
+                `ACCESS_TOKEN=${(ctx.meta as any)?.token}; REFRESH_TOKEN=${(ctx.meta as any)?.refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
               );
             }
 
