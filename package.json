@@ -23,7 +23,7 @@
     "mysql2": "^3.9.2",
     "nanoid": "^5.0.8",
     "node-universe": "^1.4.2",
-    "node-universe-gateway": "^1.0.6",
+    "node-universe-gateway": "^1.0.7",
     "nodemailer": "^6.9.15",
     "pino-rotate-file": "^1.0.4",
     "pm2": "^5.4.3",

@@ -246,8 +246,13 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             }
           }
 
+          if (params?.meta) {
+            // 合并meta数据
+            ctx.meta = { ...ctx.meta, ...params.meta };
+          }
+
           // 转发请求到相应的微服务
-          return ctx.call(`${service}.${version}.${action}`, params);
+          return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta });
         },
       },
     },

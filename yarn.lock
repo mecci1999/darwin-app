@@ -3738,10 +3738,10 @@ node-gyp@^11.0.0:
     tar "^7.4.3"
     which "^5.0.0"
 
-node-universe-gateway@^1.0.6:
-  version "1.0.6"
-  resolved "https://registry.yarnpkg.com/node-universe-gateway/-/node-universe-gateway-1.0.6.tgz#183dfed08d4f3594c886bcf44dfdea2bfb483bbd"
-  integrity sha512-qvMn9D4Nhn06pedeB+dDOsNYd4YYn8RhBwj7ZdIsIkjRFNUvwHfe2+T+taIyV+9V6xBr3kQSbDky5AoCaL7jyg==
+node-universe-gateway@^1.0.7:
+  version "1.0.7"
+  resolved "https://registry.yarnpkg.com/node-universe-gateway/-/node-universe-gateway-1.0.7.tgz#c5123748e7c17802edaeeda58195a706517ee834"
+  integrity sha512-jRniCdCLPiZnfSn+/ytilTi3znMBZBunafp56ZDApi4ft0zV9bnmYnHwhdRL6K3J74GFcdAZ5g3774U1JNeIqA==
   dependencies:
     "@fastify/busboy" "^2.1.0"
     body-parser "^1.20.2"

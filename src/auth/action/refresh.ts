@@ -8,7 +8,7 @@ import { HttpResponseItem } from 'typings/response';
 
 export default function login(star: Star) {
   return {
-    'v1.refresh': {
+    'v1.refreshToken': {
       metadata: {
         auth: true,
       },

@@ -118,7 +118,7 @@ export default function login(star: Star) {
             return {
               status: 200,
               data: {
-                content: null,
+                content: { userId: data.userId },
                 message: '登录成功',
                 code: ResponseCode.Success,
               },

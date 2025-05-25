@@ -7,6 +7,7 @@ import rsa from './rsa';
 import updateHash from './updateHash';
 import verifyCode from './verifyCode';
 import refresh from './refresh';
+import qrcode from './qrcode';
 
 /**
  * 验证微服务的动作
@@ -19,6 +20,7 @@ const authAction = (star: Star) => {
   const forgetHashAction = forgetHash(star);
   const updateHashAction = updateHash(star);
   const refreshAction = refresh(star);
+  const qrcodeAction = qrcode(star);
 
   return {
     ...verifyCodeAction,
@@ -28,6 +30,7 @@ const authAction = (star: Star) => {
     ...forgetHashAction,
     ...updateHashAction,
     ...refreshAction,
+    ...qrcodeAction,
     resolveToken: {
       metadata: {
         auth: true,
