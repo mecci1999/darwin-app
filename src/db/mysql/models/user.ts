@@ -12,11 +12,11 @@ export interface IUserTableAttributes {
   status: string;
   source: string;
   power?: number; // 用户权限等级
-  devices?: object; // 存储多设备登录信息
+  devices?: string; // 存储多设备登录信息的JSON字符串
   timezone?: string;
   locale?: string;
   lastActiveAt?: Date;
-  meta?: object;
+  meta?: string; // 扩展元数据的JSON字符串
   version?: number;
   createdAt?: Date;
   updatedAt?: Date;
@@ -31,11 +31,11 @@ export class UserTable extends Model<IUserTableAttributes> implements IUserTable
   public status!: string;
   public source!: string;
   public power!: number | undefined;
-  public devices!: object | undefined;
+  public devices!: string | undefined;
   public timezone!: string | undefined;
   public locale!: string | undefined;
   public lastActiveAt!: Date | undefined;
-  public meta!: object | undefined;
+  public meta!: string | undefined;
   public version!: number;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -84,7 +84,22 @@ export default function (sequelize: Sequelize) {
         defaultValue: 'zh-CN',
       },
       lastActiveAt: { type: DataTypes.DATE },
-      meta: { type: DataTypes.JSON },
+      meta: {
+        type: DataTypes.TEXT,
+        defaultValue: '{}',
+        comment: '扩展元数据的JSON字符串',
+        validate: {
+          isValidJSON(value: any) {
+            if (value && typeof value === 'string') {
+              try {
+                JSON.parse(value);
+              } catch (error) {
+                throw new Error('meta字段必须是有效的JSON字符串');
+              }
+            }
+          },
+        },
+      },
       version: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
@@ -105,17 +120,27 @@ export default function (sequelize: Sequelize) {
         comment: '用户权限等级，数值越高权限越大',
       },
       devices: {
-        type: DataTypes.JSON,
-        defaultValue: {},
-        comment: '多设备登录信息',
+        type: DataTypes.TEXT,
+        defaultValue: '{}',
+        comment: '多设备登录信息的JSON字符串',
         validate: {
-          isValidDevices(value: any) {
-            if (value && typeof value === 'object') {
-              // 验证设备信息格式
-              for (const [deviceType, deviceInfo] of Object.entries(value)) {
-                if (!['web', 'mobile', 'desktop'].includes(deviceType)) {
-                  throw new Error(`Invalid device type: ${deviceType}`);
+          isValidJSON(value: any) {
+            if (value && typeof value === 'string') {
+              try {
+                const parsed = JSON.parse(value);
+                // 验证设备信息格式
+                if (parsed && typeof parsed === 'object') {
+                  for (const [deviceType, deviceInfo] of Object.entries(parsed)) {
+                    if (!['web', 'mobile', 'desktop'].includes(deviceType)) {
+                      throw new Error(`Invalid device type: ${deviceType}`);
+                    }
+                  }
                 }
+              } catch (error) {
+                if (error instanceof SyntaxError) {
+                  throw new Error('devices字段必须是有效的JSON字符串');
+                }
+                throw error;
               }
             }
           },

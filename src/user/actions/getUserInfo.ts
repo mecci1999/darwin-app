@@ -49,11 +49,11 @@ export default function getUserInfo(star: Star) {
             status: userInfo.status,
             source: userInfo.source,
             isAdmin: userInfo.power === 999,
-            devices: userInfo.devices,
+            devices: userInfo.devices ? JSON.parse(userInfo.devices) : {},
             timezone: userInfo.timezone,
             locale: userInfo.locale,
             lastActiveAt: userInfo.lastActiveAt,
-            meta: userInfo.meta,
+            meta: userInfo.meta ? JSON.parse(userInfo.meta) : {},
             createdAt: userInfo.createdAt,
             updatedAt: userInfo.updatedAt,
           };
