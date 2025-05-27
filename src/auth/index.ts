@@ -10,9 +10,9 @@
  */
 import { pinoLoggerOptions } from 'config';
 import { Star } from 'node-universe';
-import authMethod from './method/index';
-import authAction from './action/index';
-// import authEvent from './event/index';
+import authMethod from './methods/index';
+import authAction from './actions/index';
+// import authEvent from './events/index';
 import * as dbConnections from '../db/mysql/index';
 
 // 微服务名

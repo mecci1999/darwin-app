@@ -5,17 +5,19 @@ import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
 import { DataBaseTableNames } from 'typings/enum';
 
 export interface IUserTableAttributes {
-  id?: number; // 新增自增主键（提升索引性能）
-  userId: string; // 保持UUID对外暴露
-  nickname?: string; // 显示名称（增加长度限制）
-  avatar?: string; // 增加CDN格式校验
-  status: string; // 改为枚举类型
-  source: string; // 明确注册来源枚举
-  timezone?: string; // 新增时区支持
-  locale?: string; // 新增语言偏好
-  lastActiveAt?: Date; // 新增最后活跃时间
-  meta?: object; // 扩展元数据
-  version?: number; // 乐观锁版本控制
+  id?: number;
+  userId: string;
+  nickname?: string;
+  avatar?: string;
+  status: string;
+  source: string;
+  power?: number; // 用户权限等级
+  devices?: object; // 存储多设备登录信息
+  timezone?: string;
+  locale?: string;
+  lastActiveAt?: Date;
+  meta?: object;
+  version?: number;
   createdAt?: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -28,6 +30,8 @@ export class UserTable extends Model<IUserTableAttributes> implements IUserTable
   public avatar!: string | undefined;
   public status!: string;
   public source!: string;
+  public power!: number | undefined;
+  public devices!: object | undefined;
   public timezone!: string | undefined;
   public locale!: string | undefined;
   public lastActiveAt!: Date | undefined;
@@ -91,6 +95,32 @@ export default function (sequelize: Sequelize) {
         defaultValue: DataTypes.NOW,
       },
       deletedAt: { type: DataTypes.DATE },
+      power: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+        validate: {
+          min: 0,
+          max: 999,
+        },
+        comment: '用户权限等级，数值越高权限越大',
+      },
+      devices: {
+        type: DataTypes.JSON,
+        defaultValue: {},
+        comment: '多设备登录信息',
+        validate: {
+          isValidDevices(value: any) {
+            if (value && typeof value === 'object') {
+              // 验证设备信息格式
+              for (const [deviceType, deviceInfo] of Object.entries(value)) {
+                if (!['web', 'mobile', 'desktop'].includes(deviceType)) {
+                  throw new Error(`Invalid device type: ${deviceType}`);
+                }
+              }
+            }
+          },
+        },
+      },
     },
     {
       sequelize,
@@ -101,7 +131,8 @@ export default function (sequelize: Sequelize) {
         { fields: ['created_at'] },
         { fields: ['status'] },
         { fields: ['last_active_at'] },
-        { fields: ['source', 'created_at'] }, // 联合索引
+        { fields: ['power'] },
+        { fields: ['source', 'created_at'] },
         {
           fields: ['user_id'],
           unique: true,

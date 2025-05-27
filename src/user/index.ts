@@ -5,6 +5,7 @@ import * as dbConnections from '../db/mysql/index';
 import { HttpResponseItem } from '../typings/response';
 import { ResponseCode } from 'typings/enum';
 import { customAlphabet } from 'nanoid';
+import userActions from './actions';
 
 // 微服务名
 const appName = 'user';
@@ -53,67 +54,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
   star.createService({
     name: appName,
     methods: {},
-    actions: {
-      // 网关服务的 dispatch 动作将请求转发到相应的微服务
-      'v1.create': {
-        metadata: {
-          auth: true,
-        },
-        async handler(ctx, route, req, res): Promise<HttpResponseItem> {
-          const params = ctx.params;
-
-          // 在此处理 create 动作的逻辑
-          if (!params.userId || !params.source) {
-            return {
-              status: 400,
-              data: {
-                content: null,
-                message: 'Invalid request body',
-                code: ResponseCode.ParamsError,
-              },
-            };
-          }
-
-          const id = customAlphabet('0123456789')(9);
-
-          // 生成用户名
-          const defaultNickname = `星际公民1${id}`;
-
-          const user = await saveOrUpdateUsers([
-            {
-              userId: params.userId,
-              nickname: defaultNickname,
-              source: params.source,
-              status: 'active',
-            },
-          ]);
-
-          // 将接收到的参数存储到数据库中
-          return {
-            status: 201,
-            data: {
-              message: 'user is creating~',
-              content: { user },
-              code: ResponseCode.Success,
-            },
-          };
-        },
-      },
-      'v1.list': {
-        metadata: {
-          auth: false,
-        },
-        async handler(ctx) {
-          const list = await queryAllUsers();
-
-          // 例如，将接收到的参数存储到数据库中
-          return {
-            status: 200,
-            data: { content: { users: list } },
-          };
-        },
-      },
-    },
+    actions: userActions(star),
     async created() {
       try {
         // 连接数据库

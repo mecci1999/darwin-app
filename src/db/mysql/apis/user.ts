@@ -38,3 +38,25 @@ export async function queryAllUsers() {
     console.log(error);
   }
 }
+
+/**
+ * 根据userId查询用户详细信息
+ */
+export async function findUserByUserId(userId: string): Promise<IUserTableAttributes | null> {
+  try {
+    const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
+    if (!model) return null;
+
+    const user = await model.findOne({
+      where: { userId },
+      attributes: {
+        exclude: ['deletedAt'], // 排除软删除字段
+      },
+    });
+
+    return user ? user.toJSON() : null;
+  } catch (error) {
+    console.log('findUserByUserId error:', error);
+    return null;
+  }
+}

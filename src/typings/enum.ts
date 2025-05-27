@@ -38,6 +38,7 @@ export enum ResponseCode {
   UserScanAuthError = 20009, // 用户扫码认证错误
   UserEmailCodeIsError = 20010, // 邮箱验证码错误
   QrCodeExpired = 20011, // 二维码过期
+  UserNotLoginError = 20012, // 用户未登录
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
   REFRESH_TOKEN = 40001, // 续签

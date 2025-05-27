@@ -115,14 +115,57 @@ export default function login(star: Star) {
             (ctx.meta as any).token = accessToken;
             (ctx.meta as any).refreshToken = refreshToken;
 
-            return {
-              status: 200,
-              data: {
-                content: { userId: data.userId },
-                message: '登录成功',
-                code: ResponseCode.Success,
-              },
-            };
+            try {
+              // 获取用户详细信息
+              const userInfoResult = await ctx.call('user.v1.getUserInfo', {
+                userId: data.userId,
+              });
+
+              // 如果获取用户信息成功，返回完整的用户信息
+              if (
+                userInfoResult &&
+                userInfoResult.data &&
+                userInfoResult.data.code === ResponseCode.Success
+              ) {
+                return {
+                  status: 200,
+                  data: {
+                    content: {
+                      userId: data.userId,
+                      userInfo: userInfoResult.data.content,
+                    },
+                    message: '登录成功',
+                    code: ResponseCode.Success,
+                  },
+                };
+              } else {
+                // 如果获取用户信息失败，仍然返回登录成功，但只包含基本信息
+                star.logger?.warn('Failed to get user info after login', { userId: data.userId });
+                return {
+                  status: 200,
+                  data: {
+                    content: {
+                      userId: data.userId,
+                    },
+                    message: '登录成功',
+                    code: ResponseCode.Success,
+                  },
+                };
+              }
+            } catch (userInfoError) {
+              // 获取用户信息出错，记录日志但不影响登录流程
+              star.logger?.error('Error getting user info after login', userInfoError);
+              return {
+                status: 200,
+                data: {
+                  content: {
+                    userId: data.userId,
+                  },
+                  message: '登录成功',
+                  code: ResponseCode.Success,
+                },
+              };
+            }
           }
 
           return {

@@ -2,6 +2,7 @@ import { Context, Star } from 'node-universe';
 import { ResponseCode } from 'typings/enum';
 import forgetHash from './forgetHash';
 import login from './login';
+import logout from './logout';
 import register from './register';
 import rsa from './rsa';
 import updateHash from './updateHash';
@@ -16,6 +17,7 @@ const authAction = (star: Star) => {
   const verifyCodeAction = verifyCode(star);
   const registerAction = register(star);
   const loginAction = login(star);
+  const logoutAction = logout(star);
   const rsaAction = rsa(star);
   const forgetHashAction = forgetHash(star);
   const updateHashAction = updateHash(star);
@@ -26,6 +28,7 @@ const authAction = (star: Star) => {
     ...verifyCodeAction,
     ...registerAction,
     ...loginAction,
+    ...logoutAction,
     ...rsaAction,
     ...forgetHashAction,
     ...updateHashAction,

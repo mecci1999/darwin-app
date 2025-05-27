@@ -166,6 +166,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
             }
           },
           // 请求成功后，对服务返回的数据进行二次处理
+          // 在 onAfterCall 方法中添加清除cookie的逻辑
           onAfterCall(
             ctx: Context,
             route: Route,
@@ -179,6 +180,14 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 'Set-Cookie',
                 `ACCESS_TOKEN=${(ctx.meta as any)?.token}; REFRESH_TOKEN=${(ctx.meta as any)?.refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
               );
+            }
+
+            // 处理退出登录，清除cookies
+            if ((ctx.meta as any)?.clearCookies) {
+              res.setHeader('Set-Cookie', [
+                'ACCESS_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+                'REFRESH_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+              ]);
             }
 
             return data;
