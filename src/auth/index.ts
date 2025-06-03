@@ -10,8 +10,8 @@
  */
 import { pinoLoggerOptions } from 'config';
 import { Star } from 'node-universe';
-import authMethod from './methods/index';
-import authAction from './actions/index';
+import authMethods from './methods/index';
+import authActions from './actions/index';
 // import authEvent from './events/index';
 import * as dbConnections from '../db/mysql/index';
 
@@ -45,12 +45,21 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     //     options: {},
     //   },
     // },
+    metrics: {
+      enabled: true,
+      reporter: {
+        type: 'Event',
+        // options: {
+        //   port: 3030,
+        // },
+      },
+    },
   });
 
   star.createService({
     name: appName,
-    methods: authMethod(star),
-    actions: authAction(star),
+    methods: authMethods(star),
+    actions: authActions(star),
     async created() {
       try {
         // 连接数据库

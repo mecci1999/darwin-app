@@ -15,6 +15,7 @@ import {
   UserNotLoginError,
 } from 'error';
 import { GatewayResponse, IncomingRequest, Route } from 'typings';
+import gatewayMethods from './methods';
 
 // 微服务名
 const appName = 'gateway';
@@ -47,15 +48,15 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         host: 'localhost',
       },
     },
-    // metrics: {
-    //   enabled: true,
-    //   reporter: {
-    //     type: 'Prometheus',
-    //     options: {
-    //       port: 3030,
-    //     },
-    //   },
-    // },
+    metrics: {
+      enabled: true,
+      reporter: {
+        type: 'Event',
+        // options: {
+        //   port: 3030,
+        // },
+      },
+    },
   });
 
   // 创建网关服务
@@ -225,6 +226,83 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         {
           path: '/logs/:service/:action',
         },
+        // 监控服务
+        {
+          path: '/metrics',
+          authorization: false,
+          // whitelist: [], // 路由白名单
+          // 路由跨域配置
+          // cors: {
+          //   origin: ["https://localhost:3000", "https://localhost:4000"],
+          //  methods: ["GET", "OPTIONS", "POST"],
+          // },
+          aliases: {
+            '/': 'gateway.metrics',
+          },
+          bodyParsers: {
+            json: true,
+          },
+          // 请求发生前处理
+          async onBeforeCall(
+            ctx: Context,
+            route: Route,
+            req: IncomingRequest,
+            res: GatewayResponse,
+          ) {
+            (ctx.meta as any).req = {
+              userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
+            };
+
+            if (req?.socket?.remoteAddress) {
+              // 查看请求的ip地址是否被黑名单
+              if (ips.includes(req.socket.remoteAddress)) {
+                // 被黑名单禁用，直接返回404状态码
+                throw new IPNotPermissionAccess();
+              }
+
+              (ctx.meta as any).req = { ...(ctx.meta as any).req, ip: req.socket.remoteAddress };
+            }
+          },
+          // 请求成功后，对服务返回的数据进行二次处理
+          // 在 onAfterCall 方法中添加清除cookie的逻辑
+          onAfterCall(
+            ctx: Context,
+            route: Route,
+            req: IncomingRequest,
+            res: GatewayResponse,
+            data: any,
+          ) {
+            return data;
+          },
+          // 请求错误处理
+          onError(req: IncomingRequest, res: GatewayResponse, err: any) {
+            // 如果触发了RateLimitExceeded报错，将该ip地址进行封禁，并将ip地址存储到数据库中，启动网关微服务的时候，从数据库中拉取ip地址封禁名单
+            if (err.code === 429 && req?.socket?.remoteAddress) {
+              if (!ips.includes(req.socket.remoteAddress)) {
+                // 触发请求限制错误，直接封禁ip
+                ips.push(req.socket.remoteAddress);
+                ipBlackList.push({
+                  ipv4: req.socket.remoteAddress,
+                  reason: '频繁请求',
+                  status: IPAddressBanStatus.active,
+                  isArtificial: false,
+                });
+              }
+            }
+            res.setHeader('Content-Type', 'text/plain');
+            res.writeHead(err.code || 500);
+            res.end(
+              JSON.stringify({
+                status: err.code || 500,
+                data: {
+                  code: err?.data?.code || 0,
+                  message: err.message,
+                  content: err?.data?.content || null,
+                },
+              }),
+            );
+          },
+        },
       ],
     },
     actions: {
@@ -264,41 +342,260 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta });
         },
       },
-    },
-    methods: {
-      /**
-       * token校验,判断是否是管理员，判断是否是用户
-       * 1、判断token是否有效
-       * 2、获取到token对应的user数据，并携带到其他服务中
-       */
-      async authorize(ctx: Context, token: string) {
-        if (!token) {
-          return Promise.reject(new UserNotLoginError());
-        }
+      // 网关服务的 metrics 动作将请求转发到相应的微服务
+      metrics: {
+        // visibility: 'public',
+        // tracing: {
+        //   tags: {
+        //     params: ['req.url','req.method'],
+        //   },
+        //   spanName: (ctx) => `${ctx.params.req.method} ${ctx.params.req.url}`,
+        // },
+        timeout: 0,
+        handler(ctx: Context) {
+          const metricsData = star.metrics?.list();
 
-        // Verify JWT token
-        return await ctx
-          .call('auth.resolveToken', { token })
-          .then((user) => {
-            if (!user) {
-              return Promise.reject(new UnAuthorizedError());
+          // 通过 WebSocket 广播指标数据到订阅了 'metrics' 频道的客户端
+          try {
+            (this as any).broadcastToChannel('metrics', {
+              type: 'metrics_update',
+              data: {
+                metrics: metricsData,
+                timestamp: Date.now(),
+                source: 'gateway',
+              },
+            });
+          } catch (error) {
+            star.logger?.error('Failed to broadcast metrics via WebSocket:', error);
+          }
+
+          return {
+            status: 200,
+            data: {
+              content: metricsData,
+              message: 'success',
+              code: ResponseCode.Success,
+            },
+          };
+        },
+      },
+
+      // WebSocket 状态查询
+      'websocket.status': {
+        timeout: 0,
+        handler(ctx: Context) {
+          const status = (this as any).getWebSocketStatus?.() || {
+            enabled: false,
+            clients: 0,
+            port: 6668,
+          };
+
+          return {
+            status: 200,
+            data: {
+              content: status,
+              message: 'WebSocket status retrieved successfully',
+              code: ResponseCode.Success,
+            },
+          };
+        },
+      },
+
+      // 触发 WebSocket 事件
+      'websocket.trigger': {
+        timeout: 0,
+        handler(ctx: Context) {
+          const { channel, data, clientId, userId } = ctx.params;
+
+          try {
+            if (clientId) {
+              // 发送给特定客户端
+              (this as any).sendToClient(clientId, {
+                type: 'custom_event',
+                channel,
+                data,
+              });
+            } else if (userId) {
+              // 发送给特定用户
+              (this as any).sendToUser(userId, {
+                type: 'custom_event',
+                channel,
+                data,
+              });
+            } else if (channel) {
+              // 广播到频道
+              (this as any).broadcastToChannel(channel, {
+                type: 'channel_event',
+                channel,
+                data,
+              });
             } else {
-              if (user && user.isExpired) {
-                // token过期续签
-                return Promise.reject(new TokenExpiredError());
-              }
-              (ctx.meta as any).user = user;
+              // 广播给所有客户端
+              (this as any).broadcastToClients({
+                type: 'broadcast_event',
+                data,
+              });
             }
-          })
-          .catch((err) => {
-            if (err.code === ResponseCode.REFRESH_TOKEN) {
-              return Promise.reject(new TokenExpiredError());
+
+            return {
+              status: 200,
+              data: {
+                content: { sent: true },
+                message: 'WebSocket event triggered successfully',
+                code: ResponseCode.Success,
+              },
+            };
+          } catch (error) {
+            star.logger?.error('Failed to trigger WebSocket event:', error);
+            return {
+              status: 500,
+              data: {
+                content: { sent: false },
+                message: 'Failed to trigger WebSocket event',
+                code: ResponseCode.ServiceActionFaild,
+              },
+            };
+          }
+        },
+      },
+
+      // 二维码更新推送
+      'qrcode.update': {
+        timeout: 0,
+        handler(ctx: Context) {
+          const { qrcode, userId, clientId } = ctx.params;
+
+          try {
+            const message = {
+              type: 'qrcode_update',
+              data: {
+                qrcode,
+                timestamp: Date.now(),
+              },
+            };
+
+            if (clientId) {
+              (this as any).sendToClient(clientId, message);
+            } else if (userId) {
+              (this as any).sendToUser(userId, message);
+            } else {
+              (this as any).broadcastToChannel('qrcode', message);
             }
-            star.logger?.error('gateway_app authorize error~', 'error:', err);
-            return Promise.reject(new UnAuthorizedError());
-          });
+
+            return {
+              status: 200,
+              data: {
+                content: { sent: true },
+                message: 'QR code update sent successfully',
+                code: ResponseCode.Success,
+              },
+            };
+          } catch (error) {
+            star.logger?.error('Failed to send QR code update:', error);
+            return {
+              status: 500,
+              data: {
+                content: { sent: false },
+                message: 'Failed to send QR code update',
+                code: ResponseCode.ServiceActionFaild,
+              },
+            };
+          }
+        },
+      },
+
+      // 告警推送
+      'alert.send': {
+        timeout: 0,
+        handler(ctx: Context) {
+          const { alert, level, userId, clientId } = ctx.params;
+
+          try {
+            const message = {
+              type: 'alert',
+              data: {
+                alert,
+                level: level || 'info',
+                timestamp: Date.now(),
+              },
+            };
+
+            if (clientId) {
+              (this as any).sendToClient(clientId, message);
+            } else if (userId) {
+              (this as any).sendToUser(userId, message);
+            } else {
+              (this as any).broadcastToChannel('alert', message);
+            }
+
+            return {
+              status: 200,
+              data: {
+                content: { sent: true },
+                message: 'Alert sent successfully',
+                code: ResponseCode.Success,
+              },
+            };
+          } catch (error) {
+            star.logger?.error('Failed to send alert:', error);
+            return {
+              status: 500,
+              data: {
+                content: { sent: false },
+                message: 'Failed to send alert',
+                code: ResponseCode.ServiceActionFaild,
+              },
+            };
+          }
+        },
+      },
+
+      // 消息推送
+      'message.send': {
+        timeout: 0,
+        handler(ctx: Context) {
+          const { message, userId, clientId } = ctx.params;
+
+          try {
+            const wsMessage = {
+              type: 'message',
+              data: {
+                message,
+                timestamp: Date.now(),
+              },
+            };
+
+            if (clientId) {
+              (this as any).sendToClient(clientId, wsMessage);
+            } else if (userId) {
+              (this as any).sendToUser(userId, wsMessage);
+            } else {
+              (this as any).broadcastToChannel('message', wsMessage);
+            }
+
+            return {
+              status: 200,
+              data: {
+                content: { sent: true },
+                message: 'Message sent successfully',
+                code: ResponseCode.Success,
+              },
+            };
+          } catch (error) {
+            star.logger?.error('Failed to send message:', error);
+            return {
+              status: 500,
+              data: {
+                content: { sent: false },
+                message: 'Failed to send message',
+                code: ResponseCode.ServiceActionFaild,
+              },
+            };
+          }
+        },
       },
     },
+    methods: gatewayMethods(star),
     // 创建时操作
     async created() {
       try {
@@ -339,10 +636,26 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
           saveOrUpdateIpBlackList(ipBlackList),
         IPConfig?.updateTimer * 60 * 1000 || 30 * 60 * 1000,
       );
+
+      // 初始化 WebSocket 服务器
+      try {
+        await (this as any).initWebSocketServer();
+        star.logger?.info('WebSocket server initialized successfully');
+      } catch (error) {
+        star.logger?.error('Failed to initialize WebSocket server:', error);
+      }
     },
 
     // 结束时操作
     async stopped() {
+      // 清理 WebSocket 资源
+      try {
+        await (this as any).cleanupWebSocket();
+        star.logger?.info('WebSocket server cleaned up successfully');
+      } catch (error) {
+        star.logger?.error('Failed to cleanup WebSocket server:', error);
+      }
+
       // 断开数据库连接
       await dbConnections.mainConnection.destroy();
 
