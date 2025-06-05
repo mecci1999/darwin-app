@@ -4,6 +4,7 @@ import { Context, Star } from 'node-universe';
 import { ResponseCode } from 'typings/enum';
 import WebSocket from 'ws';
 import url from 'url';
+import { WS_SERVER_PATH, WS_SERVER_PORT } from 'config';
 
 // WebSocket 相关变量
 let wss: WebSocket.Server | null = null;
@@ -79,7 +80,7 @@ const gatewayMethods = (star: Star) => {
         // 创建 WebSocket 服务器
         wss = new WebSocket.Server({
           server,
-          path: '/ws',
+          path: WS_SERVER_PATH || '/ws',
         });
 
         // 处理 WebSocket 连接
@@ -196,8 +197,8 @@ const gatewayMethods = (star: Star) => {
         }, 30000); // 30秒心跳检测
 
         // 启动 WebSocket 服务器
-        server.listen(6668, '0.0.0.0', () => {
-          star.logger?.info('WebSocket server started on port 6668');
+        server.listen(Number(WS_SERVER_PORT || 8090), '0.0.0.0', () => {
+          star.logger?.info('WebSocket server started on port 8090');
         });
 
         // 设置默认事件监听器

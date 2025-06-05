@@ -1,4 +1,4 @@
-import { pinoLoggerOptions } from 'config';
+import { GATEWAY_PORT, pinoLoggerOptions } from 'config';
 import { Context, Star } from 'node-universe';
 import { UniverseWeb } from 'node-universe-gateway';
 import * as dbConnections from '../db/mysql/index';
@@ -64,7 +64,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
     name: appName,
     mixins: UniverseWeb,
     settings: {
-      port: 6666,
+      port: Number(GATEWAY_PORT || 6666),
       ip: '0.0.0.0',
       // 全局跨域配置
       cors: {

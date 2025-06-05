@@ -19,6 +19,9 @@ export const {
   QR_CODE_EXPIRE,
   TOKEN_EXIPRE_TIME,
   REFRESH_TOKEN_EXIPRE_TIME,
+  GATEWAY_PORT,
+  WS_SERVER_PORT,
+  WS_SERVER_PATH,
 } = process.env;
 
 /**
