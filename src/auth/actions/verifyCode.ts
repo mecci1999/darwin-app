@@ -23,6 +23,23 @@ export default function verifyCode(star: Star) {
             throw new RequestParamInvalidError();
           }
 
+          // 检查验证码是否在缓存中
+          const existingCode = await (this as any).getVerifyCodeFromCache(
+            ctx.params.email,
+            ctx.params.type,
+          );
+          if (existingCode) {
+            return {
+              status: 200,
+              data: {
+                content: null,
+                message: '验证码已发送至邮箱，请查收～',
+                code: ResponseCode.Success,
+                success: false,
+              },
+            };
+          }
+
           // 随机生成6位验证码
           const generateCode = customAlphabet('0123456789', 6)(6);
 
@@ -30,7 +47,7 @@ export default function verifyCode(star: Star) {
             from: 'mecci1999@163.com', // 发件人邮箱
             to: ctx.params.email, // 收件人邮箱
             subject: '这是一张飞往Darwin宇宙的飞船船票',
-            html: `<p>您好，欢迎来到Darwin的小宇宙</p>
+            html: `<p>您好，欢迎来到Darwin的宇宙</p>
                   <span>您的验证码是</span><span style="font-size: 20px; font-weight: bold; margin-left: 8px; margin-right: 8px;">${generateCode}</span><span>，5分钟内有效，请勿向他人透露。</span>`,
           };
 
@@ -48,6 +65,7 @@ export default function verifyCode(star: Star) {
               content: null,
               message: '验证码已发送，请注意邮箱～',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -58,6 +76,7 @@ export default function verifyCode(star: Star) {
               content: null,
               message: '验证码发送失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

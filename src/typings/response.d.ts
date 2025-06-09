@@ -9,5 +9,6 @@ export interface HttpResponseItem {
     code?: ResponseCode | number; // 响应码
     content?: any; // 响应主体
     message?: string; // 消息
+    success?: boolean; // 是否成功
   };
 }

@@ -33,6 +33,7 @@ export default function login(star: Star) {
                 content: null,
                 message: '登录过期，请重新登录~',
                 code: ResponseCode.ERR_INVALID_TOKEN,
+                success: false,
               },
             };
           }
@@ -51,6 +52,7 @@ export default function login(star: Star) {
                 content: null,
                 message: 'Token续期成功',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           }
@@ -61,6 +63,7 @@ export default function login(star: Star) {
               content: null,
               message: 'Token续期失败，请稍后重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         } catch (error) {
@@ -70,6 +73,7 @@ export default function login(star: Star) {
               content: null,
               message: `${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

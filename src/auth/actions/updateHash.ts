@@ -37,6 +37,7 @@ export default function updateHash(star: Star) {
                 content: null,
                 message: '身份校验失败，请重新登录～',
                 code: ResponseCode.UserNotExist,
+                success: false,
               },
             };
           }
@@ -51,6 +52,7 @@ export default function updateHash(star: Star) {
                 content: null,
                 message: '邮箱验证码已失效，请重新生成～',
                 code: ResponseCode.UserEmailCodeIsError,
+                success: false,
               },
             };
           }
@@ -65,6 +67,7 @@ export default function updateHash(star: Star) {
                 content: null,
                 message: '用户信息不存在，请重新登录～',
                 code: ResponseCode.UserNotExist,
+                success: false,
               },
             };
           }
@@ -98,6 +101,7 @@ export default function updateHash(star: Star) {
                 content: { userId },
                 message: '更新密码成功',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           }
@@ -108,6 +112,7 @@ export default function updateHash(star: Star) {
               content: null,
               message: '更新密码失败，请稍后重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         } catch (error) {
@@ -117,6 +122,7 @@ export default function updateHash(star: Star) {
               content: null,
               message: `${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

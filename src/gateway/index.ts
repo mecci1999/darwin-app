@@ -217,6 +217,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                   code: err?.data?.code || 0,
                   message: err.message,
                   content: err?.data?.content || null,
+                  success: false,
                 },
               }),
             );
@@ -298,6 +299,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                   code: err?.data?.code || 0,
                   message: err.message,
                   content: err?.data?.content || null,
+                  success: false,
                 },
               }),
             );
@@ -375,6 +377,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               content: metricsData,
               message: 'success',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         },
@@ -396,6 +399,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
               content: status,
               message: 'WebSocket status retrieved successfully',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         },
@@ -443,6 +447,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: true },
                 message: 'WebSocket event triggered successfully',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           } catch (error) {
@@ -453,6 +458,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: false },
                 message: 'Failed to trigger WebSocket event',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
           }
@@ -488,6 +494,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: true },
                 message: 'QR code update sent successfully',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           } catch (error) {
@@ -498,6 +505,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: false },
                 message: 'Failed to send QR code update',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
           }
@@ -534,6 +542,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: true },
                 message: 'Alert sent successfully',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           } catch (error) {
@@ -544,6 +553,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: false },
                 message: 'Failed to send alert',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
           }
@@ -579,6 +589,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: true },
                 message: 'Message sent successfully',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           } catch (error) {
@@ -589,6 +600,7 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
                 content: { sent: false },
                 message: 'Failed to send message',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
           }

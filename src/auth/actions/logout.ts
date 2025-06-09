@@ -22,6 +22,7 @@ export default function logout(star: Star) {
                 content: null,
                 message: '用户未登录',
                 code: ResponseCode.UserNotLoginError,
+                success: false,
               },
             };
           }
@@ -30,8 +31,10 @@ export default function logout(star: Star) {
           const token = (ctx.meta as any)?.authToken;
           if (token) {
             // 可以将token加入黑名单或从缓存中移除
-            await star.cacher.del(`token:${token}`);
-            await star.cacher.del(`refreshToken:${userId}`);
+            await Promise.all([
+              star.cacher.delete(`token:${token}`),
+              star.cacher.delete(`refreshToken:${userId}`),
+            ]);
           }
 
           // 清除cookies
@@ -45,6 +48,7 @@ export default function logout(star: Star) {
               content: { userId },
               message: '退出登录成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -55,6 +59,7 @@ export default function logout(star: Star) {
               content: null,
               message: `退出登录失败: ${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

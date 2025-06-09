@@ -42,6 +42,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: `请求ip地址获取失败`,
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
 
@@ -57,6 +58,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: '操作过于频繁，请稍后再试',
                 code: ResponseCode.TooManyRequests,
+                success: false,
               },
             };
           }
@@ -100,6 +102,7 @@ export default function qrcode(star: Star) {
               },
               message: '二维码生成成功～',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -110,6 +113,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '生成二维码失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }
@@ -137,6 +141,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: `请求ip地址获取失败`,
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
 
@@ -155,6 +160,7 @@ export default function qrcode(star: Star) {
                 },
                 message: '二维码已过期',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           }
@@ -173,6 +179,7 @@ export default function qrcode(star: Star) {
                   content: null,
                   message: '安全验证失败',
                   code: ResponseCode.ServiceActionFaild,
+                  success: false,
                 },
               };
             }
@@ -209,6 +216,7 @@ export default function qrcode(star: Star) {
                   },
                   message: '登录成功',
                   code: ResponseCode.Success,
+                  success: true,
                 },
               };
             } else {
@@ -218,6 +226,7 @@ export default function qrcode(star: Star) {
                   content: null,
                   message: '获取用户信息失败',
                   code: ResponseCode.ServiceActionFaild,
+                  success: false,
                 },
               };
             }
@@ -231,6 +240,7 @@ export default function qrcode(star: Star) {
               },
               message: '获取二维码状态成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -241,6 +251,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '获取二维码状态失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }
@@ -272,6 +283,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: '二维码无效或已过期',
                 code: ResponseCode.QrCodeExpired,
+                success: false,
               },
             };
           }
@@ -306,6 +318,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '扫描成功，请在手机上确认登录',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -316,6 +329,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '扫描失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }
@@ -357,6 +371,7 @@ export default function qrcode(star: Star) {
                   content: null,
                   message: '安全验证失败',
                   code: ResponseCode.ServiceActionFaild,
+                  success: false,
                 },
               };
             }
@@ -369,6 +384,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: '二维码状态错误或已过期',
                 code: ResponseCode.QrCodeExpired,
+                success: false,
               },
             };
           }
@@ -404,6 +420,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '确认登录成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -414,6 +431,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '确认登录失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }
@@ -455,6 +473,7 @@ export default function qrcode(star: Star) {
                   content: null,
                   message: '安全验证失败',
                   code: ResponseCode.ServiceActionFaild,
+                  success: false,
                 },
               };
             }
@@ -467,6 +486,7 @@ export default function qrcode(star: Star) {
                 content: null,
                 message: '二维码已过期',
                 code: ResponseCode.QrCodeExpired,
+                success: false,
               },
             };
           }
@@ -490,6 +510,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '取消登录成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -500,6 +521,7 @@ export default function qrcode(star: Star) {
               content: null,
               message: '取消登录失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

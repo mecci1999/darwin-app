@@ -33,6 +33,7 @@ export default function login(star: Star) {
                 content: null,
                 message: '邮箱格式不正确',
                 code: 20004,
+                success: false,
               },
             };
           }
@@ -47,6 +48,7 @@ export default function login(star: Star) {
                 content: null,
                 message: '邮箱错误或未注册',
                 code: ResponseCode.UserEmailError,
+                success: false,
               },
             };
           }
@@ -59,11 +61,15 @@ export default function login(star: Star) {
               status: 200,
               data: {
                 content: null,
-                message: '邮箱验证码已失效，请重新生成～',
+                message: '邮箱验证码实效，请重新生成～',
                 code: ResponseCode.UserEmailError,
+                success: false,
               },
             };
           }
+
+          // 邮箱验证码验证通过后，删除验证码
+          await star.cacher.delete(`verifyCode:${ctx.params.email};type:login`);
 
           // 解密
           const decryptedPassword = decryptPassword(
@@ -79,8 +85,9 @@ export default function login(star: Star) {
               status: 200,
               data: {
                 content: null,
-                message: '服务查询报错',
+                message: '服务端错误，登录失败',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
 
@@ -96,6 +103,7 @@ export default function login(star: Star) {
                 content: null,
                 message: '密码错误',
                 code: ResponseCode.UserPasswordError,
+                success: false,
               },
             };
           }
@@ -136,6 +144,7 @@ export default function login(star: Star) {
                     },
                     message: '登录成功',
                     code: ResponseCode.Success,
+                    success: true,
                   },
                 };
               } else {
@@ -149,6 +158,7 @@ export default function login(star: Star) {
                     },
                     message: '登录成功',
                     code: ResponseCode.Success,
+                    success: true,
                   },
                 };
               }
@@ -163,6 +173,7 @@ export default function login(star: Star) {
                   },
                   message: '登录成功',
                   code: ResponseCode.Success,
+                  success: true,
                 },
               };
             }
@@ -174,6 +185,7 @@ export default function login(star: Star) {
               content: null,
               message: '登录失败，请稍后重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         } catch (error) {
@@ -183,6 +195,7 @@ export default function login(star: Star) {
               content: null,
               message: `${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

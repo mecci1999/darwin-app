@@ -26,6 +26,7 @@ export default function rsa(star: Star) {
               content: rsa ? JSON.parse(rsa) : {},
               message: '获取密钥对成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -36,6 +37,7 @@ export default function rsa(star: Star) {
               content: null,
               message: '获取密钥对失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }
@@ -78,6 +80,7 @@ export default function rsa(star: Star) {
               content: data,
               message: '生成密钥对成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -88,6 +91,7 @@ export default function rsa(star: Star) {
               content: null,
               message: '生成密钥对失败，请重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

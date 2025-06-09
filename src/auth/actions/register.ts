@@ -34,6 +34,7 @@ export default function register(star: Star) {
                 content: null,
                 message: '邮箱格式不正确',
                 code: 20004,
+                success: false,
               },
             };
           }
@@ -48,6 +49,7 @@ export default function register(star: Star) {
                 content: null,
                 message: '该邮箱已注册',
                 code: ResponseCode.UserEmailAlreadyExist,
+                success: false,
               },
             };
           }
@@ -62,6 +64,7 @@ export default function register(star: Star) {
                 content: null,
                 message: '邮箱验证码已失效，请重新生成～',
                 code: ResponseCode.UserEmailCodeIsError,
+                success: false,
               },
             };
           }
@@ -96,6 +99,7 @@ export default function register(star: Star) {
                 content: null,
                 message: '注册账号失败，请稍后重试～',
                 code: ResponseCode.ServiceActionFaild,
+                success: false,
               },
             };
           }
@@ -118,6 +122,7 @@ export default function register(star: Star) {
                 content: { userId },
                 message: '注册账号成功',
                 code: ResponseCode.Success,
+                success: true,
               },
             };
           }
@@ -128,6 +133,7 @@ export default function register(star: Star) {
               content: null,
               message: '注册账号失败，请稍后重试～',
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         } catch (error) {
@@ -137,6 +143,7 @@ export default function register(star: Star) {
               content: null,
               message: `${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

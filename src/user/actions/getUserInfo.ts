@@ -23,6 +23,7 @@ export default function getUserInfo(star: Star) {
                 content: null,
                 message: '用户ID不能为空',
                 code: ResponseCode.ParamsError,
+                success: false,
               },
             };
           }
@@ -37,6 +38,7 @@ export default function getUserInfo(star: Star) {
                 content: null,
                 message: '用户不存在',
                 code: ResponseCode.UserNotExist,
+                success: false,
               },
             };
           }
@@ -66,6 +68,7 @@ export default function getUserInfo(star: Star) {
               content: safeUserInfo,
               message: '获取用户信息成功',
               code: ResponseCode.Success,
+              success: true,
             },
           };
         } catch (error) {
@@ -76,6 +79,7 @@ export default function getUserInfo(star: Star) {
               content: null,
               message: `获取用户信息失败: ${error}`,
               code: ResponseCode.ServiceActionFaild,
+              success: false,
             },
           };
         }

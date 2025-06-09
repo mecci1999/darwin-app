@@ -24,6 +24,7 @@ export default function createUser(star: Star) {
               content: null,
               message: 'Invalid request body',
               code: ResponseCode.ParamsError,
+              success: false,
             },
           };
         }
@@ -49,9 +50,10 @@ export default function createUser(star: Star) {
         return {
           status: 201,
           data: {
-            message: 'user is creating~',
+            message: '创建成功~',
             content: { user },
             code: ResponseCode.Success,
+            success: true,
           },
         };
       },
