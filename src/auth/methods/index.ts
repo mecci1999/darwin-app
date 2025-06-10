@@ -114,45 +114,49 @@ const authMethod = (star: Star) => {
       options: verifyCodeOptions;
       code: string;
     }) {
-      try {
-        // 创建邮箱发送对象
-        const transporter = nodemailer.createTransport({
-          service: '163',
-          auth: {
-            user: 'mecci1999@163.com',
-            pass: 'YEVimrR6xg6pNYKK',
-          },
-        });
-
-        const cacheCode = await star.cacher.get(`verifyCode:${params.email};type:${params.type}`);
-
-        // 获取redis缓存
-        if (cacheCode) {
-          // 存在缓存
-          return {
-            code: 200,
-            message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
-          };
-        } else {
-          // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
-          await star.cacher.set(
-            `verifyCode:${params.email};type:${params.type}`,
-            params.code,
-            5 * 60,
-          );
-
-          return transporter.sendMail(params.options as any, (error) => {
-            if (error) {
-              star.logger?.error('发送邮件失败', params, error);
-              return { code: 500, message: '验证码发送失败', error };
-            } else {
-              return { code: 200, message: '验证码已发送' };
-            }
+      return new Promise(async (resolve, reject) => {
+        try {
+          // 创建邮箱发送对象
+          const transporter = nodemailer.createTransport({
+            service: '163',
+            auth: {
+              user: 'mecci1999@163.com',
+              pass: 'YEVimrR6xg6pNYKK',
+            },
           });
+
+          const cacheCode = await star.cacher.get(`verifyCode:${params.email};type:${params.type}`);
+
+          // 获取redis缓存
+          if (cacheCode) {
+            // 存在缓存
+            resolve({
+              code: 200,
+              message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
+            });
+          } else {
+            // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+            await star.cacher.set(
+              `verifyCode:${params.email};type:${params.type}`,
+              params.code,
+              5 * 60,
+            );
+
+            // 使用Promise包装sendMail方法
+            transporter.sendMail(params.options as any, (error, info) => {
+              if (error) {
+                star.logger?.error('发送邮件失败', params, error);
+                reject({ code: 500, message: '验证码发送失败，请稍后重试～', error });
+              } else {
+                star.logger?.info('邮件发送成功', info);
+                resolve({ code: 200, message: '验证码已发送至邮箱，请注意查收～', info });
+              }
+            });
+          }
+        } catch (error) {
+          reject({ code: 500, message: '验证码发送失败', error });
         }
-      } catch (error) {
-        return { code: 500, message: '验证码发送失败', error };
-      }
+      });
     },
   };
 };

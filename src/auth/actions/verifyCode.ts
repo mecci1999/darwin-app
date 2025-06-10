@@ -23,23 +23,6 @@ export default function verifyCode(star: Star) {
             throw new RequestParamInvalidError();
           }
 
-          // 检查验证码是否在缓存中
-          const existingCode = await (this as any).getVerifyCodeFromCache(
-            ctx.params.email,
-            ctx.params.type,
-          );
-          if (existingCode) {
-            return {
-              status: 200,
-              data: {
-                content: null,
-                message: '验证码已发送至邮箱，请查收～',
-                code: ResponseCode.Success,
-                success: false,
-              },
-            };
-          }
-
           // 随机生成6位验证码
           const generateCode = customAlphabet('0123456789', 6)(6);
 
@@ -52,18 +35,30 @@ export default function verifyCode(star: Star) {
           };
 
           // 发送邮件
-          await (this as any).sendVerifyCodeEmail({
+          const res = await (this as any).sendVerifyCodeEmail({
             email: ctx.params.email,
             type: ctx.params.type,
             options: mailOptions,
             code: generateCode,
           });
 
+          if (res.code !== 200) {
+            return {
+              status: 200,
+              data: {
+                content: null,
+                message: res.message || '验证码发送失败，请重试～',
+                code: ResponseCode.ServiceActionFaild,
+                success: false,
+              },
+            };
+          }
+
           return {
             status: 200,
             data: {
               content: null,
-              message: '验证码已发送，请注意邮箱～',
+              message: res.message || '验证码已发送，请注意邮箱～',
               code: ResponseCode.Success,
               success: true,
             },

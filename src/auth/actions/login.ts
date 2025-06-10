@@ -61,7 +61,7 @@ export default function login(star: Star) {
               status: 200,
               data: {
                 content: null,
-                message: '邮箱验证码实效，请重新生成～',
+                message: '邮箱验证码失效，请重新生成～',
                 code: ResponseCode.UserEmailError,
                 success: false,
               },
