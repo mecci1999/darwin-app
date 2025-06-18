@@ -10,8 +10,8 @@
  */
 import { pinoLoggerOptions } from 'config';
 import { Star } from 'node-universe';
-import authMethods from './methods/index';
 import authActions from './actions/index';
+import authMethods from './methods/index';
 // import authEvent from './events/index';
 import * as dbConnections from '../db/mysql/index';
 
@@ -78,6 +78,10 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
         star.logger?.error('auth_app is created fail~, error:', error);
       }
     },
+    // 启动时操作
+    async started() {
+      (this as any).checkAndGenerateRSA();
+    },
     // 结束时操作
     async stopped() {
       // 断开数据库连接
@@ -88,5 +92,6 @@ pinoLoggerOptions(appName).then((pinoOptions) => {
   // 启动身份校验微服务
   star.start().then(() => {
     star.logger?.info(`微服务 ${appName.toUpperCase()} 启动成功`);
+    // 检查并自动生成RSA密钥对
   });
 });

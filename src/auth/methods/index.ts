@@ -1,5 +1,6 @@
 import { REFRESH_TOKEN_EXIPRE_TIME, TOKEN_EXIPRE_TIME } from 'config';
-import { queryConfigs } from 'db/mysql/apis/config';
+import { generateKeyPairSync } from 'crypto';
+import { queryConfigs, saveOrUpdateConfigs } from 'db/mysql/apis/config';
 import jwt from 'jsonwebtoken';
 import { Star } from 'node-universe';
 import nodemailer from 'nodemailer';
@@ -157,6 +158,53 @@ const authMethod = (star: Star) => {
           reject({ code: 500, message: '验证码发送失败', error });
         }
       });
+    },
+    // 检查并生成RSA密钥对
+    async checkAndGenerateRSA() {
+      try {
+        // 从数据库查询RSA密钥
+        const result = (await queryConfigs(['rsa'])) || [];
+
+        if (result.length > 0) {
+          const rsaData = JSON.parse(result[0].value);
+
+          // 检查是否已存在有效的RSA密钥对
+          if (rsaData.publicKey && rsaData.privateKey) {
+            star.logger?.info('RSA密钥对已存在，跳过生成');
+            return;
+          }
+        }
+
+        // 如果不存在或无效，则生成新的RSA密钥对
+        star.logger?.info('RSA密钥对不存在，开始生成...');
+
+        const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+          modulusLength: 2048, // 密钥长度
+        });
+
+        // 生成RSA密钥对
+        const publicKeyBuffer = publicKey.export({
+          type: 'spki',
+          format: 'pem',
+        });
+        const privateKeyBuffer = privateKey.export({
+          type: 'pkcs8',
+          format: 'pem',
+        });
+
+        // 将密钥对转换成字符串
+        const publicKeyText = publicKeyBuffer.toString('utf-8');
+        const privateKeyText = privateKeyBuffer.toString('utf-8');
+
+        const data = { publicKey: publicKeyText, privateKey: privateKeyText };
+
+        // 将密钥存储至config表中
+        await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(data) }]);
+
+        star.logger?.info('RSA密钥对生成并保存成功');
+      } catch (error) {
+        star.logger?.error('检查或生成RSA密钥对时发生错误:', error);
+      }
     },
   };
 };
