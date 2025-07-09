@@ -1,5 +1,6 @@
 import { Context, Star } from 'node-universe';
 import { ResponseCode } from 'typings/enum';
+import { ResponseUtils } from '../utils';
 import forgetHash from './forgetHash';
 import login from './login';
 import logout from './logout';

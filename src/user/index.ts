@@ -1,87 +1,95 @@
-import { queryAllUsers, saveOrUpdateUsers } from 'db/mysql/apis/user';
-import { Star } from 'node-universe/dist';
+// User微服务主文件
+import { Star } from 'node-universe';
 import { pinoLoggerOptions } from 'config';
 import * as dbConnections from '../db/mysql/index';
-import { HttpResponseItem } from '../typings/response';
-import { ResponseCode } from 'typings/enum';
-import { customAlphabet } from 'nanoid';
 import userActions from './actions';
 
-// 微服务名
-const appName = 'user';
+// 导入基本类型和常量
+import { APP_NAME, REDIS_CONFIG, KAFKA_CONFIG } from './constants';
 
-pinoLoggerOptions(appName).then((pinoOptions) => {
+async function initializeUserService() {
+  // const pinoOptions = await pinoLoggerOptions(APP_NAME);
+
   const star = new Star({
     namespace: 'darwin-app',
     transporter: {
       type: 'KAFKA',
       debug: true,
-      host: 'localhost:9092',
+      host: KAFKA_CONFIG.BROKERS.join(','),
     },
     serializer: {
       type: 'NotePack',
     },
-    // 日志模块
     // logger: pinoOptions,
     cacher: {
       type: 'Redis',
       clone: true,
       options: {
-        port: 6379, // Redis port
-        host: 'localhost',
+        port: REDIS_CONFIG.PORT,
+        host: REDIS_CONFIG.HOST,
+        password: REDIS_CONFIG.PASSWORD,
+        db: REDIS_CONFIG.DB,
       },
     },
-    // cacher: {
-    //   type: "Redis",
-    //   clone: true,
-    //   options: {
-    //     port: 6379, // Redis port
-    //     host: "localhost",
-    //   },
-    // },
-    // logger: pinoOptions,
     // metrics: {
     //   enabled: true,
     //   reporter: {
-    //     type: "Prometheus",
-    //     options: {
-    //       port: 3031,
-    //     },
+    //     type: 'Event',
     //   },
     // },
   });
 
   star.createService({
-    name: appName,
+    name: APP_NAME,
     methods: {},
     actions: userActions(star),
-    async created() {
+
+    created() {
+      star.logger?.info('User service created');
+    },
+
+    async started() {
       try {
-        // 连接数据库
+        // 初始化数据库连接
         await dbConnections.mainConnection.bindManinConnection({
           benchmark: true,
           logging(sql, timing) {
             if (timing && timing > 1000) {
-              // 如果查询时间大于1s，将进行日志打印
-              star.logger?.warn(`mysql operation is timeout, sql: ${sql}, timing: ${timing}`);
+              star.logger?.warn(`Slow query detected: ${sql}, timing: ${timing}ms`);
             }
           },
         });
-
-        star.logger?.info('Mysql connection is success!');
+        star.logger?.info('Database connection established');
+        star.logger?.info('User service started successfully');
       } catch (error) {
-        star.logger?.error('user_app is created fail~, error:', error);
+        star.logger?.error('Failed to start User service:', error);
+        throw error;
       }
     },
-    // 结束时操作
+
     async stopped() {
-      // 断开数据库连接
-      await dbConnections.mainConnection.destroy();
+      try {
+        star.logger?.info('Stopping User service...');
+
+        // 断开数据库连接
+        await dbConnections.mainConnection.destroy();
+
+        star.logger?.info('User service stopped successfully');
+      } catch (error) {
+        star.logger?.error('Error stopping User service:', error);
+        throw error;
+      }
     },
   });
 
-  // 启动网关微服务
+  // 启动微服务
   star.start().then(() => {
-    star.logger?.info(`微服务 ${appName.toUpperCase()} 启动成功`);
+    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
   });
+}
+
+// 启动应用
+initializeUserService().catch((error) => {
+  console.error('Failed to initialize user service:', error);
+  process.exit(1);
 });

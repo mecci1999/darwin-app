@@ -38,6 +38,20 @@ class MainDatabaseConnection {
         DataBaseTableNames.EmailAuth,
         DataBaseTableNames.WechatAuth,
         DataBaseTableNames.ScanAuth,
+        // SaaS 相关表
+        DataBaseTableNames.SubscriptionPlan,
+        DataBaseTableNames.UserSubscription,
+        DataBaseTableNames.UserQuota,
+        DataBaseTableNames.QuotaUsageHistory,
+        DataBaseTableNames.ApiKey,
+        DataBaseTableNames.ApiKeyStats,
+        DataBaseTableNames.PaymentOrder,
+        DataBaseTableNames.RefundRequest,
+        DataBaseTableNames.PaymentProvider,
+        DataBaseTableNames.Bill,
+        DataBaseTableNames.BillItem,
+        DataBaseTableNames.UserBillingAddress,
+        DataBaseTableNames.BillingReminderSetting,
       ],
     });
   }

@@ -4,7 +4,7 @@ services:
     image: bitnami/zookeeper:latest
     container_name: zookeeper
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT}:2181"
     environment:
       ZOO_ENABLE_AUTH: "no"
       ALLOW_ANONYMOUS_LOGIN: "yes"
@@ -16,17 +16,24 @@ services:
     image: bitnami/kafka:latest
     container_name: kafka
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT}:9092"
     expose:
-      - "9093"
+      - "${KAFKA_INTERNAL_PORT}"
     environment:
-      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:${KAFKA_INTERNAL_PORT},OUTSIDE://localhost:${KAFKA_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:SASL_PLAINTEXT,OUTSIDE:SASL_PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:${KAFKA_INTERNAL_PORT},OUTSIDE://0.0.0.0:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:${ZOOKEEPER_PORT}"
       KAFKA_CREATE_TOPICS: "test:1:1"
       KAFKA_MESSAGE_MAX_BYTES: "5242880" # Set message size to 5MB
+      # SASL认证配置
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_CLIENT_USERS: ${KAFKA_USER}
+      KAFKA_CLIENT_PASSWORDS: ${KAFKA_PASSWORD}
+      KAFKA_INTER_BROKER_USER: ${KAFKA_USER}
+      KAFKA_INTER_BROKER_PASSWORD: ${KAFKA_PASSWORD}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -40,14 +47,14 @@ services:
     container_name: mysql
     # restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: leo19870624
-      MYSQL_DATABASE: darwin_app
-      MYSQL_USER: darwin
-      MYSQL_PASSWORD: darwin19990709
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT}:3306"
     networks:
       - app_network
 
@@ -56,14 +63,35 @@ services:
     image: redis:latest
     container_name: redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"
     volumes:
       - ./redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
     environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - app_network
+
+  # InfluxDB Service
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    ports:
+      - "${INFLUXDB_PORT}:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_RETENTION: 1w
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
+    volumes:
+      - ./influxdb_data:/var/lib/influxdb2
+      - ./influxdb_config:/etc/influxdb2
+    networks:
+      - app_network
+    restart: unless-stopped
 
   # prometheus:
   #   image: bitnami/prometheus:latest

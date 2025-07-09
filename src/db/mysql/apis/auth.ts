@@ -10,8 +10,6 @@ export async function findEmailIsExist(email: string): Promise<boolean> {
 
   const model = await mainConnection.getModel(DataBaseTableNames.EmailAuth);
 
-  console.log(model);
-
   const result = await model.findOne({ where: { email } });
 
   return !!result;

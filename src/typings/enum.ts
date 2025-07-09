@@ -8,6 +8,20 @@ export enum DataBaseTableNames {
   EmailAuth = 'emailAuth',
   WechatAuth = 'wechatAuth',
   ScanAuth = 'scanAuth',
+  // SaaS 相关表
+  SubscriptionPlan = 'SubscriptionPlan',
+  UserSubscription = 'UserSubscription',
+  UserQuota = 'UserQuota',
+  QuotaUsageHistory = 'QuotaUsageHistory',
+  ApiKey = 'ApiKey',
+  ApiKeyStats = 'ApiKeyStats',
+  PaymentOrder = 'PaymentOrder',
+  RefundRequest = 'RefundRequest',
+  PaymentProvider = 'PaymentProvider',
+  Bill = 'Bill',
+  BillItem = 'BillItem',
+  UserBillingAddress = 'UserBillingAddress',
+  BillingReminderSetting = 'BillingReminderSetting',
 }
 
 /**
@@ -39,8 +53,13 @@ export enum ResponseCode {
   UserEmailCodeIsError = 20010, // 邮箱验证码错误
   QrCodeExpired = 20011, // 二维码过期
   UserNotLoginError = 20012, // 用户未登录
+  AppKeyIsInvalid = 20013, // appKey无效
+  UserQuotaExceeded = 20014, // 用户额度已超
+  AppKeyIsInactive = 20015, // appKey未激活
+  AppKeyIsExpired = 20016, // appKey已过期
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
+  NoPermissionError = 30003, // 没有权限
   REFRESH_TOKEN = 40001, // 续签
 }
 

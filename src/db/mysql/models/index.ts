@@ -10,6 +10,11 @@ const loadModelsRecursive = (
 ): Record<string, any> => {
   const models: Record<string, any> = {};
 
+  // 检查目录是否存在
+  if (!fs.existsSync(directoryPath)) {
+    return models;
+  }
+
   fs.readdirSync(directoryPath).forEach((file) => {
     const fullPath = path.join(directoryPath, file);
     // const stat = fs.statSync(fullPath);
@@ -34,12 +39,26 @@ const loadModelsRecursive = (
 };
 
 export default function (sequelize: Sequelize, tables: string[]) {
-  // 从根目录和auth目录加载
+  // 从根目录和各个子目录加载其他模型
   const rootModels = loadModelsRecursive(__dirname, sequelize, tables);
   const authModels = loadModelsRecursive(path.join(__dirname, 'auth'), sequelize, tables);
+  const subscriptionModels = loadModelsRecursive(
+    path.join(__dirname, 'subscription'),
+    sequelize,
+    tables,
+  );
+  const quotaModels = loadModelsRecursive(path.join(__dirname, 'quota'), sequelize, tables);
+  const apiModels = loadModelsRecursive(path.join(__dirname, 'api'), sequelize, tables);
+  const paymentModels = loadModelsRecursive(path.join(__dirname, 'payment'), sequelize, tables);
+  const billingModels = loadModelsRecursive(path.join(__dirname, 'billing'), sequelize, tables);
 
   return {
     ...rootModels,
     ...authModels,
+    ...subscriptionModels,
+    ...quotaModels,
+    ...apiModels,
+    ...paymentModels,
+    ...billingModels,
   };
 }

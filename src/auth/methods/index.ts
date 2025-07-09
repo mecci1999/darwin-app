@@ -5,11 +5,14 @@ import jwt from 'jsonwebtoken';
 import { Star } from 'node-universe';
 import nodemailer from 'nodemailer';
 import { verifyCodeOptions } from 'typings/auth';
+import { AUTH_CONFIG } from '../constants';
+import { AuthState } from '../types';
+import { AuthUtils } from '../utils';
 
 /**
  * 验证微服务的方法
  */
-const authMethod = (star: Star) => {
+const authMethod = (star: Star, state?: AuthState) => {
   return {
     // 生成token
     async generateToken(params: { userId: string }) {
@@ -33,7 +36,7 @@ const authMethod = (star: Star) => {
         const privateKey = rsa.privateKey;
 
         return jwt.sign(payload, privateKey, {
-          expiresIn: (TOKEN_EXIPRE_TIME as any) || '2h', // TOKEN过期时间
+          expiresIn: AUTH_CONFIG.tokenExpireTime as any,
           algorithm: 'RS256',
         });
       } catch (error) {
@@ -62,7 +65,7 @@ const authMethod = (star: Star) => {
         const privateKey = rsa.privateKey;
 
         return jwt.sign(payload, privateKey, {
-          expiresIn: (REFRESH_TOKEN_EXIPRE_TIME as any) || '3d', // TOKEN过期时间
+          expiresIn: AUTH_CONFIG.refreshTokenExpireTime as any,
           algorithm: 'RS256',
         });
       } catch (error) {
@@ -119,10 +122,10 @@ const authMethod = (star: Star) => {
         try {
           // 创建邮箱发送对象
           const transporter = nodemailer.createTransport({
-            service: '163',
+            service: AUTH_CONFIG.email.service,
             auth: {
-              user: 'mecci1999@163.com',
-              pass: 'YEVimrR6xg6pNYKK',
+              user: AUTH_CONFIG.email.user,
+              pass: AUTH_CONFIG.email.pass,
             },
           });
 
@@ -136,11 +139,11 @@ const authMethod = (star: Star) => {
               message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
             });
           } else {
-            // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间为5分钟
+            // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间
             await star.cacher.set(
               `verifyCode:${params.email};type:${params.type}`,
               params.code,
-              5 * 60,
+              AUTH_CONFIG.verificationCodeExpireTime,
             );
 
             // 使用Promise包装sendMail方法
@@ -159,51 +162,38 @@ const authMethod = (star: Star) => {
         }
       });
     },
-    // 检查并生成RSA密钥对
+    // 检查并生成RSA密钥对 (已迁移到 AuthUtils)
     async checkAndGenerateRSA() {
-      try {
-        // 从数据库查询RSA密钥
-        const result = (await queryConfigs(['rsa'])) || [];
-
-        if (result.length > 0) {
-          const rsaData = JSON.parse(result[0].value);
-
-          // 检查是否已存在有效的RSA密钥对
-          if (rsaData.publicKey && rsaData.privateKey) {
-            star.logger?.info('RSA密钥对已存在，跳过生成');
-            return;
+      if (state) {
+        return AuthUtils.checkAndGenerateRSA(state, star.logger);
+      } else {
+        // 兼容旧版本调用
+        try {
+          const result = (await queryConfigs(['rsa'])) || [];
+          if (result.length > 0) {
+            const rsaData = JSON.parse(result[0].value);
+            if (rsaData.publicKey && rsaData.privateKey) {
+              star.logger?.info('RSA密钥对已存在，跳过生成');
+              return;
+            }
           }
+
+          star.logger?.info('RSA密钥对不存在，开始生成...');
+          const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+            modulusLength: 2048,
+          });
+
+          const publicKeyBuffer = publicKey.export({ type: 'spki', format: 'pem' });
+          const privateKeyBuffer = privateKey.export({ type: 'pkcs8', format: 'pem' });
+          const publicKeyText = publicKeyBuffer.toString('utf-8');
+          const privateKeyText = privateKeyBuffer.toString('utf-8');
+          const data = { publicKey: publicKeyText, privateKey: privateKeyText };
+
+          await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(data) }]);
+          star.logger?.info('RSA密钥对生成并保存成功');
+        } catch (error) {
+          star.logger?.error('检查或生成RSA密钥对时发生错误:', error);
         }
-
-        // 如果不存在或无效，则生成新的RSA密钥对
-        star.logger?.info('RSA密钥对不存在，开始生成...');
-
-        const { publicKey, privateKey } = generateKeyPairSync('rsa', {
-          modulusLength: 2048, // 密钥长度
-        });
-
-        // 生成RSA密钥对
-        const publicKeyBuffer = publicKey.export({
-          type: 'spki',
-          format: 'pem',
-        });
-        const privateKeyBuffer = privateKey.export({
-          type: 'pkcs8',
-          format: 'pem',
-        });
-
-        // 将密钥对转换成字符串
-        const publicKeyText = publicKeyBuffer.toString('utf-8');
-        const privateKeyText = privateKeyBuffer.toString('utf-8');
-
-        const data = { publicKey: publicKeyText, privateKey: privateKeyText };
-
-        // 将密钥存储至config表中
-        await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(data) }]);
-
-        star.logger?.info('RSA密钥对生成并保存成功');
-      } catch (error) {
-        star.logger?.error('检查或生成RSA密钥对时发生错误:', error);
       }
     },
   };
