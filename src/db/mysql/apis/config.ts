@@ -1,16 +1,13 @@
-import { ConfigKeysMap, IConfig } from "typings/config";
-import { DataBaseTableNames } from "typings/enum";
-import { mainConnection } from "..";
-import { ConfigTable } from "../models/config";
+import { ConfigKeysMap, DataBaseTableNames, IConfig } from 'typings';
+import { mainConnection } from '..';
+import { ConfigTable } from '../models/config';
 
 /**
  * 批量新增配置项
  */
 export async function saveOrUpdateConfigs(configs: IConfig[]) {
-  const model = await mainConnection.getModel<ConfigTable>(
-    DataBaseTableNames.Config,
-  );
-  if(!model) return [];
+  const model = await mainConnection.getModel<ConfigTable>(DataBaseTableNames.Config);
+  if (!model) return [];
   // 先尝试找到所有已存在的记录
   const existingKeys = configs.map((config) => config.key);
   const existingConfigs = await model.findAll({
@@ -38,7 +35,7 @@ export async function saveOrUpdateConfigs(configs: IConfig[]) {
 
   // 批量创建不存在的配置
   if (toCreate.length) {
-    await model.bulkCreate(toCreate, { updateOnDuplicate: ["value"] });
+    await model.bulkCreate(toCreate, { updateOnDuplicate: ['value'] });
   }
 
   // 更新已存在的配置
@@ -56,12 +53,10 @@ export async function saveOrUpdateConfigs(configs: IConfig[]) {
  * 获取所有的配置项
  */
 export async function getAllConfigList() {
-  const model = await mainConnection.getModel<ConfigTable>(
-    DataBaseTableNames.Config,
-  );
-  if(!model) return [];
+  const model = await mainConnection.getModel<ConfigTable>(DataBaseTableNames.Config);
+  if (!model) return [];
 
-  return model.findAll({ attributes: ["key", "value"] }).then((res) => {
+  return model.findAll({ attributes: ['key', 'value'] }).then((res) => {
     if (res) {
       return res.map((item) => {
         return item.toJSON();
@@ -76,10 +71,8 @@ export async function getAllConfigList() {
  * 查询某些配置项
  */
 export async function queryConfigs(keys: ConfigKeysMap[] | string[]) {
-  const model = await mainConnection.getModel<ConfigTable>(
-    DataBaseTableNames.Config,
-  );
-  if(!model) return [];
+  const model = await mainConnection.getModel<ConfigTable>(DataBaseTableNames.Config);
+  if (!model) return [];
 
   return await model.findAll({
     where: {
@@ -95,9 +88,7 @@ export async function queryConfigs(keys: ConfigKeysMap[] | string[]) {
  * 批量删除配置项
  */
 export async function deleteConfigs(keys: ConfigKeysMap[] | string[]) {
-  const model = await mainConnection.getModel<ConfigTable>(
-    DataBaseTableNames.Config,
-  );
+  const model = await mainConnection.getModel<ConfigTable>(DataBaseTableNames.Config);
 
   await model.destroy({
     where: {

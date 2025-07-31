@@ -1,7 +1,13 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
-import { SubscriptionPlanAttributes, SubscriptionPlanTable } from '../models/subscription/SubscriptionPlan';
-import { UserSubscriptionAttributes, UserSubscriptionTable } from '../models/subscription/UserSubscription';
+import {
+  SubscriptionPlanAttributes,
+  SubscriptionPlanTable,
+} from '../models/subscription/subscriptionPlan';
+import {
+  UserSubscriptionAttributes,
+  UserSubscriptionTable,
+} from '../models/subscription/userSubscription';
 
 /**
  * 订阅计划相关数据库操作
@@ -12,7 +18,9 @@ import { UserSubscriptionAttributes, UserSubscriptionTable } from '../models/sub
  */
 export async function saveOrUpdateSubscriptionPlan(plan: SubscriptionPlanAttributes) {
   try {
-    const model = await mainConnection.getModel<SubscriptionPlanTable>(DataBaseTableNames.SubscriptionPlan);
+    const model = await mainConnection.getModel<SubscriptionPlanTable>(
+      DataBaseTableNames.SubscriptionPlan,
+    );
     return await model.upsert(plan);
   } catch (error) {
     console.log('saveOrUpdateSubscriptionPlan error:', error);
@@ -25,15 +33,17 @@ export async function saveOrUpdateSubscriptionPlan(plan: SubscriptionPlanAttribu
  */
 export async function queryAllSubscriptionPlans(): Promise<SubscriptionPlanAttributes[]> {
   try {
-    const model = await mainConnection.getModel<SubscriptionPlanTable>(DataBaseTableNames.SubscriptionPlan);
+    const model = await mainConnection.getModel<SubscriptionPlanTable>(
+      DataBaseTableNames.SubscriptionPlan,
+    );
     if (!model) return [];
-    
+
     const plans = await model.findAll({
       where: { isActive: true },
       order: [['price', 'ASC']],
     });
-    
-    return plans.map(plan => plan.toJSON());
+
+    return plans.map((plan) => plan.toJSON());
   } catch (error) {
     console.log('queryAllSubscriptionPlans error:', error);
     return [];
@@ -43,9 +53,13 @@ export async function queryAllSubscriptionPlans(): Promise<SubscriptionPlanAttri
 /**
  * 根据ID查询订阅计划
  */
-export async function findSubscriptionPlanById(planId: string): Promise<SubscriptionPlanAttributes | null> {
+export async function findSubscriptionPlanById(
+  planId: string,
+): Promise<SubscriptionPlanAttributes | null> {
   try {
-    const model = await mainConnection.getModel<SubscriptionPlanTable>(DataBaseTableNames.SubscriptionPlan);
+    const model = await mainConnection.getModel<SubscriptionPlanTable>(
+      DataBaseTableNames.SubscriptionPlan,
+    );
     if (!model) return null;
 
     const plan = await model.findOne({
@@ -68,7 +82,9 @@ export async function findSubscriptionPlanById(planId: string): Promise<Subscrip
  */
 export async function createUserSubscription(subscription: UserSubscriptionAttributes) {
   try {
-    const model = await mainConnection.getModel<UserSubscriptionTable>(DataBaseTableNames.UserSubscription);
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
     return await model.create(subscription);
   } catch (error) {
     console.log('createUserSubscription error:', error);
@@ -79,9 +95,13 @@ export async function createUserSubscription(subscription: UserSubscriptionAttri
 /**
  * 获取用户当前有效订阅
  */
-export async function findActiveUserSubscription(userId: string): Promise<UserSubscriptionAttributes | null> {
+export async function findActiveUserSubscription(
+  userId: string,
+): Promise<UserSubscriptionAttributes | null> {
   try {
-    const model = await mainConnection.getModel<UserSubscriptionTable>(DataBaseTableNames.UserSubscription);
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
     if (!model) return null;
 
     const subscription = await model.findOne({
@@ -105,9 +125,13 @@ export async function findActiveUserSubscription(userId: string): Promise<UserSu
 /**
  * 获取用户所有订阅历史
  */
-export async function findUserSubscriptionHistory(userId: string): Promise<UserSubscriptionAttributes[]> {
+export async function findUserSubscriptionHistory(
+  userId: string,
+): Promise<UserSubscriptionAttributes[]> {
   try {
-    const model = await mainConnection.getModel<UserSubscriptionTable>(DataBaseTableNames.UserSubscription);
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
     if (!model) return [];
 
     const subscriptions = await model.findAll({
@@ -115,7 +139,7 @@ export async function findUserSubscriptionHistory(userId: string): Promise<UserS
       order: [['createdAt', 'DESC']],
     });
 
-    return subscriptions.map(sub => sub.toJSON());
+    return subscriptions.map((sub) => sub.toJSON());
   } catch (error) {
     console.log('findUserSubscriptionHistory error:', error);
     return [];
@@ -126,15 +150,14 @@ export async function findUserSubscriptionHistory(userId: string): Promise<UserS
  * 更新订阅状态
  */
 export async function updateSubscriptionStatus(
-  subscriptionId: string, 
-  status: 'active' | 'cancelled' | 'expired' | 'suspended'
+  subscriptionId: string,
+  status: 'active' | 'cancelled' | 'expired' | 'suspended',
 ) {
   try {
-    const model = await mainConnection.getModel<UserSubscriptionTable>(DataBaseTableNames.UserSubscription);
-    return await model.update(
-      { status },
-      { where: { id: subscriptionId } }
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
     );
+    return await model.update({ status }, { where: { id: subscriptionId } });
   } catch (error) {
     console.log('updateSubscriptionStatus error:', error);
     throw error;

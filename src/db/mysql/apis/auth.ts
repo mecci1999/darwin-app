@@ -1,7 +1,7 @@
 /**
  * 登录校验方法
  */
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
 
 // 查询邮箱是否存在

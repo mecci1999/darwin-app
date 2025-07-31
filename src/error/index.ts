@@ -1,5 +1,5 @@
 import { Errors } from 'node-universe';
-import { ResponseCode } from 'typings/enum';
+import { HttpResponseCode } from 'typings';
 
 /**
  * IP被被封禁报错
@@ -8,7 +8,7 @@ export class IPNotPermissionAccess extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
     super('该IP地址已被封禁', 404, type || '', {
       content: data,
-      code: ResponseCode.IPNotAccess,
+      code: HttpResponseCode.IPNotAccess,
     });
   }
 }
@@ -38,7 +38,7 @@ export class UserNotLoginError extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
     super('请先登录~', 200, type || '', {
       content: data,
-      code: ResponseCode.NotLogin,
+      code: HttpResponseCode.NotLogin,
     });
   }
 }
@@ -50,7 +50,19 @@ export class UnAuthorizedError extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
     super('Token无效', 401, type || '', {
       content: data,
-      code: ResponseCode.ERR_INVALID_TOKEN,
+      code: HttpResponseCode.ERR_INVALID_TOKEN,
+    });
+  }
+}
+
+/**
+ * 无效的Token
+ */
+export class InvalidTokenError extends Errors.StarClientError {
+  constructor(type?: string, data?: any) {
+    super('无效的Token', 401, type || '', {
+      content: data,
+      code: HttpResponseCode.ERR_INVALID_TOKEN,
     });
   }
 }
@@ -62,7 +74,31 @@ export class TokenExpiredError extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
     super('Token过期续签', 401, type || '', {
       content: data,
-      code: ResponseCode.REFRESH_TOKEN,
+      code: HttpResponseCode.REFRESH_TOKEN,
+    });
+  }
+}
+
+/**
+ * 权限被拒绝
+ */
+export class PermissionDeniedError extends Errors.StarClientError {
+  constructor(type?: string, data?: any) {
+    super('权限被拒绝', 403, type || '', {
+      content: data,
+      code: HttpResponseCode.NoPermissionError,
+    });
+  }
+}
+
+/**
+ * 请求频率超限
+ */
+export class RateLimitExceededError extends Errors.StarClientError {
+  constructor(type?: string, data?: any) {
+    super('请求过于频繁，请稍后再试', 429, type || '', {
+      content: data,
+      code: HttpResponseCode.TooManyRequests,
     });
   }
 }

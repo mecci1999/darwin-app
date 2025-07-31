@@ -1,5 +1,5 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { UserTable } from '../user';
 
 export interface IEmailAuthAttributes {

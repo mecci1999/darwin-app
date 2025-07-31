@@ -1,8 +1,8 @@
 /**
  * IP黑名单表
  */
-import { DataTypes, Model, Optional, Sequelize } from "sequelize";
-import { DataBaseTableNames, IPAddressBanStatus } from "typings/enum";
+import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
+import { DataBaseTableNames, IPAddressBanStatus } from 'typings';
 
 export interface IIPBlackListTableAttributes {
   id?: number;
@@ -14,10 +14,7 @@ export interface IIPBlackListTableAttributes {
 }
 
 export class IPBlackListTable
-  extends Model<
-    IIPBlackListTableAttributes,
-    Optional<IIPBlackListTableAttributes, "id">
-  >
+  extends Model<IIPBlackListTableAttributes, Optional<IIPBlackListTableAttributes, 'id'>>
   implements IIPBlackListTableAttributes
 {
   public id!: number; // id
@@ -36,7 +33,7 @@ export default function (sequelize: Sequelize) {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       ipv4: { type: DataTypes.STRING(32), allowNull: true },
       ipv6: { type: DataTypes.STRING(45), allowNull: true },
-      reason: { type: DataTypes.TEXT, allowNull: true, defaultValue: "" },
+      reason: { type: DataTypes.TEXT, allowNull: true, defaultValue: '' },
       status: {
         type: DataTypes.STRING(32),
         allowNull: false,

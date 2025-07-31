@@ -1,9 +1,8 @@
 /**
  * 微服务相关的配置表
  */
-import { DataTypes, Model, Sequelize } from "sequelize";
-import { IConfig } from "typings/config";
-import { DataBaseTableNames } from "typings/enum";
+import { DataTypes, Model, Sequelize } from 'sequelize';
+import { IConfig, DataBaseTableNames } from 'typings';
 
 export interface IConfigTableAttributes extends IConfig {
   key: string;

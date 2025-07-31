@@ -1,8 +1,8 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
-import { PaymentOrderAttributes, PaymentOrderTable } from '../models/payment/PaymentOrder';
-import { RefundRequestAttributes, RefundRequestTable } from '../models/payment/RefundRequest';
-import { PaymentProviderAttributes, PaymentProviderTable } from '../models/payment/PaymentProvider';
+import { PaymentOrderAttributes, PaymentOrderTable } from '../models/payment/paymentOrder';
+import { PaymentProviderAttributes, PaymentProviderTable } from '../models/payment/paymentProvider';
+import { RefundRequestAttributes, RefundRequestTable } from '../models/payment/refundRequest';
 
 /**
  * 支付订单相关数据库操作

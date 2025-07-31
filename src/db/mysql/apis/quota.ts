@@ -1,10 +1,10 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
-import { UserQuotaAttributes, UserQuotaTable } from '../models/quota/UserQuota';
 import {
   QuotaUsageHistoryAttributes,
   QuotaUsageHistoryTable,
-} from '../models/quota/QuotaUsageHistory';
+} from '../models/quota/quotaUsageHistory';
+import { UserQuotaAttributes, UserQuotaTable } from '../models/quota/userQuota';
 
 /**
  * 用户配额相关数据库操作

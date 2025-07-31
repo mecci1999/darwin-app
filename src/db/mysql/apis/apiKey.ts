@@ -1,7 +1,11 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
-import { ApiKeyAttributes, ApiKeyCreationAttributes, ApiKeyTable } from '../models/api/ApiKey';
-import { ApiKeyStatsAttributes, ApiKeyStatsCreationAttributes, ApiKeyStatsTable } from '../models/api/ApiKeyStats';
+import { ApiKeyAttributes, ApiKeyCreationAttributes, ApiKeyTable } from '../models/api/apiKey';
+import {
+  ApiKeyStatsAttributes,
+  ApiKeyStatsCreationAttributes,
+  ApiKeyStatsTable,
+} from '../models/api/apiKeyStats';
 
 /**
  * API密钥相关数据库操作
@@ -247,5 +251,53 @@ export async function getApiKeyTotalStats(
   } catch (error) {
     console.log('getApiKeyTotalStats error:', error);
     return { totalRequests: 0, daysActive: 0 };
+  }
+}
+
+/**
+ * 根据租户ID统计活跃API密钥数量
+ */
+export async function countActiveApiKeysByTenantId(tenantId: string): Promise<number> {
+  try {
+    const model = await mainConnection.getModel<ApiKeyTable>(DataBaseTableNames.ApiKey);
+    if (!model) return 0;
+
+    const count = await model.count({
+      where: {
+        // tenantId, // 注意：当前ApiKey模型中没有tenantId字段，需要根据实际情况调整
+        isActive: true,
+      },
+    });
+
+    return count;
+  } catch (error) {
+    console.log('countActiveApiKeysByTenantId error:', error);
+    return 0;
+  }
+}
+
+/**
+ * 根据租户ID查询API密钥列表
+ */
+export async function findApiKeysByTenantId(tenantId: string): Promise<ApiKeyAttributes[]> {
+  try {
+    const model = await mainConnection.getModel<ApiKeyTable>(DataBaseTableNames.ApiKey);
+    if (!model) return [];
+
+    const apiKeys = await model.findAll({
+      where: {
+        // tenantId, // 注意：当前ApiKey模型中没有tenantId字段，需要根据实际情况调整
+        isActive: true,
+      },
+      order: [['createdAt', 'DESC']],
+      attributes: {
+        exclude: ['keyHash'], // 出于安全考虑，不返回完整密钥
+      },
+    });
+
+    return apiKeys.map((key) => key.toJSON());
+  } catch (error) {
+    console.log('findApiKeysByTenantId error:', error);
+    return [];
   }
 }

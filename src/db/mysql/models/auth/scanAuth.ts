@@ -1,5 +1,5 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { UserTable } from '../user'; // 添加用户模型引用
 
 export interface IScanAuthAttributes {

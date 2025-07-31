@@ -2,7 +2,7 @@
  * 用户表
  */
 import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 
 export interface IUserTableAttributes {
   id?: number;

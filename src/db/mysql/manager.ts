@@ -4,7 +4,7 @@
 import * as SequelizeStatic from 'sequelize';
 import deepmerge from 'deepmerge';
 import getModels from './models';
-import { MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE, MYSQL_PASSWORD, MYSQL_USER } from 'config/index';
+import { MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE, MYSQL_PASSWORD, MYSQL_USER } from 'config';
 
 export class DataBaseConnectionManager {
   public static SequelizeStatic = SequelizeStatic;

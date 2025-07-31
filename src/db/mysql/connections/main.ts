@@ -1,6 +1,6 @@
 import Sequelize, { Model } from 'sequelize';
+import { DataBaseTableNames } from 'typings';
 import databaseConnectionManager, { DataBaseConnectionManager } from '../manager';
-import { DataBaseTableNames } from 'typings/enum';
 
 class MainDatabaseConnection {
   public connection: Sequelize.Sequelize | null = null;

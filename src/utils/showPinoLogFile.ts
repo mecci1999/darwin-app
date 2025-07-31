@@ -4,7 +4,7 @@ import { spawn } from "child_process";
 /**
  * 用来在控制台展示pino生成的文件日志
  */
-function showPinoLogFile() {
+export default function showPinoLogFile() {
   console.log(process.argv);
   // 日志模块名
   let moduleName = "";
@@ -43,5 +43,3 @@ function showPinoLogFile() {
     console.log(`child process exited with code ${code}`);
   });
 }
-
-showPinoLogFile();

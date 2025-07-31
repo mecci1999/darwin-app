@@ -1,15 +1,15 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
-import { BillAttributes, BillTable } from '../models/billing/Bill';
-import { BillItemAttributes, BillItemTable } from '../models/billing/BillItem';
-import {
-  UserBillingAddressAttributes,
-  UserBillingAddressTable,
-} from '../models/billing/UserBillingAddress';
+import { BillAttributes, BillTable } from '../models/billing/bill';
 import {
   BillingReminderSettingAttributes,
   BillingReminderSettingTable,
-} from '../models/billing/BillingReminderSetting';
+} from '../models/billing/billingReminderSetting';
+import { BillItemAttributes, BillItemTable } from '../models/billing/billItem';
+import {
+  UserBillingAddressAttributes,
+  UserBillingAddressTable,
+} from '../models/billing/userBillingAddress';
 
 /**
  * 账单相关数据库操作
@@ -313,10 +313,7 @@ export async function getUserBillingStats(userId: string): Promise<{
       model.findOne({
         where: { userId },
         attributes: [
-          [
-            mainConnection.Sequelize.fn('COUNT', mainConnection.Sequelize.col('id')),
-            'totalBills',
-          ],
+          [mainConnection.Sequelize.fn('COUNT', mainConnection.Sequelize.col('id')), 'totalBills'],
           [
             mainConnection.Sequelize.fn('SUM', mainConnection.Sequelize.col('total')),
             'totalAmount',
@@ -337,10 +334,7 @@ export async function getUserBillingStats(userId: string): Promise<{
           status: { [mainConnection.Sequelize.Op.ne]: 'paid' },
         },
         attributes: [
-          [
-            mainConnection.Sequelize.fn('COUNT', mainConnection.Sequelize.col('id')),
-            'unpaidBills',
-          ],
+          [mainConnection.Sequelize.fn('COUNT', mainConnection.Sequelize.col('id')), 'unpaidBills'],
           [
             mainConnection.Sequelize.fn('SUM', mainConnection.Sequelize.col('total')),
             'unpaidAmount',

@@ -1,11 +1,11 @@
 /**
  * 数据库初始化器 - 通用版本，可供所有微服务使用
  */
-import * as dbConnections from './index';
-import { getAllIpBlackList, saveOrUpdateIpBlackList } from './apis/ipBlackList';
-import { getAllConfigList } from './apis/config';
-import { ConfigKeysMap } from 'typings/enum';
 import _ from 'lodash';
+import { ConfigKeysMap } from 'typings';
+import { getAllConfigList } from './apis/config';
+import { getAllIpBlackList, saveOrUpdateIpBlackList } from './apis/ipBlackList';
+import * as dbConnections from './index';
 
 // 常量定义
 const IP_SYNC_INTERVAL = 30 * 60 * 1000; // 30分钟
@@ -38,10 +38,10 @@ export class DatabaseInitializer {
     options?: {
       enableSlowQueryLog?: boolean;
       slowQueryThreshold?: number;
-    }
+    },
   ) {
     const { enableSlowQueryLog = true, slowQueryThreshold = SLOW_QUERY_THRESHOLD } = options || {};
-    
+
     try {
       const connectionOptions: any = {
         benchmark: true,
@@ -91,7 +91,7 @@ export class DatabaseInitializer {
   public static setupIpSyncTimer(state: DatabaseState, customInterval?: number) {
     try {
       let interval = customInterval || IP_SYNC_INTERVAL;
-      
+
       // 如果有配置项，则使用配置的间隔
       if (state.configs && state.configs[ConfigKeysMap.IPAccessBlackList]) {
         const IPConfig = JSON.parse(state.configs[ConfigKeysMap.IPAccessBlackList]);
@@ -115,7 +115,7 @@ export class DatabaseInitializer {
   public static async cleanup(state?: DatabaseState) {
     try {
       await dbConnections.mainConnection.destroy();
-      
+
       if (state?.ipTimer) {
         clearInterval(state.ipTimer);
         state.ipTimer = null;
@@ -160,26 +160,26 @@ export class DatabaseInitializer {
       enableIpBlacklist?: boolean;
       enableIpSyncTimer?: boolean;
       ipSyncInterval?: number;
-    }
+    },
   ) {
     const {
       enableSlowQueryLog = true,
       slowQueryThreshold = SLOW_QUERY_THRESHOLD,
       enableIpBlacklist = true,
       enableIpSyncTimer = true,
-      ipSyncInterval
+      ipSyncInterval,
     } = options || {};
 
     // 初始化数据库连接
     await this.initializeDatabase(logger, state, {
       enableSlowQueryLog,
-      slowQueryThreshold
+      slowQueryThreshold,
     });
 
     // 如果启用IP黑名单功能且提供了状态对象
     if (enableIpBlacklist && state) {
       await this.initializeIpBlacklist(state);
-      
+
       if (enableIpSyncTimer) {
         this.setupIpSyncTimer(state, ipSyncInterval);
       }

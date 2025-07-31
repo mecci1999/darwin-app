@@ -35,7 +35,7 @@ export enum IPAddressBanStatus {
 /**
  * 请求响应码
  */
-export enum ResponseCode {
+export enum HttpResponseCode {
   Success = 0, // 成功
   ServiceActionFaild = 10000, // 服务操作失败
   ParamsError = 10001, // 参数错误
@@ -60,6 +60,7 @@ export enum ResponseCode {
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
   NoPermissionError = 30003, // 没有权限
+  BAD_REQUEST = 40000, // 失败
   REFRESH_TOKEN = 40001, // 续签
 }
 

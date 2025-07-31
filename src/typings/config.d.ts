@@ -1,9 +1,8 @@
-declare enum ConfigKeysMap {
-  IPAccessBlackList = 'IPAccessBlackList', // IP访问黑名单相关配置
-  PinoLogger = 'PinoLogger', // pino日志模块相关配置
-}
+import { ConfigKeysMap } from './enum';
 
 export interface IConfig {
   key: string | ConfigKeysMap;
   value: any;
 }
+
+export { ConfigKeysMap };

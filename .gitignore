@@ -1,7 +1,8 @@
 dist
 dist2
 node_modules
-logs
+log
 mysql_data
 file
 .env.production
+.vscode

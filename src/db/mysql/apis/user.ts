@@ -1,4 +1,4 @@
-import { DataBaseTableNames } from 'typings/enum';
+import { DataBaseTableNames } from 'typings';
 import { mainConnection } from '..';
 import { IUserTableAttributes, UserTable } from '../models/user';
 
