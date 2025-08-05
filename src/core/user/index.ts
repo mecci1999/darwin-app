@@ -25,7 +25,7 @@ async function initializeUserService() {
     cacher: {
       type: 'Redis',
       clone: true,
-      options: {
+      redis: {
         port: REDIS_CONFIG.PORT,
         host: REDIS_CONFIG.HOST,
         password: REDIS_CONFIG.PASSWORD,

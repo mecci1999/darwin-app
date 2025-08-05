@@ -3,6 +3,10 @@ dist2
 node_modules
 log
 mysql_data
+influxdb_config
+influxdb_data
+elasticsearch_data
+redis.conf
 file
 .env.production
 .vscode

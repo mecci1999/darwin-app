@@ -3,13 +3,13 @@
  * SaaS化日志管理服务 - 核心数据处理服务
  * 支持多种日志格式：JSON、文本、Syslog、结构化日志
  */
-import { Star } from 'node-universe';
-import { APP_NAME } from './constants';
 import { DatabaseService } from 'db/mysql';
-import { Starlight } from '../typings';
+import { Star } from 'node-universe';
+import { Starlight } from 'typings';
+import createActions from './actions';
+import { APP_NAME } from './constants';
 import { LogsState } from './types/index';
 import { elasticsearchManager } from './utils/elasticsearch-manager';
-import createActions from './actions';
 
 // 服务状态管理
 const logsState: LogsState = {
