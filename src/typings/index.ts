@@ -1,6 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import { Star } from 'node-universe';
 import { DatabaseService } from 'db/mysql';
+import { HttpResponseCode } from './enum';
 
 /**
  * 扩展的 Star 类型，包含数据库服务
@@ -160,6 +161,19 @@ export enum HttpStatusCode {
   BAD_GATEWAY = 502, // 网关错误
   SERVICE_UNAVAILABLE = 503, // 服务不可用
   GATEWAY_TIMEOUT = 504, // 网关超时
+}
+
+/**
+ * 请求返回的响应类型
+ */
+export interface HttpResponseItem {
+  status: number; // http状态码
+  data: {
+    code?: HttpResponseCode | number; // 响应码
+    content?: any; // 响应主体
+    message?: string; // 消息
+    success?: boolean; // 是否成功
+  };
 }
 
 // 导出其他声明类型

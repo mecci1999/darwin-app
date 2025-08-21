@@ -1,13 +1,12 @@
 // User微服务事件处理工具类
+import { Starlight } from 'typings';
 import { UserEventData, UserLoginEvent, UserStatusChangeEvent } from '../types';
-import { EVENT_TYPES, KAFKA_CONFIG } from '../constants';
 
 class EventHandler {
   private static instance: EventHandler;
-  private kafkaProducer: any;
-  private broker: any;
+  private star: Starlight | null = null;
   private eventQueue: UserEventData[] = [];
-  private processingTimer?: NodeJS.Timeout;
+  private processing = false;
 
   static getInstance(): EventHandler {
     if (!EventHandler.instance) {
@@ -19,19 +18,16 @@ class EventHandler {
   /**
    * 初始化事件处理器
    */
-  async initialize(kafkaProducer?: any, broker?: any): Promise<void> {
-    this.kafkaProducer = kafkaProducer;
-    this.broker = broker;
-    
-    // 启动事件处理定时器
-    this.startEventProcessing();
+  initialize(star: Starlight) {
+    this.star = star;
+    this.startEventProcessor();
   }
 
   /**
-   * 启动事件处理定时器
+   * 启动事件处理器
    */
-  private startEventProcessing(): void {
-    this.processingTimer = setInterval(() => {
+  private startEventProcessor() {
+    setInterval(() => {
       this.processEventQueue();
     }, 1000); // 每秒处理一次事件队列
   }
@@ -39,182 +35,107 @@ class EventHandler {
   /**
    * 处理事件队列
    */
-  private async processEventQueue(): Promise<void> {
-    if (this.eventQueue.length === 0) return;
-    
-    const events = this.eventQueue.splice(0, 10); // 每次处理最多10个事件
-    
+  private async processEventQueue() {
+    if (this.processing || this.eventQueue.length === 0) {
+      return;
+    }
+
+    this.processing = true;
+    const batchSize = 10;
+    const events = this.eventQueue.splice(0, batchSize);
+
     for (const event of events) {
       try {
         await this.publishEvent(event);
       } catch (error) {
-        console.error('Failed to process event:', error);
-        // 重新加入队列进行重试
+        this.star?.logger?.error('Failed to publish event:', error);
+        // 重新加入队列重试
         this.eventQueue.unshift(event);
       }
     }
+
+    this.processing = false;
   }
 
   /**
-   * 发布事件到Kafka
+   * 发布事件到内部事件总线
    */
-  private async publishEvent(event: UserEventData): Promise<void> {
-    if (this.kafkaProducer) {
-      try {
-        await this.kafkaProducer.send({
-          topic: KAFKA_CONFIG.TOPICS.USER_EVENTS,
-          messages: [{
-            key: event.userId,
-            value: JSON.stringify(event),
-            timestamp: event.timestamp.getTime().toString(),
-          }],
-        });
-      } catch (error) {
-        console.error('Failed to publish event to Kafka:', error);
-        throw error;
-      }
+  private async publishEvent(eventData: UserEventData) {
+    if (!this.star) {
+      throw new Error('EventHandler not initialized');
     }
-    
-    // 同时通过内部事件总线发布
-    if (this.broker) {
-      try {
-        await this.broker.emit(event.eventType, event);
-      } catch (error) {
-        console.error('Failed to emit event through broker:', error);
-      }
-    }
+
+    // 使用Star实例的emit方法发布事件
+    this.star.emit(eventData.eventType, {
+      userId: eventData.userId,
+      timestamp: eventData.timestamp,
+      data: eventData.data,
+      source: eventData.source,
+      metadata: eventData.metadata,
+    });
   }
 
   /**
    * 发布用户创建事件
    */
-  async publishUserCreated(userId: string, userData: any, source: string): Promise<void> {
+  publishUserCreated(userId: string, userData: any, source: string = 'user-service') {
     const event: UserEventData = {
       userId,
-      eventType: EVENT_TYPES.USER_CREATED,
+      eventType: 'user.created',
       timestamp: new Date(),
-      data: {
-        nickname: userData.nickname,
-        source: userData.source,
-        status: userData.status,
-      },
+      data: userData,
       source,
       metadata: {
-        version: '1.0',
+        action: 'create',
         service: 'user',
       },
     };
-    
     this.eventQueue.push(event);
   }
 
   /**
    * 发布用户更新事件
    */
-  async publishUserUpdated(userId: string, oldData: any, newData: any, source: string): Promise<void> {
+  publishUserUpdated(userId: string, updateData: any, source: string = 'user-service') {
     const event: UserEventData = {
       userId,
-      eventType: EVENT_TYPES.USER_UPDATED,
+      eventType: 'user.updated',
       timestamp: new Date(),
-      data: {
-        oldData: {
-          nickname: oldData.nickname,
-          status: oldData.status,
-        },
-        newData: {
-          nickname: newData.nickname,
-          status: newData.status,
-        },
-        changes: this.getChangedFields(oldData, newData),
-      },
+      data: updateData,
       source,
       metadata: {
-        version: '1.0',
+        action: 'update',
         service: 'user',
       },
     };
-    
     this.eventQueue.push(event);
   }
 
   /**
    * 发布用户删除事件
    */
-  async publishUserDeleted(userId: string, userData: any, source: string): Promise<void> {
+  publishUserDeleted(userId: string, source: string = 'user-service') {
     const event: UserEventData = {
       userId,
-      eventType: EVENT_TYPES.USER_DELETED,
+      eventType: 'user.deleted',
       timestamp: new Date(),
-      data: {
-        nickname: userData.nickname,
-        deletedAt: new Date(),
-        reason: 'user_request',
-      },
+      data: { userId },
       source,
       metadata: {
-        version: '1.0',
+        action: 'delete',
         service: 'user',
       },
     };
-    
-    this.eventQueue.push(event);
-  }
-
-  /**
-   * 发布用户状态变更事件
-   */
-  async publishUserStatusChanged(event: UserStatusChangeEvent): Promise<void> {
-    const userEvent: UserEventData = {
-      userId: event.userId,
-      eventType: EVENT_TYPES.USER_STATUS_CHANGED,
-      timestamp: event.timestamp,
-      data: {
-        oldStatus: event.oldStatus,
-        newStatus: event.newStatus,
-        reason: event.reason,
-        changedBy: event.changedBy,
-      },
-      source: 'user-service',
-      metadata: {
-        version: '1.0',
-        service: 'user',
-      },
-    };
-    
-    this.eventQueue.push(userEvent);
-  }
-
-  /**
-   * 发布用户资料更新事件
-   */
-  async publishUserProfileUpdated(userId: string, profileData: any, source: string): Promise<void> {
-    const event: UserEventData = {
-      userId,
-      eventType: EVENT_TYPES.USER_PROFILE_UPDATED,
-      timestamp: new Date(),
-      data: {
-        nickname: profileData.nickname,
-        avatar: profileData.avatar,
-        bio: profileData.bio,
-        preferences: profileData.preferences,
-      },
-      source,
-      metadata: {
-        version: '1.0',
-        service: 'user',
-      },
-    };
-    
     this.eventQueue.push(event);
   }
 
   /**
    * 发布用户登录事件
    */
-  async publishUserLogin(loginEvent: UserLoginEvent): Promise<void> {
+  publishUserLogin(loginEvent: UserLoginEvent) {
     const event: UserEventData = {
       userId: loginEvent.userId,
-      eventType: EVENT_TYPES.USER_LOGIN,
+      eventType: 'user.login',
       timestamp: loginEvent.timestamp,
       data: {
         source: loginEvent.source,
@@ -223,135 +144,120 @@ class EventHandler {
         success: loginEvent.success,
         failureReason: loginEvent.failureReason,
       },
-      source: loginEvent.source,
+      source: 'user-service',
       metadata: {
-        version: '1.0',
+        action: 'login',
         service: 'user',
       },
     };
-    
     this.eventQueue.push(event);
   }
 
   /**
    * 发布用户登出事件
    */
-  async publishUserLogout(userId: string, source: string, metadata?: any): Promise<void> {
+  publishUserLogout(userId: string, deviceId?: string, reason?: string) {
     const event: UserEventData = {
       userId,
-      eventType: EVENT_TYPES.USER_LOGOUT,
+      eventType: 'user.logout',
       timestamp: new Date(),
       data: {
-        source,
-        logoutTime: new Date(),
-        sessionDuration: metadata?.sessionDuration,
+        deviceId,
+        reason: reason || 'manual',
       },
-      source,
+      source: 'user-service',
       metadata: {
-        version: '1.0',
+        action: 'logout',
         service: 'user',
-        ...metadata,
       },
     };
-    
     this.eventQueue.push(event);
   }
 
   /**
-   * 获取变更的字段
+   * 发布用户状态变更事件
    */
-  private getChangedFields(oldData: any, newData: any): string[] {
-    const changes: string[] = [];
-    const fields = ['nickname', 'avatar', 'email', 'phone', 'bio', 'status'];
-    
-    for (const field of fields) {
-      if (oldData[field] !== newData[field]) {
-        changes.push(field);
-      }
-    }
-    
-    return changes;
-  }
-
-  /**
-   * 处理外部事件
-   */
-  async handleExternalEvent(eventType: string, data: any): Promise<void> {
-    switch (eventType) {
-      case 'auth.login':
-        await this.handleAuthLoginEvent(data);
-        break;
-      case 'auth.logout':
-        await this.handleAuthLogoutEvent(data);
-        break;
-      case 'subscription.updated':
-        await this.handleSubscriptionUpdatedEvent(data);
-        break;
-      default:
-        console.warn(`Unhandled external event type: ${eventType}`);
-    }
-  }
-
-  /**
-   * 处理认证登录事件
-   */
-  private async handleAuthLoginEvent(data: any): Promise<void> {
-    const loginEvent: UserLoginEvent = {
-      userId: data.userId,
-      source: data.source || 'web',
-      ip: data.ip,
-      userAgent: data.userAgent,
-      timestamp: new Date(data.timestamp),
-      success: data.success,
-      failureReason: data.failureReason,
+  publishUserStatusChanged(statusChangeEvent: UserStatusChangeEvent) {
+    const event: UserEventData = {
+      userId: statusChangeEvent.userId,
+      eventType: 'user.status.changed',
+      timestamp: statusChangeEvent.timestamp,
+      data: {
+        oldStatus: statusChangeEvent.oldStatus,
+        newStatus: statusChangeEvent.newStatus,
+        reason: statusChangeEvent.reason,
+        changedBy: statusChangeEvent.changedBy,
+      },
+      source: 'user-service',
+      metadata: {
+        action: 'status_change',
+        service: 'user',
+      },
     };
-    
-    await this.publishUserLogin(loginEvent);
+    this.eventQueue.push(event);
+  }
+
+
+
+  /**
+   * 发布用户应用关联事件
+   */
+  publishUserApplicationAdded(userId: string, applicationId: string) {
+    const event: UserEventData = {
+      userId,
+      eventType: 'user.application.added',
+      timestamp: new Date(),
+      data: { applicationId },
+      source: 'user-service',
+      metadata: {
+        action: 'application_add',
+        service: 'user',
+      },
+    };
+    this.eventQueue.push(event);
   }
 
   /**
-   * 处理认证登出事件
+   * 发布用户应用移除事件
    */
-  private async handleAuthLogoutEvent(data: any): Promise<void> {
-    await this.publishUserLogout(data.userId, data.source, {
-      sessionDuration: data.sessionDuration,
-      ip: data.ip,
-    });
-  }
-
-  /**
-   * 处理订阅更新事件
-   */
-  private async handleSubscriptionUpdatedEvent(data: any): Promise<void> {
-    // 这里可以处理订阅更新对用户状态的影响
-    console.log(`User ${data.userId} subscription updated to plan: ${data.planId}`);
+  publishUserApplicationRemoved(userId: string, applicationId: string) {
+    const event: UserEventData = {
+      userId,
+      eventType: 'user.application.removed',
+      timestamp: new Date(),
+      data: { applicationId },
+      source: 'user-service',
+      metadata: {
+        action: 'application_remove',
+        service: 'user',
+      },
+    };
+    this.eventQueue.push(event);
   }
 
   /**
    * 获取事件队列状态
    */
-  getEventQueueStatus(): { queueSize: number; isProcessing: boolean } {
+  getQueueStatus() {
     return {
-      queueSize: this.eventQueue.length,
-      isProcessing: !!this.processingTimer,
+      queueLength: this.eventQueue.length,
+      processing: this.processing,
     };
+  }
+
+  /**
+   * 清空事件队列
+   */
+  clearQueue() {
+    this.eventQueue = [];
   }
 
   /**
    * 停止事件处理器
    */
-  async stop(): Promise<void> {
-    if (this.processingTimer) {
-      clearInterval(this.processingTimer);
-      this.processingTimer = undefined;
-    }
-    
-    // 处理剩余的事件
-    await this.processEventQueue();
-    
+  stop() {
+    this.processing = false;
     this.eventQueue = [];
-    this.kafkaProducer = null;
-    this.broker = null;
   }
 }
 

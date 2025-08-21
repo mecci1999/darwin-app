@@ -128,36 +128,36 @@ async function initializeGatewayService() {
           path: '/logs/:service/:action',
         },
         // 监控服务路由
-        {
-          path: '/metrics',
-          authorization: false,
-          aliases: {
-            '/': 'gateway.metrics',
-          },
-          bodyParsers: {
-            json: true,
-          },
-          async onBeforeCall(
-            ctx: Context,
-            route: Route,
-            req: IncomingRequest,
-            res: GatewayResponse,
-          ) {
-            await GatewayHelper.handleBeforeCall(ctx, route, req, res, star, state, false);
-          },
-          onAfterCall(
-            ctx: Context,
-            route: Route,
-            req: IncomingRequest,
-            res: GatewayResponse,
-            data: any,
-          ) {
-            return GatewayHelper.handleAfterCall(ctx, route, req, res, data);
-          },
-          onError(req: IncomingRequest, res: GatewayResponse, err: any) {
-            GatewayHelper.handleError(req, res, err, state);
-          },
-        },
+        // {
+        //   path: '/metrics',
+        //   authorization: false,
+        //   aliases: {
+        //     '/': 'gateway.metrics',
+        //   },
+        //   bodyParsers: {
+        //     json: true,
+        //   },
+        //   async onBeforeCall(
+        //     ctx: Context,
+        //     route: Route,
+        //     req: IncomingRequest,
+        //     res: GatewayResponse,
+        //   ) {
+        //     await GatewayHelper.handleBeforeCall(ctx, route, req, res, star, state, false);
+        //   },
+        //   onAfterCall(
+        //     ctx: Context,
+        //     route: Route,
+        //     req: IncomingRequest,
+        //     res: GatewayResponse,
+        //     data: any,
+        //   ) {
+        //     return GatewayHelper.handleAfterCall(ctx, route, req, res, data);
+        //   },
+        //   onError(req: IncomingRequest, res: GatewayResponse, err: any) {
+        //     GatewayHelper.handleError(req, res, err, state);
+        //   },
+        // },
       ],
     },
     actions: {

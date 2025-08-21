@@ -18,6 +18,10 @@ export interface IUserTableAttributes {
   lastActiveAt?: Date;
   meta?: string; // 扩展元数据的JSON字符串
   version?: number;
+  // 多应用支持字段
+  tenantId?: string; // 租户ID，支持多租户架构
+  applicationIds?: string; // 用户可访问的应用ID列表，JSON字符串
+
   createdAt?: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -37,6 +41,10 @@ export class UserTable extends Model<IUserTableAttributes> implements IUserTable
   public lastActiveAt!: Date | undefined;
   public meta!: string | undefined;
   public version!: number;
+  // 多应用支持字段
+  public tenantId!: string | undefined;
+  public applicationIds!: string | undefined;
+
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt!: Date | undefined;
@@ -146,6 +154,36 @@ export default function (sequelize: Sequelize) {
           },
         },
       },
+      // 多应用支持字段
+      tenantId: {
+        type: DataTypes.STRING(64),
+        field: 'tenant_id',
+        comment: '租户ID，支持多租户架构',
+      },
+      applicationIds: {
+        type: DataTypes.TEXT,
+        field: 'application_ids',
+        defaultValue: '[]',
+        comment: '用户可访问的应用ID列表，JSON数组字符串',
+        validate: {
+          isValidJSON(value: any) {
+            if (value && typeof value === 'string') {
+              try {
+                const parsed = JSON.parse(value);
+                if (!Array.isArray(parsed)) {
+                  throw new Error('applicationIds必须是JSON数组格式');
+                }
+              } catch (error) {
+                if (error instanceof SyntaxError) {
+                  throw new Error('applicationIds字段必须是有效的JSON字符串');
+                }
+                throw error;
+              }
+            }
+          },
+        },
+      },
+
     },
     {
       sequelize,
@@ -163,6 +201,10 @@ export default function (sequelize: Sequelize) {
           unique: true,
           // using: 'HASH', // 对UUID字段优化
         },
+        // 多应用支持索引
+        { fields: ['tenant_id'] },
+        { fields: ['tenant_id', 'status'] },
+        { fields: ['tenant_id', 'created_at'] },
       ],
       hooks: {
         beforeUpdate: (user: UserTable) => {

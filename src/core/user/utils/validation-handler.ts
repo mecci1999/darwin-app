@@ -1,6 +1,5 @@
 // User微服务验证处理工具类
 import { CreateUserParams, UpdateUserParams, UserQueryParams } from '../types';
-import { VALIDATION_CONFIG, USER_CONFIG } from '../constants';
 import UserUtils from './user-utils';
 
 class ValidationHandler {
@@ -21,18 +20,22 @@ class ValidationHandler {
   /**
    * 验证创建用户请求
    */
-  validateCreateUserRequest(params: any): { valid: boolean; errors: string[]; sanitized?: CreateUserParams } {
+  validateCreateUserRequest(params: any): {
+    valid: boolean;
+    errors: string[];
+    sanitized?: CreateUserParams;
+  } {
     const errors: string[] = [];
-    
+
     // 检查必需字段
     if (!params.userId || typeof params.userId !== 'string') {
       errors.push('用户ID是必需的且必须是字符串');
     }
-    
+
     if (!params.source || typeof params.source !== 'string') {
       errors.push('用户来源是必需的且必须是字符串');
     }
-    
+
     // 验证用户来源
     if (params.source) {
       const sourceValidation = this.userUtils.validateSource(params.source);
@@ -40,7 +43,7 @@ class ValidationHandler {
         errors.push(sourceValidation.error!);
       }
     }
-    
+
     // 验证昵称（如果提供）
     if (params.nickname) {
       if (typeof params.nickname !== 'string') {
@@ -52,7 +55,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证邮箱（如果提供）
     if (params.email) {
       if (typeof params.email !== 'string') {
@@ -64,7 +67,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证手机号（如果提供）
     if (params.phone) {
       if (typeof params.phone !== 'string') {
@@ -76,21 +79,21 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证头像URL（如果提供）
     if (params.avatar && typeof params.avatar !== 'string') {
       errors.push('头像URL必须是字符串');
     }
-    
+
     // 验证元数据（如果提供）
     if (params.metadata && typeof params.metadata !== 'object') {
       errors.push('元数据必须是对象');
     }
-    
+
     if (errors.length > 0) {
       return { valid: false, errors };
     }
-    
+
     // 清理和标准化数据
     const sanitized: CreateUserParams = {
       userId: params.userId.trim(),
@@ -101,21 +104,25 @@ class ValidationHandler {
       avatar: params.avatar ? params.avatar.trim() : undefined,
       metadata: params.metadata || {},
     };
-    
+
     return { valid: true, errors: [], sanitized };
   }
 
   /**
    * 验证更新用户请求
    */
-  validateUpdateUserRequest(params: any): { valid: boolean; errors: string[]; sanitized?: UpdateUserParams } {
+  validateUpdateUserRequest(params: any): {
+    valid: boolean;
+    errors: string[];
+    sanitized?: UpdateUserParams;
+  } {
     const errors: string[] = [];
-    
+
     // 检查用户ID
     if (!params.userId || typeof params.userId !== 'string') {
       errors.push('用户ID是必需的且必须是字符串');
     }
-    
+
     // 验证昵称（如果提供）
     if (params.nickname !== undefined) {
       if (typeof params.nickname !== 'string') {
@@ -127,7 +134,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证邮箱（如果提供）
     if (params.email !== undefined) {
       if (typeof params.email !== 'string') {
@@ -139,7 +146,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证手机号（如果提供）
     if (params.phone !== undefined) {
       if (typeof params.phone !== 'string') {
@@ -151,7 +158,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证个人简介（如果提供）
     if (params.bio !== undefined) {
       if (typeof params.bio !== 'string') {
@@ -163,7 +170,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证用户状态（如果提供）
     if (params.status !== undefined) {
       if (typeof params.status !== 'string') {
@@ -172,12 +179,12 @@ class ValidationHandler {
         errors.push('无效的用户状态');
       }
     }
-    
+
     // 验证头像URL（如果提供）
     if (params.avatar !== undefined && typeof params.avatar !== 'string') {
       errors.push('头像URL必须是字符串');
     }
-    
+
     // 验证偏好设置（如果提供）
     if (params.preferences !== undefined) {
       const preferencesValidation = this.validatePreferences(params.preferences);
@@ -185,21 +192,21 @@ class ValidationHandler {
         errors.push(...preferencesValidation.errors);
       }
     }
-    
+
     // 验证元数据（如果提供）
     if (params.metadata !== undefined && typeof params.metadata !== 'object') {
       errors.push('元数据必须是对象');
     }
-    
+
     if (errors.length > 0) {
       return { valid: false, errors };
     }
-    
+
     // 清理和标准化数据
     const sanitized: UpdateUserParams = {
       userId: params.userId.trim(),
     };
-    
+
     if (params.nickname !== undefined) {
       sanitized.nickname = params.nickname.trim();
     }
@@ -224,21 +231,25 @@ class ValidationHandler {
     if (params.metadata !== undefined) {
       sanitized.metadata = params.metadata;
     }
-    
+
     return { valid: true, errors: [], sanitized };
   }
 
   /**
    * 验证查询用户请求
    */
-  validateQueryUserRequest(params: any): { valid: boolean; errors: string[]; sanitized?: UserQueryParams } {
+  validateQueryUserRequest(params: any): {
+    valid: boolean;
+    errors: string[];
+    sanitized?: UserQueryParams;
+  } {
     const errors: string[] = [];
-    
+
     // 验证用户ID（如果提供）
     if (params.userId !== undefined && typeof params.userId !== 'string') {
       errors.push('用户ID必须是字符串');
     }
-    
+
     // 验证邮箱（如果提供）
     if (params.email !== undefined) {
       if (typeof params.email !== 'string') {
@@ -250,7 +261,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证手机号（如果提供）
     if (params.phone !== undefined) {
       if (typeof params.phone !== 'string') {
@@ -262,7 +273,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证状态（如果提供）
     if (params.status !== undefined) {
       if (typeof params.status !== 'string') {
@@ -271,7 +282,7 @@ class ValidationHandler {
         errors.push('无效的用户状态');
       }
     }
-    
+
     // 验证来源（如果提供）
     if (params.source !== undefined) {
       if (typeof params.source !== 'string') {
@@ -283,7 +294,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     // 验证日期范围（如果提供）
     if (params.createdAfter !== undefined) {
       const date = new Date(params.createdAfter);
@@ -291,14 +302,14 @@ class ValidationHandler {
         errors.push('创建时间起始日期格式不正确');
       }
     }
-    
+
     if (params.createdBefore !== undefined) {
       const date = new Date(params.createdBefore);
       if (isNaN(date.getTime())) {
         errors.push('创建时间结束日期格式不正确');
       }
     }
-    
+
     // 验证分页参数
     if (params.limit !== undefined) {
       const limit = parseInt(params.limit);
@@ -306,21 +317,21 @@ class ValidationHandler {
         errors.push('限制数量必须是1-100之间的数字');
       }
     }
-    
+
     if (params.offset !== undefined) {
       const offset = parseInt(params.offset);
       if (isNaN(offset) || offset < 0) {
         errors.push('偏移量必须是非负数字');
       }
     }
-    
+
     if (errors.length > 0) {
       return { valid: false, errors };
     }
-    
+
     // 清理和标准化数据
     const sanitized: UserQueryParams = {};
-    
+
     if (params.userId !== undefined) {
       sanitized.userId = params.userId.trim();
     }
@@ -348,7 +359,7 @@ class ValidationHandler {
     if (params.offset !== undefined) {
       sanitized.offset = parseInt(params.offset);
     }
-    
+
     return { valid: true, errors: [], sanitized };
   }
 
@@ -357,22 +368,22 @@ class ValidationHandler {
    */
   private validatePreferences(preferences: any): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
-    
+
     if (typeof preferences !== 'object' || preferences === null) {
       errors.push('偏好设置必须是对象');
       return { valid: false, errors };
     }
-    
+
     // 验证语言设置
     if (preferences.language !== undefined && typeof preferences.language !== 'string') {
       errors.push('语言设置必须是字符串');
     }
-    
+
     // 验证时区设置
     if (preferences.timezone !== undefined && typeof preferences.timezone !== 'string') {
       errors.push('时区设置必须是字符串');
     }
-    
+
     // 验证通知设置
     if (preferences.notifications !== undefined) {
       if (typeof preferences.notifications !== 'object') {
@@ -390,7 +401,7 @@ class ValidationHandler {
         }
       }
     }
-    
+
     return { valid: errors.length === 0, errors };
   }
 
@@ -399,24 +410,24 @@ class ValidationHandler {
    */
   validateBatchOperation(userIds: any): { valid: boolean; errors: string[]; sanitized?: string[] } {
     const errors: string[] = [];
-    
+
     if (!Array.isArray(userIds)) {
       errors.push('用户ID列表必须是数组');
       return { valid: false, errors };
     }
-    
+
     if (userIds.length === 0) {
       errors.push('用户ID列表不能为空');
       return { valid: false, errors };
     }
-    
+
     if (userIds.length > 100) {
       errors.push('批量操作最多支持100个用户');
       return { valid: false, errors };
     }
-    
+
     const sanitized: string[] = [];
-    
+
     for (let i = 0; i < userIds.length; i++) {
       const userId = userIds[i];
       if (typeof userId !== 'string') {
@@ -427,13 +438,13 @@ class ValidationHandler {
         sanitized.push(userId.trim());
       }
     }
-    
+
     // 检查重复的用户ID
     const uniqueIds = new Set(sanitized);
     if (uniqueIds.size !== sanitized.length) {
       errors.push('用户ID列表中存在重复项');
     }
-    
+
     return { valid: errors.length === 0, errors, sanitized };
   }
 }

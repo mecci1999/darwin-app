@@ -6,7 +6,8 @@ import { Starlight } from 'typings';
 import userActions from './actions';
 
 // 导入基本类型和常量
-import { APP_NAME, REDIS_CONFIG, KAFKA_CONFIG } from './constants';
+import { APP_NAME } from './constants';
+import { EventHandler } from './utils';
 
 async function initializeUserService() {
   // const pinoOptions = await pinoLoggerOptions(APP_NAME);
@@ -16,7 +17,15 @@ async function initializeUserService() {
     transporter: {
       type: 'KAFKA',
       debug: true,
-      host: KAFKA_CONFIG.BROKERS.join(','),
+      host: process.env.KAFKA_HOST || 'localhost:9092',
+      options: {
+        sasl: {
+          mechanism: 'plain',
+          username: process.env.KAFKA_USER || 'kafka_user',
+          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2024!$',
+        },
+        ssl: false,
+      },
     },
     serializer: {
       type: 'NotePack',
@@ -26,10 +35,9 @@ async function initializeUserService() {
       type: 'Redis',
       clone: true,
       redis: {
-        port: REDIS_CONFIG.PORT,
-        host: REDIS_CONFIG.HOST,
-        password: REDIS_CONFIG.PASSWORD,
-        db: REDIS_CONFIG.DB,
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        host: process.env.REDIS_HOST || 'localhost',
+        password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
       },
     },
     // metrics: {
@@ -57,6 +65,11 @@ async function initializeUserService() {
       try {
         // 初始化数据库连接
         await star.db.simpleInitialize();
+        
+        // 初始化事件处理器
+        const eventHandler = EventHandler.getInstance();
+        eventHandler.initialize(star);
+        
         star.logger?.info('User service started successfully');
       } catch (error) {
         star.logger?.error('Failed to start User service:', error);

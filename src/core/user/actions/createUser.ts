@@ -1,9 +1,10 @@
 /**
- * 用户创建接口
+ * 用户创建动作
  */
 import { customAlphabet } from 'nanoid';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { EventHandler } from '../utils';
 
 export default function createUser(star: Starlight) {
   return {
@@ -30,7 +31,7 @@ export default function createUser(star: Starlight) {
         const id = customAlphabet('0123456789')(9);
 
         // 生成用户名
-        const defaultNickname = `星际公民1${id}`;
+        const defaultNickname = `星际公民${id}`;
 
         const user = await star.db.user.saveOrUpdateUsers([
           {
@@ -43,6 +44,14 @@ export default function createUser(star: Starlight) {
 
         // 日志打印
         star.logger?.info(`用户${id}创建成功`);
+
+        // 发布用户创建事件
+        const eventHandler = EventHandler.getInstance();
+        eventHandler.publishUserCreated(params.userId, {
+          nickname: defaultNickname,
+          source: params.source,
+          status: 'active',
+        });
 
         // 将接收到的参数存储到数据库中
         return {

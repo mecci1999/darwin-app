@@ -1,5 +1,5 @@
 /**
- * 获取用户信息接口
+ * 获取用户信息动作
  */
 import { Context, Star } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem } from 'typings';
