@@ -123,10 +123,5 @@ initializeFileService().catch((error) => {
   process.exit(1);
 });
 
-// 导出类型和常量
+// 导出必要的类型定义供其他微服务使用
 export * from './types';
-export * from './constants';
-export { FileEventHandler } from './utils';
-export * from './processors';
-export * from './validators';
-export * from './storage';

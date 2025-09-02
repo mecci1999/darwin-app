@@ -1,10 +1,11 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const payment = (star: Starlight) => {
   return {
     // 创建支付订单
-    'payment.createOrder': {
+    'v1.payment.createOrder': {
       metadata: {
         auth: true,
       },
@@ -15,6 +16,9 @@ const payment = (star: Starlight) => {
         promoCode: { type: 'string', optional: true },
         returnUrl: { type: 'string', optional: true },
         notifyUrl: { type: 'string', optional: true },
+      },
+      hooks: {
+        before: [validators.payment],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -122,7 +126,7 @@ const payment = (star: Starlight) => {
     },
 
     // 查询支付订单状态
-    'payment.queryOrder': {
+    'v1.payment.queryOrder': {
       metadata: {
         auth: true,
       },
@@ -213,7 +217,7 @@ const payment = (star: Starlight) => {
     },
 
     // 取消支付订单
-    'payment.cancelOrder': {
+    'v1.payment.cancelOrder': {
       metadata: {
         auth: true,
       },
@@ -300,7 +304,7 @@ const payment = (star: Starlight) => {
     },
 
     // 支付回调处理
-    'payment.notify': {
+    'v1.payment.notify': {
       params: {
         provider: { type: 'string', required: true }, // alipay, wechatpay
         data: { type: 'object', required: true },
@@ -410,7 +414,7 @@ const payment = (star: Starlight) => {
     },
 
     // 申请退款
-    'payment.refund': {
+    'v1.payment.refund': {
       metadata: {
         auth: true,
       },
@@ -558,7 +562,7 @@ const payment = (star: Starlight) => {
     },
 
     // 获取支付方式列表
-    'payment.methods': {
+    'v1.payment.methods': {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const paymentMethods = await (this as any).getAvailablePaymentMethods();
@@ -600,7 +604,7 @@ const payment = (star: Starlight) => {
     },
 
     // 获取用户支付历史
-    'payment.history': {
+    'v1.payment.history': {
       metadata: {
         auth: true,
       },

@@ -2,9 +2,9 @@
  * 用户头像上传动作
  */
 
+import { FileCategory } from 'core/file';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
-import { FileCategory } from '../../file/types';
 
 export default function uploadAvatar(star: Starlight) {
   return {

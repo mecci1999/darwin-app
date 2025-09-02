@@ -1,10 +1,11 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const subscription = (star: Starlight) => {
   return {
     // 获取用户当前订阅
-    'subscription.current': {
+    'v1.subscription.current': {
       metadata: {
         auth: true,
       },
@@ -97,7 +98,7 @@ const subscription = (star: Starlight) => {
     },
 
     // 创建订阅
-    'subscription.create': {
+    'v1.subscription.create': {
       metadata: {
         auth: true,
       },
@@ -107,6 +108,9 @@ const subscription = (star: Starlight) => {
         paymentMethodId: { type: 'string', optional: true },
         promoCode: { type: 'string', optional: true },
         autoRenew: { type: 'boolean', optional: true, default: true },
+      },
+      hooks: {
+        before: [validators.subscriptionCreate],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {

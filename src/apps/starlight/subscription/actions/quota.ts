@@ -1,16 +1,20 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const quota = (star: Starlight) => {
   return {
     // 检查用户配额
-    'quota.check': {
+    'v1.quota.check': {
       metadata: {
         auth: true,
       },
       params: {
         quotaType: { type: 'string', required: true }, // metrics, appkeys, schemas, etc.
         amount: { type: 'number', optional: true, default: 1 },
+      },
+      hooks: {
+        before: [validators.query],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -121,7 +125,7 @@ const quota = (star: Starlight) => {
     },
 
     // 获取用户所有配额状态
-    'quota.status': {
+    'v1.quota.status': {
       metadata: {
         auth: true,
       },
@@ -244,7 +248,7 @@ const quota = (star: Starlight) => {
     },
 
     // 使用配额
-    'quota.consume': {
+    'v1.quota.consume': {
       metadata: {
         auth: true,
       },
@@ -346,7 +350,7 @@ const quota = (star: Starlight) => {
     },
 
     // 获取配额使用历史
-    'quota.history': {
+    'v1.quota.history': {
       metadata: {
         auth: true,
       },
@@ -417,7 +421,7 @@ const quota = (star: Starlight) => {
     },
 
     // 重置配额（管理员功能）
-    'quota.reset': {
+    'v1.quota.reset': {
       metadata: {
         auth: true,
         roles: ['admin'],
@@ -509,7 +513,7 @@ const quota = (star: Starlight) => {
     },
 
     // 获取配额预测
-    'quota.forecast': {
+    'v1.quota.forecast': {
       metadata: {
         auth: true,
       },

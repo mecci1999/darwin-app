@@ -1,10 +1,11 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const billing = (star: Starlight) => {
   return {
     // 获取账单列表
-    'billing.list': {
+    'v1.billing.list': {
       metadata: {
         auth: true,
       },
@@ -14,6 +15,9 @@ const billing = (star: Starlight) => {
         status: { type: 'string', optional: true }, // paid, pending, overdue
         limit: { type: 'number', optional: true, default: 20 },
         offset: { type: 'number', optional: true, default: 0 },
+      },
+      hooks: {
+        before: [validators.query],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -93,7 +97,7 @@ const billing = (star: Starlight) => {
     },
 
     // 获取账单详情
-    'billing.get': {
+    'v1.billing.get': {
       metadata: {
         auth: true,
       },
@@ -191,7 +195,7 @@ const billing = (star: Starlight) => {
     },
 
     // 下载发票
-    'billing.downloadInvoice': {
+    'v1.billing.downloadInvoice': {
       metadata: {
         auth: true,
       },
@@ -271,7 +275,7 @@ const billing = (star: Starlight) => {
     },
 
     // 更新账单地址
-    'billing.updateAddress': {
+    'v1.billing.updateAddress': {
       metadata: {
         auth: true,
       },
@@ -361,7 +365,7 @@ const billing = (star: Starlight) => {
     },
 
     // 获取使用量账单
-    'billing.usage': {
+    'v1.billing.usage': {
       metadata: {
         auth: true,
       },
@@ -473,7 +477,7 @@ const billing = (star: Starlight) => {
     },
 
     // 预估下月账单
-    'billing.estimate': {
+    'v1.billing.estimate': {
       metadata: {
         auth: true,
       },
@@ -571,7 +575,7 @@ const billing = (star: Starlight) => {
     },
 
     // 设置账单提醒
-    'billing.setReminder': {
+    'v1.billing.setReminder': {
       metadata: {
         auth: true,
       },

@@ -1,13 +1,17 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const plans = (star: Starlight) => {
   return {
     // 获取所有订阅计划
-    'plans.list': {
+    'v1.plans.list': {
       params: {
         includeFeatures: { type: 'boolean', optional: true, default: true },
         currency: { type: 'string', optional: true, default: 'CNY' },
+      },
+      hooks: {
+        before: [validators.query],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -63,10 +67,13 @@ const plans = (star: Starlight) => {
     },
 
     // 获取特定订阅计划详情
-    'plans.get': {
+    'v1.plans.get': {
       params: {
         planName: { type: 'string', required: true },
         currency: { type: 'string', optional: true, default: 'CNY' },
+      },
+      hooks: {
+        before: [validators.query],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -123,7 +130,7 @@ const plans = (star: Starlight) => {
     },
 
     // 比较订阅计划
-    'plans.compare': {
+    'v1.plans.compare': {
       params: {
         planNames: { type: 'array', required: true },
         currency: { type: 'string', optional: true, default: 'CNY' },
@@ -200,7 +207,7 @@ const plans = (star: Starlight) => {
     },
 
     // 获取计划升级路径
-    'plans.upgradePath': {
+    'v1.plans.upgradePath': {
       metadata: {
         auth: true,
       },
@@ -302,7 +309,7 @@ const plans = (star: Starlight) => {
     },
 
     // 获取计划推荐
-    'plans.recommend': {
+    'v1.plans.recommend': {
       metadata: {
         auth: true,
       },
@@ -381,7 +388,7 @@ const plans = (star: Starlight) => {
     },
 
     // 获取计划定价
-    'plans.pricing': {
+    'v1.plans.pricing': {
       params: {
         planName: { type: 'string', required: true },
         billingCycle: { type: 'string', optional: true }, // monthly, yearly
