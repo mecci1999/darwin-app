@@ -3,7 +3,6 @@
  */
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
-import { saveOrUpdateUsers, findUserByUserId } from 'db/mysql/apis/user';
 import { ValidationHandler, EventHandler } from '../utils';
 
 export default function recordUserLogout(star: Starlight) {

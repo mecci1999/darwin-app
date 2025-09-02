@@ -6,6 +6,7 @@ import deleteUser from './deleteUser';
 import batchGetUsers from './batchGetUsers';
 import recordUserLogin from './recordUserLogin';
 import recordUserLogout from './recordUserLogout';
+import uploadAvatar from './uploadAvatar';
 
 import manageApplications from './manageApplications';
 
@@ -20,6 +21,7 @@ const userActions = (star: Starlight) => {
   const batchGetUsersAction = batchGetUsers(star);
   const recordUserLoginAction = recordUserLogin(star);
   const recordUserLogoutAction = recordUserLogout(star);
+  const uploadAvatarAction = uploadAvatar(star);
 
   const manageApplicationsAction = manageApplications(star);
 
@@ -31,6 +33,7 @@ const userActions = (star: Starlight) => {
     ...batchGetUsersAction,
     ...recordUserLoginAction,
     ...recordUserLogoutAction,
+    ...uploadAvatarAction,
 
     ...manageApplicationsAction,
   };

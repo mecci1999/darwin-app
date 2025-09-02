@@ -10,7 +10,21 @@ export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
     const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
     return model
       .bulkCreate(users, {
-        updateOnDuplicate: ['userId', 'nickname', 'avatar', 'status', 'source'],
+        updateOnDuplicate: [
+          'nickname',
+          'avatar',
+          'status',
+          'source',
+          'power',
+          'devices',
+          'timezone',
+          'locale',
+          'lastActiveAt',
+          'meta',
+          'version',
+          'tenantId',
+          'applicationIds',
+        ],
       })
       .then(() => users);
   } catch (error) {
@@ -26,7 +40,26 @@ export async function queryAllUsers() {
     const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
     if (!model) return [];
     return model
-      .findAll({ attributes: ['userId', 'nickname', 'avatar', 'status', 'source'] })
+      .findAll({
+        attributes: [
+          'userId',
+          'nickname',
+          'avatar',
+          'status',
+          'source',
+          'power',
+          'devices',
+          'timezone',
+          'locale',
+          'lastActiveAt',
+          'meta',
+          'version',
+          'tenantId',
+          'applicationIds',
+          'createdAt',
+          'updatedAt',
+        ],
+      })
       .then((res) => {
         if (res) {
           return res.map((item) => {

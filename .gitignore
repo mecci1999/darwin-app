@@ -7,6 +7,5 @@ influxdb_config
 influxdb_data
 elasticsearch_data
 redis.conf
-file
 .env.production
 .vscode

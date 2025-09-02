@@ -3,7 +3,6 @@
  */
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
-import { saveOrUpdateUsers, findUserByUserId } from '../../../db/mysql/apis/user';
 import { ValidationHandler, EventHandler } from '../utils';
 
 export default function updateUser(star: Starlight) {
@@ -74,8 +73,8 @@ export default function updateUser(star: Starlight) {
           star.logger?.info(`用户${params.userId}信息更新成功`);
 
           // 发布用户更新事件
-        const eventHandler = EventHandler.getInstance();
-        eventHandler.publishUserUpdated(params.userId, updateData);
+          const eventHandler = EventHandler.getInstance();
+          eventHandler.publishUserUpdated(params.userId, updateData);
 
           return {
             status: 200,

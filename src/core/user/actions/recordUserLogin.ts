@@ -3,7 +3,6 @@
  */
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
-import { saveOrUpdateUsers, findUserByUserId } from '../../../db/mysql/apis/user';
 import { ValidationHandler, EventHandler } from '../utils';
 
 export default function recordUserLogin(star: Starlight) {
@@ -55,14 +54,14 @@ export default function recordUserLogin(star: Starlight) {
           if (params.deviceInfo) {
             const devices = existingUser.devices ? JSON.parse(existingUser.devices) : {};
             const deviceId = params.deviceInfo.deviceId || 'unknown';
-            
+
             devices[deviceId] = {
               ...params.deviceInfo,
               lastLoginAt: new Date(),
               ip: params.ip,
               userAgent: params.userAgent,
             };
-            
+
             loginData.devices = JSON.stringify(devices);
           }
 
@@ -87,8 +86,8 @@ export default function recordUserLogin(star: Starlight) {
           });
 
           // 发布用户登录事件
-        const eventHandler = EventHandler.getInstance();
-        eventHandler.publishUserLogin(params.userId);
+          const eventHandler = EventHandler.getInstance();
+          eventHandler.publishUserLogin(params.userId);
 
           return {
             status: 200,
