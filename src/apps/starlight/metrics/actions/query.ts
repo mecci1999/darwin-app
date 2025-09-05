@@ -1,5 +1,6 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators, metricsValidators } from '../validators';
 
 const query = (star: Starlight) => {
   return {
@@ -33,6 +34,9 @@ const query = (star: Starlight) => {
         },
         limit: { type: 'number', optional: true, default: 1000 },
         offset: { type: 'number', optional: true, default: 0 },
+      },
+      hooks: {
+        before: [validators.queryParams],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {

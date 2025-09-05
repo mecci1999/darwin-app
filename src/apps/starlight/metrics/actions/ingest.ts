@@ -1,5 +1,6 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const ingest = (star: Starlight) => {
   return {
@@ -13,6 +14,9 @@ const ingest = (star: Starlight) => {
         metrics: { type: 'array', required: true },
         format: { type: 'string', optional: true, default: 'custom' },
         timestamp: { type: 'number', optional: true },
+      },
+      hooks: {
+        before: [validators.rawData],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -63,7 +67,7 @@ const ingest = (star: Starlight) => {
             };
           }
 
-          // 数据验证和清洗
+          // 数据清洗
           const validatedMetrics = await (this as any).validateAndCleanMetrics(
             metrics,
             format,

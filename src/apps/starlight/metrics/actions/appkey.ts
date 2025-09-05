@@ -13,6 +13,7 @@ import {
 } from 'db/mysql/apis/apiKey';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { validators } from '../validators';
 
 const appkey = (star: Starlight) => {
   return {
@@ -27,6 +28,9 @@ const appkey = (star: Starlight) => {
         permissions: { type: 'array', optional: true, default: ['read', 'write'] },
         expiresAt: { type: 'string', optional: true }, // ISO date string
         rateLimit: { type: 'number', optional: true, default: 1000 }, // requests per hour
+      },
+      hooks: {
+        before: [validators.appKeyGenerate],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
@@ -71,22 +75,7 @@ const appkey = (star: Starlight) => {
           const appSecret = crypto.randomBytes(32).toString('hex');
           const keyId = crypto.randomUUID();
 
-          // 验证过期时间
-          let expiresAtDate: Date | undefined = undefined;
-          if (expiresAt) {
-            expiresAtDate = new Date(expiresAt);
-            if (isNaN(expiresAtDate.getTime()) || expiresAtDate <= new Date()) {
-              return {
-                status: 400,
-                data: {
-                  code: HttpResponseCode.ParamsError,
-                  content: null,
-                  message: '过期时间格式错误或已过期',
-                  success: false,
-                },
-              };
-            }
-          }
+          // expiresAt已经通过validator验证并转换为Date对象
 
           // 保存到数据库
           const appKeyData = {
@@ -97,7 +86,7 @@ const appkey = (star: Starlight) => {
             keyPrefix: appKey.substring(0, 8), // 存储前缀用于快速查找
             permissions,
             rateLimitPerMinute: Math.ceil(rateLimit / 60), // 转换为每分钟限制
-            expiresAt: expiresAtDate,
+            expiresAt: expiresAt,
             isActive: true,
             lastUsedAt: undefined,
           };
@@ -127,7 +116,7 @@ const appkey = (star: Starlight) => {
                 appSecret, // 只在创建时返回，之后不再显示
                 permissions,
                 rateLimit,
-                expiresAt: expiresAtDate,
+                expiresAt: expiresAt,
                 createdAt: (createdKey as any).createdAt || new Date(),
                 warning: 'AppSecret只显示一次，请妥善保存',
               },

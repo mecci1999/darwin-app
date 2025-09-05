@@ -8,6 +8,7 @@ import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import createActions from './actions';
 import { APP_NAME } from './constants';
+import events from './events';
 import { MetricsState } from './types';
 
 // 服务状态管理
@@ -222,203 +223,8 @@ function createMetricsService() {
       }
     },
 
-    // SaaS化事件处理
-    events: {
-      // 处理原始指标数据（支持多租户）
-      'metrics.raw': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, data } = ctx.params;
-
-            // 多租户数据隔离
-            const enrichedData = {
-              ...data,
-              tenantId,
-              timestamp: Date.now(),
-              serviceId: ctx.service.fullName,
-            };
-
-            // 添加到处理队列
-            metricsState.processingQueue.push(enrichedData);
-
-            ctx.service.logger.debug(`Raw metrics processed for tenant: ${tenantId}`);
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle metrics.raw event:', error);
-          }
-        },
-      },
-
-      // 处理配额警告（SaaS化）
-      'quota.warning': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, userId, quotaType, usage, limit } = ctx.params;
-
-            // 处理配额警告逻辑
-            const warningData = {
-              tenantId,
-              userId,
-              quotaType,
-              usage,
-              limit,
-              severity: 'warning',
-              timestamp: Date.now(),
-            };
-
-            // 缓存警告信息
-            const warningKey = `warning:${tenantId}:${userId}:${quotaType}`;
-            metricsState.cache.quotas.set(warningKey, warningData);
-
-            ctx.service.logger.warn(`Quota warning for tenant: ${tenantId}, user: ${userId}`);
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle quota.warning event:', error);
-          }
-        },
-      },
-
-      // 处理配额超限（SaaS化）
-      'quota.exceeded': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, userId, quotaType } = ctx.params;
-
-            // 发送配额超限警告
-            await ctx.emit('quota.alert', {
-              tenantId,
-              userId,
-              quotaType,
-              severity: 'critical',
-              timestamp: Date.now(),
-              action: 'throttle', // 限流处理
-            });
-
-            ctx.service.logger.error(`Quota exceeded for tenant: ${tenantId}, user: ${userId}`);
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle quota.exceeded event:', error);
-          }
-        },
-      },
-
-      // 处理指标处理完成事件
-      'metrics.processed': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, batchId, count } = ctx.params;
-
-            // 更新处理统计（按租户）
-            const tenantKey = `tenant:${tenantId}`;
-            const currentStats = metricsState.cache.metrics.get(tenantKey) || { processed: 0 };
-            currentStats.processed += count || 1;
-            currentStats.lastProcessed = Date.now();
-            metricsState.cache.metrics.set(tenantKey, currentStats);
-
-            // 全局统计
-            metricsState.stats.processed += count || 1;
-            metricsState.stats.lastProcessed = Date.now();
-
-            ctx.service.logger.debug(
-              `Metrics batch processed for tenant: ${tenantId}, batch: ${batchId}`,
-            );
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle metrics.processed event:', error);
-          }
-        },
-      },
-
-      // 处理租户创建事件
-      'tenant.created': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, planId } = ctx.params;
-
-            // 初始化租户配额
-            const quotaKey = `quota:${tenantId}`;
-            metricsState.cache.quotas.set(quotaKey, {
-              tenantId,
-              planId,
-              limits: ctx.service.settings.quotas.defaultLimits,
-              createdAt: Date.now(),
-            });
-
-            ctx.service.logger.info(`Tenant quota initialized: ${tenantId}`);
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle tenant.created event:', error);
-          }
-        },
-      },
-
-      // 处理用户创建事件（多租户）
-      'user.created': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, userId } = ctx.params;
-
-            // 清理用户相关缓存
-            metricsState.cache.quotas.delete(`quota:${tenantId}:${userId}`);
-            metricsState.cache.metrics.delete(`metrics:${tenantId}:${userId}`);
-
-            ctx.service.logger.info(
-              `User quota initialized for tenant: ${tenantId}, user: ${userId}`,
-            );
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle user.created event:', error);
-          }
-        },
-      },
-
-      // 处理订阅更新事件（SaaS化）
-      'subscription.updated': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId, userId, planId, oldPlanId } = ctx.params;
-
-            // 更新租户配额
-            const quotaKey = `quota:${tenantId}:${userId}`;
-            const existingQuota = metricsState.cache.quotas.get(quotaKey);
-            if (existingQuota) {
-              (existingQuota as any).planId = planId;
-              (existingQuota as any).updatedAt = Date.now();
-              metricsState.cache.quotas.set(quotaKey, existingQuota);
-            }
-
-            // 清理相关缓存
-            metricsState.cache.metrics.delete(`metrics:${tenantId}:${userId}`);
-
-            ctx.service.logger.info(
-              `Subscription updated for tenant: ${tenantId}, user: ${userId}, plan: ${planId}`,
-            );
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle subscription.updated event:', error);
-          }
-        },
-      },
-
-      // 处理租户删除事件
-      'tenant.deleted': {
-        async handler(ctx: any) {
-          try {
-            const { tenantId } = ctx.params;
-
-            // 清理缓存
-            for (const [key] of metricsState.cache.metrics) {
-              if (key.startsWith(`tenant:${tenantId}`) || key.includes(`:${tenantId}:`)) {
-                metricsState.cache.metrics.delete(key);
-              }
-            }
-
-            for (const [key] of metricsState.cache.quotas) {
-              if (key.includes(`:${tenantId}:`)) {
-                metricsState.cache.quotas.delete(key);
-              }
-            }
-
-            ctx.service.logger.info(`Tenant data cleaned up: ${tenantId}`);
-          } catch (error) {
-            ctx.service.logger.error('Failed to handle tenant.deleted event:', error);
-          }
-        },
-      },
-    },
+    // 事件处理器（从events目录导入）
+    events,
 
     // Actions（API接口）
     actions: createActions(star),
@@ -440,12 +246,6 @@ async function startMetricsService() {
     // 优雅关闭处理
     process.on('SIGINT', async () => {
       star.logger?.info('Received SIGINT, shutting down gracefully...');
-      await star.stop();
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      star.logger?.info('Received SIGTERM, shutting down gracefully...');
       await star.stop();
       process.exit(0);
     });
