@@ -7,7 +7,7 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { searchLogsSecord } from '../methods/log-search';
 import { LogSearchParams } from '../types';
-import { validateSearchParams } from '../utils/log-utils';
+import { validateLogSearch } from '../validators';
 
 export default function search(star: Starlight) {
   return {
@@ -41,12 +41,13 @@ export default function search(star: Starlight) {
 
         try {
           // 验证搜索参数
-          if (!validateSearchParams(ctx.params)) {
+          const validation = validateLogSearch(ctx.params);
+          if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: 'Invalid search parameters',
+                message: validation.errors.join(', '),
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },

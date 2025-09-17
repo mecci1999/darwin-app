@@ -3,7 +3,8 @@
  */
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
-import { convertToCSV, convertToJSON, validateExportParams } from '../utils/log-utils';
+import { convertToCSV, convertToJSON } from '../utils/log-utils';
+import { validateLogStats } from '../validators';
 
 export default function exportLogs(star: Starlight) {
   return {
@@ -25,26 +26,14 @@ export default function exportLogs(star: Starlight) {
             apiKey,
           } = ctx.params;
 
-          // 参数验证
-          if (!tenantId || !apiKey) {
-            return {
-              status: HttpStatusCode.BAD_REQUEST,
-              data: {
-                content: null,
-                message: '参数无效：tenantId和apiKey为必填项',
-                code: HttpResponseCode.ParamsError,
-                success: false,
-              },
-            };
-          }
-
           // 验证导出参数
-          if (!validateExportParams({ format, limit })) {
+          const validation = validateLogStats(ctx.params);
+          if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: '导出参数无效',
+                message: validation.errors.join(', '),
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },

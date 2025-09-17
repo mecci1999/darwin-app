@@ -2,7 +2,7 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { getLogStats } from '../methods/log-stats';
 import { LogStatsParams } from '../types';
-import { validateStatsParams } from '../utils/log-utils';
+import { validateLogStats } from '../validators';
 
 export default function stats(star: Starlight) {
   return {
@@ -19,12 +19,13 @@ export default function stats(star: Starlight) {
 
         try {
           // 验证统计参数
-          if (!validateStatsParams({ service, timeRange, groupBy })) {
+          const validation = validateLogStats(ctx.params);
+          if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: 'Invalid stats parameters',
+                message: validation.errors.join(', '),
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },

@@ -5,7 +5,7 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { ingestSingleLog } from '../methods/log-ingestion';
-import { validateLogFormat } from '../utils/log-utils';
+import { validateLogIngest } from '../validators';
 
 export default function ingest(star: Starlight) {
   return {
@@ -20,13 +20,14 @@ export default function ingest(star: Starlight) {
         const startTime = Date.now();
 
         try {
-          // 验证日志格式
-          if (!validateLogFormat(log)) {
+          // 验证请求参数
+          const validation = validateLogIngest({ log, apiKey, tenantId });
+          if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: 'Invalid log format',
+                message: validation.errors.join(', '),
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },

@@ -34,10 +34,12 @@ async function initializeUserService() {
     cacher: {
       type: 'Redis',
       clone: true,
-      redis: {
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        host: process.env.REDIS_HOST || 'localhost',
-        password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+      options: {
+        redis: {
+          port: parseInt(process.env.REDIS_PORT || '6379'),
+          host: process.env.REDIS_HOST || 'localhost',
+          password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+        },
       },
     },
     // metrics: {
@@ -65,11 +67,11 @@ async function initializeUserService() {
       try {
         // 初始化数据库连接
         await star.db.simpleInitialize();
-        
+
         // 初始化事件处理器
         const eventHandler = EventHandler.getInstance();
         eventHandler.initialize(star);
-        
+
         star.logger?.info('User service started successfully');
       } catch (error) {
         star.logger?.error('Failed to start User service:', error);

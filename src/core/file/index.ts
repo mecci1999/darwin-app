@@ -19,7 +19,7 @@ import { FileEventHandler } from './utils';
 async function initializeFileService() {
   try {
     // 启用日志配置
-    const pinoOptions = await pinoLoggerOptions(APP_NAME);
+    // const pinoOptions = await pinoLoggerOptions(APP_NAME);
 
     const star = new Star({
       namespace: 'darwin-app',
@@ -39,16 +39,18 @@ async function initializeFileService() {
       serializer: {
         type: 'NotePack',
       },
-      logger: pinoOptions,
+      // logger: pinoOptions,
       cacher: {
-        type: 'Redis',
-        clone: true,
+      type: 'Redis',
+      clone: true,
+      options: {
         redis: {
           port: parseInt(process.env.REDIS_PORT || '6379'),
           host: process.env.REDIS_HOST || 'localhost',
           password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
         },
       },
+    },
       metrics: {
         enabled: true,
         reporter: {

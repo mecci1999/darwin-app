@@ -3,7 +3,7 @@ const commonjs = require('@rollup/plugin-commonjs');
 const dts = require('rollup-plugin-dts');
 const tscAlias = require('rollup-plugin-tsc-alias');
 const json = require('@rollup/plugin-json');
-const { terser } = require('rollup-plugin-terser');
+const { terser } = require('@rollup/plugin-terser');
 
 module.exports = [
   {

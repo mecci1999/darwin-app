@@ -5,7 +5,8 @@
 
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
-import { generateBatchId, generateLogId, validateBatchLogFormat } from '../utils/log-utils';
+import { generateBatchId, generateLogId } from '../utils/log-utils';
+import { validateLogBatchIngest } from '../validators';
 
 export default function batchIngest(star: Starlight) {
   return {
@@ -21,26 +22,13 @@ export default function batchIngest(star: Starlight) {
           const startTime = Date.now();
 
           // 参数验证
-          if (!tenantId || !apiKey || !logs || !Array.isArray(logs) || logs.length === 0) {
+          const validation = validateLogBatchIngest({ tenantId, apiKey, logs, format });
+          if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: '参数错误：tenantId、apiKey 和 logs 为必填项',
-                code: HttpResponseCode.BAD_REQUEST,
-                success: false,
-              },
-            };
-          }
-
-          // 验证日志格式
-          const validationResult = validateBatchLogFormat(logs, format || 'json');
-          if (!validationResult.valid) {
-            return {
-              status: HttpStatusCode.BAD_REQUEST,
-              data: {
-                content: null,
-                message: validationResult.message,
+                message: validation.errors.join(', '),
                 code: HttpResponseCode.BAD_REQUEST,
                 success: false,
               },

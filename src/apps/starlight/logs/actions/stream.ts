@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { LogStreamEvent } from '../types';
+import { validateLogStream } from '../validators';
 
 // 全局活跃流存储
 let _activeStreams: Map<string, any> | undefined;
@@ -21,6 +22,19 @@ export default function stream(star: Starlight) {
         const tenantId = (ctx.meta as any)?.tenantId;
 
         try {
+          // 验证流式传输参数
+          const validation = validateLogStream({ service, level, tenantId });
+          if (!validation.valid) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: validation.errors.join(', '),
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
           // 设置SSE响应头
           (ctx.meta as any).$responseHeaders = {
             'Content-Type': 'text/event-stream',

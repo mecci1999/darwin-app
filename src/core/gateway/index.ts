@@ -40,7 +40,7 @@ async function initializeGatewayService() {
         sasl: {
           mechanism: 'plain',
           username: process.env.KAFKA_USER || 'kafka_user',
-          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2024!$',
+          password: process.env.KAFKA_PASSWORD,
         },
         ssl: false,
       },

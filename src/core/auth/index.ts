@@ -60,10 +60,12 @@ async function initializeAuthService() {
     cacher: {
       type: 'Redis',
       clone: true,
-      redis: {
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        host: process.env.REDIS_HOST || 'localhost',
-        password: process.env.REDIS_PASSWORD,
+      options: {
+        redis: {
+          port: parseInt(process.env.REDIS_PORT || '6379'),
+          host: process.env.REDIS_HOST || 'localhost',
+          password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+        },
       },
     },
     metrics: {
