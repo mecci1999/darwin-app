@@ -3,12 +3,33 @@
  * SaaS化系统监控服务 - 核心数据处理服务
  * 支持多种指标格式：Prometheus、StatsD、DataDog、OTLP、自定义格式
  */
+import dotenv from 'dotenv';
+import path from 'path';
+
+// 加载环境变量
+const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 import { DatabaseService } from 'db/mysql';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import createActions from './actions';
-import { APP_NAME } from './constants';
+import {
+  APP_NAME,
+  INFLUXDB_BUCKET,
+  INFLUXDB_ORG,
+  INFLUXDB_TOKEN,
+  INFLUXDB_URL,
+  KAFKA_BROKERS,
+  KAFKA_PASSWORD,
+  KAFKA_USER,
+  REDIS_DB,
+  REDIS_HOST,
+  REDIS_PASSWORD,
+  REDIS_PORT,
+} from './constants';
 import events from './events';
+import createMethods from './methods';
 import { MetricsState } from './types';
 
 // 服务状态管理
@@ -35,14 +56,27 @@ const metricsState: MetricsState = {
   },
 };
 
+import { InfluxDBHandler } from './utils/influxdb-handler';
+
 // 批处理指标数据
-async function processBatchedMetrics() {
+async function processBatchedMetrics(star: Starlight) {
   if (metricsState.processingQueue.length === 0) return;
 
-  // 处理批量指标数据逻辑
-  metricsState.stats.processed += metricsState.processingQueue.length;
-  metricsState.processingQueue = [];
-  metricsState.lastFlushTime = Date.now();
+  const metricsToFlush = [...metricsState.processingQueue];
+  metricsState.processingQueue = []; // 清空队列
+
+  try {
+    // 写入 InfluxDB
+    const flatMetrics = metricsToFlush.flatMap((batch) => batch.data);
+    await InfluxDBHandler.writeMetrics(flatMetrics, star);
+
+    metricsState.stats.processed += metricsToFlush.length;
+    metricsState.lastFlushTime = Date.now();
+  } catch (error) {
+    console.error('Failed to flush metrics:', error);
+    // 失败重试逻辑：将数据放回队列头部
+    metricsState.processingQueue.unshift(...metricsToFlush);
+  }
 }
 
 // 创建并配置指标数据处理微服务
@@ -52,14 +86,34 @@ function createMetricsService() {
     namespace: 'darwin-app',
     nodeID: `metrics-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
     transporter: {
-      type: 'Kafka',
+      type: 'KAFKA',
+      debug: true,
+      host: KAFKA_BROKERS,
       options: {
-        kafka: {
-          brokers: ['localhost:9092'],
-          clientId: 'metrics-service',
-          connectionTimeout: 3000,
-          requestTimeout: 30000,
+        producer: {
+          'linger.ms': 0,
+          'batch.size': 0,
+          acks: 1,
         },
+        consumer: {
+          'fetch.min.bytes': 1,
+          'fetch.wait.max.ms': 100,
+        },
+        sasl:
+          KAFKA_USER && KAFKA_PASSWORD
+            ? {
+                mechanism: 'plain',
+                username: KAFKA_USER,
+                password: KAFKA_PASSWORD,
+              }
+            : undefined,
+        ssl: false,
+        groupId: `metrics-group-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        clientId: 'metrics-service',
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
       },
     },
     serializer: {
@@ -69,9 +123,10 @@ function createMetricsService() {
       type: 'Redis',
       options: {
         redis: {
-          host: 'localhost',
-          port: 6379,
-          db: 0,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
+          password: REDIS_PASSWORD,
+          db: REDIS_DB,
           retryDelayOnFailover: 100,
           maxRetriesPerRequest: 3,
         },
@@ -95,7 +150,7 @@ function createMetricsService() {
   // 创建指标数据处理服务
   const metricsService = star.createService({
     name: APP_NAME,
-    version: 1,
+    version: '1',
 
     // SaaS化配置
     settings: {
@@ -105,10 +160,10 @@ function createMetricsService() {
 
       // InfluxDB连接配置
       influxdb: {
-        url: 'http://localhost:8086',
-        token: 'your-token',
-        org: 'your-org',
-        bucket: 'metrics',
+        url: INFLUXDB_URL,
+        token: INFLUXDB_TOKEN,
+        org: INFLUXDB_ORG,
+        bucket: INFLUXDB_BUCKET,
         timeout: 10000,
         retries: 3,
       },
@@ -155,9 +210,14 @@ function createMetricsService() {
       const databaseService = new DatabaseService(star, APP_NAME);
       star.db = databaseService;
 
+      // 绑定内部方法到服务实例
+      const methods = createMethods(star as any, metricsState);
+      Object.assign(this, methods);
+
       // 初始化服务状态
       metricsState.serviceId = this.fullName;
       metricsState.startTime = Date.now();
+      (this as any).metricsState = metricsState;
 
       this.logger.info('Metrics service state initialized');
     },
@@ -169,7 +229,8 @@ function createMetricsService() {
         // 初始化数据库连接
         await star.db.simpleInitialize();
 
-        // 初始化InfluxDB连接（示例实现）
+        // 初始化InfluxDB连接
+        await InfluxDBHandler.initialize(this.settings.influxdb, star);
         metricsState.influxdbConnected = true;
         this.logger.info('InfluxDB connection initialized');
 
@@ -178,7 +239,7 @@ function createMetricsService() {
 
         // 启动批处理定时器
         const batchInterval = setInterval(
-          processBatchedMetrics,
+          () => processBatchedMetrics(star), // Wrap in arrow function
           this.settings.processing.flushInterval,
         );
 
@@ -224,7 +285,9 @@ function createMetricsService() {
     },
 
     // 事件处理器（从events目录导入）
-    events,
+    events: events,
+
+    methods: {},
 
     // Actions（API接口）
     actions: createActions(star),
@@ -240,8 +303,7 @@ async function startMetricsService() {
 
     // 启动微服务
     await star.start();
-
-    star.logger?.info(`Metrics service ${APP_NAME} started successfully`);
+    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
 
     // 优雅关闭处理
     process.on('SIGINT', async () => {

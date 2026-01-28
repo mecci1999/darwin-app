@@ -18,7 +18,7 @@ import { validators } from '../validators';
 const appkey = (star: Starlight) => {
   return {
     // 生成新的AppKey
-    generate: {
+    'v1.appkey.generate': {
       metadata: {
         auth: true,
       },
@@ -140,7 +140,7 @@ const appkey = (star: Starlight) => {
     },
 
     // 获取用户的AppKey列表
-    list: {
+    'v1.appkey.list': {
       metadata: {
         auth: true,
       },
@@ -228,7 +228,7 @@ const appkey = (star: Starlight) => {
     },
 
     // 验证AppKey
-    verify: {
+    'v1.appkey.verify': {
       params: {
         appKey: { type: 'string', required: true },
         appSecret: { type: 'string', required: true },
@@ -370,7 +370,7 @@ const appkey = (star: Starlight) => {
     },
 
     // 更新AppKey
-    update: {
+    'v1.appkey.update': {
       metadata: {
         auth: true,
       },
@@ -468,7 +468,7 @@ const appkey = (star: Starlight) => {
     },
 
     // 删除AppKey
-    delete: {
+    'v1.appkey.delete': {
       metadata: {
         auth: true,
       },
@@ -547,7 +547,7 @@ const appkey = (star: Starlight) => {
     },
 
     // 获取AppKey使用统计
-    stats: {
+    'v1.appkey.stats': {
       metadata: {
         auth: true,
       },
@@ -647,6 +647,24 @@ const appkey = (star: Starlight) => {
               success: false,
             },
           };
+        }
+      },
+    },
+
+    // 内部调用：获取用户AppKey数量
+    getUserApiKeysCount: {
+      visibility: 'public',
+      params: {
+        userId: { type: 'string', required: true },
+      },
+      async handler(ctx: Context) {
+        try {
+          const { userId } = ctx.params;
+          const allAppKeys = await findApiKeysByUserId(userId);
+          return allAppKeys.length;
+        } catch (error) {
+          star.logger?.error('Get user API keys count failed:', error);
+          return 0;
         }
       },
     },

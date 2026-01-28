@@ -97,6 +97,34 @@ const subscription = (star: Starlight) => {
       },
     },
 
+    // 内部调用：获取用户订阅信息
+    getUserSubscription: {
+      params: {
+        userId: { type: 'string', required: true },
+      },
+      async handler(ctx: Context) {
+        try {
+          const { userId } = ctx.params;
+          const sub = await (this as any).getUserActiveSubscription(userId);
+
+          if (!sub) {
+            return null;
+          }
+
+          return {
+            id: sub.id,
+            plan: sub.planId, // metrics service uses 'plan' property
+            status: sub.status,
+            startDate: sub.startDate,
+            endDate: sub.endDate,
+          };
+        } catch (error) {
+          star.logger?.error('Get user subscription failed:', error);
+          return null;
+        }
+      },
+    },
+
     // 创建订阅
     'v1.subscription.create': {
       metadata: {
@@ -237,7 +265,7 @@ const subscription = (star: Starlight) => {
     },
 
     // 升级订阅
-    'subscription.upgrade': {
+    'v1.subscription.upgrade': {
       metadata: {
         auth: true,
       },
@@ -393,7 +421,7 @@ const subscription = (star: Starlight) => {
     },
 
     // 取消订阅
-    'subscription.cancel': {
+    'v1.subscription.cancel': {
       metadata: {
         auth: true,
       },
@@ -517,7 +545,7 @@ const subscription = (star: Starlight) => {
     },
 
     // 恢复订阅
-    'subscription.resume': {
+    'v1.subscription.resume': {
       metadata: {
         auth: true,
       },
@@ -606,7 +634,7 @@ const subscription = (star: Starlight) => {
     },
 
     // 获取订阅历史
-    'subscription.history': {
+    'v1.subscription.history': {
       metadata: {
         auth: true,
       },

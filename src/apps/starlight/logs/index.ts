@@ -3,11 +3,28 @@
  * SaaS化日志管理服务 - 核心数据处理服务
  * 支持多种日志格式：JSON、文本、Syslog、结构化日志
  */
+import dotenv from 'dotenv';
+import path from 'path';
+
+// 加载环境变量
+const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 import { DatabaseService } from 'db/mysql';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import createActions from './actions';
-import { APP_NAME } from './constants';
+import {
+  APP_NAME,
+  KAFKA_BROKERS,
+  KAFKA_CLIENT_ID,
+  KAFKA_PASSWORD,
+  KAFKA_USER,
+  REDIS_DB,
+  REDIS_HOST,
+  REDIS_PASSWORD,
+  REDIS_PORT,
+} from './constants';
 import { createEventHandlersManager } from './events';
 import { LogsState } from './types/index';
 import { elasticsearchManager } from './utils/elasticsearch-manager';
@@ -53,14 +70,34 @@ function createLogsService() {
     namespace: 'darwin-app',
     nodeID: `logs-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
     transporter: {
-      type: 'Kafka',
+      type: 'KAFKA',
+      debug: true,
+      host: KAFKA_BROKERS,
       options: {
-        kafka: {
-          brokers: ['localhost:9092'],
-          clientId: 'logs-service',
-          connectionTimeout: 3000,
-          requestTimeout: 30000,
+        producer: {
+          'linger.ms': 0,
+          'batch.size': 0,
+          acks: 1,
         },
+        consumer: {
+          'fetch.min.bytes': 1,
+          'fetch.wait.max.ms': 100,
+        },
+        sasl:
+          KAFKA_USER && KAFKA_PASSWORD
+            ? {
+                mechanism: 'plain',
+                username: KAFKA_USER,
+                password: KAFKA_PASSWORD,
+              }
+            : undefined,
+        ssl: false,
+        groupId: `${KAFKA_CLIENT_ID}-group-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        clientId: KAFKA_CLIENT_ID,
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
       },
     },
     serializer: {
@@ -70,9 +107,10 @@ function createLogsService() {
       type: 'Redis',
       options: {
         redis: {
-          host: 'localhost',
-          port: 6379,
-          db: 1,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
+          password: REDIS_PASSWORD,
+          db: REDIS_DB,
           retryDelayOnFailover: 100,
           maxRetriesPerRequest: 3,
         },
@@ -96,7 +134,7 @@ function createLogsService() {
   // 创建日志处理服务
   const logsService = star.createService({
     name: APP_NAME,
-    version: 1,
+    version: '1',
 
     // SaaS化配置
     settings: {
@@ -254,6 +292,8 @@ function createLogsService() {
 
     // Actions（API接口）
     actions: createActions(star),
+
+    methods: {},
   });
 
   return { star, logsService };
@@ -267,7 +307,7 @@ async function startLogsService() {
     // 启动微服务
     await star.start();
 
-    star.logger?.info(`Logs service ${APP_NAME} started successfully`);
+    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
 
     // 优雅关闭处理
     process.on('SIGINT', async () => {

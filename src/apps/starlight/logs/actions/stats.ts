@@ -6,7 +6,7 @@ import { validateLogStats } from '../validators';
 
 export default function stats(star: Starlight) {
   return {
-    'v1.logStats': {
+    'v1.stats': {
       metadata: {
         auth: true,
         roles: ['admin', 'user', 'viewer'],

@@ -453,12 +453,33 @@ export class UsageTracker {
     star: any,
   ): Promise<UsageStats | null> {
     try {
-      // 从数据库查询使用量数据
-      // const usage = await star.db.collection('usage_stats').findOne({ userId });
-      // return usage;
+      const UserQuotaModel = star.db.models.UserQuotaTable;
+      if (!UserQuotaModel) {
+        return null;
+      }
 
-      // 模拟返回null，表示没有找到数据
-      return null;
+      const quotas = await UserQuotaModel.findAll({
+        where: { userId }
+      });
+
+      if (!quotas || quotas.length === 0) {
+        return null;
+      }
+
+      const usage: UsageStats = {};
+      
+      quotas.forEach((quota: any) => {
+        // 将数据库中的配额记录转换为 UsageStats 格式
+        // 假设 UsageStats 的 key 是 quotaType
+        usage[quota.quotaType] = {
+          used: Number(quota.quotaUsed),
+          limit: Number(quota.quotaLimit),
+          resetPeriod: quota.resetPeriod,
+          lastReset: quota.lastResetAt ? new Date(quota.lastResetAt).getTime() : Date.now()
+        };
+      });
+
+      return usage;
     } catch (error) {
       star.logger?.error('Failed to load usage from database:', error);
       return null;

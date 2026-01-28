@@ -85,6 +85,7 @@ export default {
   },
 
   // 处理配额检查事件
+  /*
   'quota.check': {
     async handler(ctx: any) {
       try {
@@ -94,37 +95,38 @@ export default {
         // 检查配额使用情况
         const quotaKey = `quota:${tenantId}:${userId}:${quotaType}`;
         const quota = metricsState.cache.quotas.get(quotaKey);
-        
+
         if (quota) {
           const currentUsage = (quota as any).usage || 0;
           const limit = (quota as any).limit || 0;
-          const newUsage = currentUsage + increment;
 
-          // 更新使用量
-          (quota as any).usage = newUsage;
-          (quota as any).lastChecked = Date.now();
-          metricsState.cache.quotas.set(quotaKey, quota);
-
-          // 检查是否需要发送警告
-          const warningThreshold = limit * 0.8; // 80%警告阈值
-          if (newUsage >= limit) {
+          if (currentUsage + increment > limit) {
+            // 触发配额超限事件
             await ctx.emit('quota.exceeded', { tenantId, userId, quotaType });
-          } else if (newUsage >= warningThreshold) {
-            await ctx.emit('quota.warning', {
-              tenantId,
-              userId,
-              quotaType,
-              usage: newUsage,
-              limit,
-            });
           }
         }
-
-        ctx.service.logger.debug(
-          `Quota checked for tenant: ${tenantId}, user: ${userId}, type: ${quotaType}`,
-        );
       } catch (error) {
         ctx.service.logger.error('Failed to handle quota.check event:', error);
+      }
+    },
+  },
+  */
+
+  // 处理指标使用量更新
+  'metrics.usage.update': {
+    async handler(ctx: any) {
+      try {
+        const { userId, count } = ctx.params;
+        const metricsState: MetricsState = ctx.service.metricsState;
+
+        // 更新内存中的配额缓存
+        const cacheKey = `usage:${userId}`;
+        const current = metricsState.cache.quotas.get(cacheKey) || { count: 0 };
+        (current as any).count = ((current as any).count || 0) + count;
+        (current as any).updatedAt = Date.now();
+        metricsState.cache.quotas.set(cacheKey, current);
+      } catch (error) {
+        ctx.service.logger.error('Failed to handle metrics.usage.update:', error);
       }
     },
   },

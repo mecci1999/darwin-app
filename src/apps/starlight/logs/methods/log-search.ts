@@ -29,7 +29,7 @@ import {
 /**
  * 搜索日志
  */
-export async function searchLogsSecord(
+export async function searchLogs(
   ctx: Context,
   params: {
     apiKey: string;
@@ -53,7 +53,10 @@ export async function searchLogsSecord(
     }
 
     // 检查权限
-    const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(validatedKey, ApiPermission.SEARCH);
+    const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(
+      validatedKey,
+      ApiPermission.SEARCH,
+    );
     if (!hasSearchPermission) {
       throw new Error('Insufficient permissions for log search');
     }
@@ -310,7 +313,10 @@ export async function getSearchSuggestions(
     }
 
     // 检查权限
-    const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(validatedKey, ApiPermission.SEARCH);
+    const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(
+      validatedKey,
+      ApiPermission.SEARCH,
+    );
     if (!hasSearchPermission) {
       throw new Error('Insufficient permissions for search suggestions');
     }

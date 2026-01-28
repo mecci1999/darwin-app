@@ -8,7 +8,7 @@ import { validateLogStats } from '../validators';
 
 export default function exportLogs(star: Starlight) {
   return {
-    'v1.exportLogs': {
+    'v1.export': {
       metadata: {
         auth: true,
         roles: ['admin', 'user'],
@@ -45,7 +45,7 @@ export default function exportLogs(star: Starlight) {
           const validatedLimit = Math.min(limit, maxLimit);
 
           // 调用搜索方法获取日志数据
-          const searchResult = await ctx.call('logs.v1.searchLogs', {
+          const searchResult = await ctx.call('logs.v1.search', {
             tenantId,
             apiKey,
             query,

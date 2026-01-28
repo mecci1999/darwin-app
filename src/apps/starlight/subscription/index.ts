@@ -3,11 +3,18 @@
  * SaaS化订阅计划管理服务 - 支持多租户订阅管理
  * 功能：订阅计划管理、配额控制、计费集成、升级降级
  */
+import dotenv from 'dotenv';
+import path from 'path';
+
+// 加载环境变量
+const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 import { DatabaseService } from 'db/mysql';
 import { Context, Star } from 'node-universe';
 import { Starlight } from 'typings';
 import createActions from './actions';
-import { APP_NAME } from './constants';
+import { APP_NAME, KAFKA_CONFIG, REDIS_CONFIG } from './constants';
 import { createEvents } from './events';
 import { createMethods } from './methods';
 import { SubscriptionState } from './types';
@@ -65,14 +72,34 @@ function createSubscriptionService() {
     namespace: 'darwin-app',
     nodeID: `subscription-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
     transporter: {
-      type: 'Kafka',
+      type: 'KAFKA',
+      debug: true,
+      host: KAFKA_CONFIG.BROKERS.join(','),
       options: {
-        kafka: {
-          brokers: ['localhost:9092'],
-          clientId: 'subscription-service',
-          connectionTimeout: 3000,
-          requestTimeout: 30000,
+        producer: {
+          'linger.ms': 0,
+          'batch.size': 0,
+          acks: 1,
         },
+        consumer: {
+          'fetch.min.bytes': 1,
+          'fetch.wait.max.ms': 100,
+        },
+        sasl:
+          KAFKA_CONFIG.USERNAME && KAFKA_CONFIG.PASSWORD
+            ? {
+                mechanism: 'plain',
+                username: KAFKA_CONFIG.USERNAME,
+                password: KAFKA_CONFIG.PASSWORD,
+              }
+            : undefined,
+        ssl: false,
+        groupId: `${KAFKA_CONFIG.GROUP_ID}-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        clientId: KAFKA_CONFIG.CLIENT_ID,
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
       },
     },
     serializer: {
@@ -82,9 +109,10 @@ function createSubscriptionService() {
       type: 'Redis',
       options: {
         redis: {
-          host: 'localhost',
-          port: 6379,
-          db: 0,
+          host: REDIS_CONFIG.HOST,
+          port: REDIS_CONFIG.PORT,
+          password: REDIS_CONFIG.PASSWORD,
+          db: REDIS_CONFIG.DB,
           retryDelayOnFailover: 100,
           maxRetriesPerRequest: 3,
         },
@@ -108,7 +136,7 @@ function createSubscriptionService() {
   // 创建订阅管理服务
   const subscriptionService = star.createService({
     name: APP_NAME,
-    version: 1,
+    version: '1',
 
     // SaaS化配置
     settings: {
@@ -236,6 +264,9 @@ function createSubscriptionService() {
     // SaaS化事件处理
     events: createEvents(star, subscriptionState),
 
+    // 方法（RPC接口）
+    methods: createMethods(star),
+
     // Actions（API接口）
     actions: createActions(star),
   });
@@ -251,7 +282,7 @@ async function startSubscriptionService() {
     // 启动微服务
     await star.start();
 
-    star.logger?.info(`Subscription service ${APP_NAME} started successfully`);
+    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
 
     // 优雅关闭处理
     process.on('SIGINT', async () => {

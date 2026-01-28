@@ -31,45 +31,70 @@ export class ElasticsearchClient {
   // 初始化索引和映射
   async initializeIndex(): Promise<void> {
     try {
-      const exists = await this.client.indices.exists({ index: this.indexName });
+      // 尝试获取集群信息以验证连接
+      try {
+        const info = await this.client.info();
+        console.log('Elasticsearch connected. Version:', info.version.number);
+      } catch (e: any) {
+        console.warn('Failed to get cluster info, proceeding anyway:', e.message);
+      }
+
+      // 检查索引是否存在
+      // 使用 try-catch 包装 exists 调用，如果失败则尝试直接创建
+      let exists = false;
+      try {
+        exists = await this.client.indices.exists({ index: this.indexName });
+      } catch (error) {
+        console.warn('Checking index existence failed, assuming not exists:', error);
+      }
 
       if (!exists) {
-        await this.client.indices.create({
-          index: this.indexName,
-          settings: {
-            number_of_shards: 1,
-            number_of_replicas: 0,
-            'index.mapping.total_fields.limit': 2000,
-          },
-          mappings: {
-            properties: {
-              id: { type: 'keyword' },
-              level: { type: 'keyword' },
-              message: {
-                type: 'text',
-                analyzer: 'standard',
-                fields: {
-                  keyword: { type: 'keyword', ignore_above: 256 },
+        // 如果索引不存在，尝试创建
+        // 如果创建失败，可能是因为索引已经存在（竞态条件），忽略该错误
+        try {
+          await this.client.indices.create({
+            index: this.indexName,
+            settings: {
+              number_of_shards: 1,
+              number_of_replicas: 0,
+              'index.mapping.total_fields.limit': 2000,
+            },
+            mappings: {
+              properties: {
+                id: { type: 'keyword' },
+                level: { type: 'keyword' },
+                message: {
+                  type: 'text',
+                  analyzer: 'standard',
+                  fields: {
+                    keyword: { type: 'keyword', ignore_above: 256 },
+                  },
+                },
+                timestamp: { type: 'date' },
+                receivedAt: { type: 'date' },
+                service: { type: 'keyword' },
+                source: { type: 'keyword' },
+                userId: { type: 'keyword' },
+                sessionId: { type: 'keyword' },
+                traceId: { type: 'keyword' },
+                apiKeyId: { type: 'keyword' },
+                tenantId: { type: 'keyword' },
+                indexed: { type: 'boolean' },
+                metadata: {
+                  type: 'object',
+                  dynamic: true,
                 },
               },
-              timestamp: { type: 'date' },
-              receivedAt: { type: 'date' },
-              service: { type: 'keyword' },
-              source: { type: 'keyword' },
-              userId: { type: 'keyword' },
-              sessionId: { type: 'keyword' },
-              traceId: { type: 'keyword' },
-              apiKeyId: { type: 'keyword' },
-              tenantId: { type: 'keyword' },
-              indexed: { type: 'boolean' },
-              metadata: {
-                type: 'object',
-                dynamic: true,
-              },
             },
-          },
-        });
-        console.log(`索引 ${this.indexName} 创建成功`);
+          });
+          console.log(`索引 ${this.indexName} 创建成功`);
+        } catch (createError: any) {
+          if (createError.meta?.body?.error?.type === 'resource_already_exists_exception') {
+            console.log(`索引 ${this.indexName} 已存在`);
+          } else {
+            throw createError;
+          }
+        }
       }
     } catch (error) {
       console.error('初始化ES索引失败:', error);
@@ -197,6 +222,316 @@ export class ElasticsearchClient {
     }
   }
 
+  // 获取日志趋势
+  async getLogTrends(
+    timeRange: string,
+    interval: string,
+    tenantId: string,
+    userId?: string,
+    groupBy?: string[],
+  ): Promise<Array<{ timestamp: number; count: number; groups?: Record<string, number> }>> {
+    const { start, end } = this.parseTimeRange(timeRange);
+    const must: any[] = [
+      { term: { tenantId } },
+      { range: { timestamp: { gte: start, lte: end } } },
+    ];
+    if (userId) must.push({ term: { userId } });
+
+    const query = { bool: { must } };
+
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        query,
+        size: 0,
+        aggs: {
+          trends: {
+            date_histogram: {
+              field: 'timestamp',
+              fixed_interval:
+                interval.endsWith('m') || interval.endsWith('h') || interval.endsWith('d')
+                  ? interval
+                  : '1h',
+              min_doc_count: 0,
+              extended_bounds: { min: start, max: end },
+            },
+          },
+        },
+      });
+
+      const buckets = (response.aggregations?.trends as any)?.buckets || [];
+      return buckets.map((b: any) => ({
+        timestamp: b.key,
+        count: b.doc_count,
+      }));
+    } catch (error) {
+      console.error('获取日志趋势失败:', error);
+      throw error;
+    }
+  }
+
+  // 获取错误率统计
+  async getErrorRateStats(
+    timeRange: string,
+    interval: string,
+    tenantId: string,
+    userId?: string,
+    groupBy?: string,
+  ): Promise<{
+    errorRate: number;
+    errorTrends: Array<{
+      timestamp: number;
+      errorCount: number;
+      totalCount: number;
+      errorRate: number;
+    }>;
+    topErrors: Array<{ message: string; count: number; percentage: number }>;
+  }> {
+    const { start, end } = this.parseTimeRange(timeRange);
+    const baseMust: any[] = [
+      { term: { tenantId } },
+      { range: { timestamp: { gte: start, lte: end } } },
+    ];
+    if (userId) baseMust.push({ term: { userId } });
+
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        query: { bool: { must: baseMust } },
+        size: 0,
+        aggs: {
+          total_count: { value_count: { field: '_index' } },
+          error_filter: {
+            filter: { terms: { level: ['error', 'fatal'] } },
+            aggs: {
+              error_trends: {
+                date_histogram: {
+                  field: 'timestamp',
+                  fixed_interval:
+                    interval.endsWith('m') || interval.endsWith('h') || interval.endsWith('d')
+                      ? interval
+                      : '1h',
+                  min_doc_count: 0,
+                },
+              },
+              top_messages: {
+                terms: { field: 'message.keyword', size: 5 },
+              },
+            },
+          },
+          all_trends: {
+            date_histogram: {
+              field: 'timestamp',
+              fixed_interval:
+                interval.endsWith('m') || interval.endsWith('h') || interval.endsWith('d')
+                  ? interval
+                  : '1h',
+              min_doc_count: 0,
+            },
+          },
+        },
+      });
+
+      const totalLogs = (response.aggregations?.total_count as any)?.value || 0;
+      const errorFilterAgg = response.aggregations?.error_filter as any;
+      const totalErrors = errorFilterAgg?.doc_count || 0;
+
+      const errorRate = totalLogs > 0 ? (totalErrors / totalLogs) * 100 : 0;
+
+      const errorBuckets = errorFilterAgg?.error_trends?.buckets || [];
+      const allBuckets = (response.aggregations?.all_trends as any)?.buckets || [];
+
+      const errorTrends = allBuckets.map((bucket: any, index: number) => {
+        const errorBucket = errorBuckets.find((b: any) => b.key === bucket.key);
+        const errorCount = errorBucket ? errorBucket.doc_count : 0;
+        const totalCount = bucket.doc_count;
+        return {
+          timestamp: bucket.key,
+          errorCount,
+          totalCount,
+          errorRate: totalCount > 0 ? (errorCount / totalCount) * 100 : 0,
+        };
+      });
+
+      const topErrors = (errorFilterAgg?.top_messages?.buckets || []).map((b: any) => ({
+        message: b.key,
+        count: b.doc_count,
+        percentage: totalErrors > 0 ? (b.doc_count / totalErrors) * 100 : 0,
+      }));
+
+      return { errorRate, errorTrends, topErrors };
+    } catch (error) {
+      console.error('获取错误率统计失败:', error);
+      throw error;
+    }
+  }
+
+  // 获取热门服务统计
+  async getTopServicesStats(
+    timeRange: string,
+    tenantId: string,
+    userId?: string,
+    limit: number = 10,
+  ): Promise<
+    Array<{
+      service: string;
+      logCount: number;
+      errorCount: number;
+      errorRate: number;
+      avgResponseTime?: number;
+    }>
+  > {
+    const { start, end } = this.parseTimeRange(timeRange);
+    const must: any[] = [
+      { term: { tenantId } },
+      { range: { timestamp: { gte: start, lte: end } } },
+    ];
+    if (userId) must.push({ term: { userId } });
+
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        query: { bool: { must } },
+        size: 0,
+        aggs: {
+          services: {
+            terms: { field: 'service', size: limit },
+            aggs: {
+              errors: { filter: { terms: { level: ['error', 'fatal'] } } },
+            },
+          },
+        },
+      });
+
+      const buckets = (response.aggregations?.services as any)?.buckets || [];
+      return buckets.map((b: any) => {
+        const logCount = b.doc_count;
+        const errorCount = b.errors?.doc_count || 0;
+        return {
+          service: b.key,
+          logCount,
+          errorCount,
+          errorRate: logCount > 0 ? (errorCount / logCount) * 100 : 0,
+        };
+      });
+    } catch (error) {
+      console.error('获取热门服务统计失败:', error);
+      throw error;
+    }
+  }
+
+  // 获取日志级别分布
+  async getLogLevelDistribution(
+    timeRange: string,
+    tenantId: string,
+    userId?: string,
+  ): Promise<Array<{ level: LogLevel; count: number; percentage: number }>> {
+    const { start, end } = this.parseTimeRange(timeRange);
+    const must: any[] = [
+      { term: { tenantId } },
+      { range: { timestamp: { gte: start, lte: end } } },
+    ];
+    if (userId) must.push({ term: { userId } });
+
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        query: { bool: { must } },
+        size: 0,
+        aggs: {
+          levels: { terms: { field: 'level', size: 10 } },
+        },
+      });
+
+      const total = (response.hits.total as any).value || 0;
+      const buckets = (response.aggregations?.levels as any)?.buckets || [];
+
+      return buckets.map((b: any) => ({
+        level: b.key as LogLevel,
+        count: b.doc_count,
+        percentage: total > 0 ? (b.doc_count / total) * 100 : 0,
+      }));
+    } catch (error) {
+      console.error('获取日志级别分布失败:', error);
+      throw error;
+    }
+  }
+
+  // 获取日志来源分布
+  async getLogSourceDistribution(
+    timeRange: string,
+    tenantId: string,
+    userId?: string,
+    limit: number = 20,
+  ): Promise<Array<{ source: LogSource; count: number; percentage: number }>> {
+    const { start, end } = this.parseTimeRange(timeRange);
+    const must: any[] = [
+      { term: { tenantId } },
+      { range: { timestamp: { gte: start, lte: end } } },
+    ];
+    if (userId) must.push({ term: { userId } });
+
+    try {
+      const response = await this.client.search({
+        index: this.indexName,
+        query: { bool: { must } },
+        size: 0,
+        aggs: {
+          sources: { terms: { field: 'source', size: limit } },
+        },
+      });
+
+      const total = (response.hits.total as any).value || 0;
+      const buckets = (response.aggregations?.sources as any)?.buckets || [];
+
+      return buckets.map((b: any) => ({
+        source: b.key as LogSource,
+        count: b.doc_count,
+        percentage: total > 0 ? (b.doc_count / total) * 100 : 0,
+      }));
+    } catch (error) {
+      console.error('获取日志来源分布失败:', error);
+      throw error;
+    }
+  }
+
+  // 异常检测
+  async detectAnomalies(
+    timeRange: string,
+    tenantId: string,
+    userId?: string,
+    sensitivity?: 'low' | 'medium' | 'high',
+  ): Promise<
+    Array<{
+      timestamp: number;
+      type: 'spike' | 'drop' | 'pattern';
+      severity: 'low' | 'medium' | 'high';
+      description: string;
+      affectedServices?: string[];
+      confidence: number;
+    }>
+  > {
+    // 简单模拟异常检测，基于错误率飙升
+    const stats = await this.getErrorRateStats(timeRange, '1h', tenantId, userId);
+    const anomalies: any[] = [];
+
+    const threshold = sensitivity === 'high' ? 1 : sensitivity === 'low' ? 10 : 5;
+
+    stats.errorTrends.forEach((trend) => {
+      if (trend.errorRate > threshold && trend.totalCount > 10) {
+        anomalies.push({
+          timestamp: trend.timestamp,
+          type: 'spike',
+          severity: trend.errorRate > 20 ? 'high' : 'medium',
+          description: `Error rate spike detected: ${trend.errorRate.toFixed(2)}%`,
+          confidence: 0.8,
+        });
+      }
+    });
+
+    return anomalies;
+  }
+
   // 构建搜索查询
   private buildSearchQuery(params: LogSearchParams): any {
     const must: any[] = [];
@@ -269,6 +604,82 @@ export class ElasticsearchClient {
     return {
       query: { bool: { must } },
     };
+  }
+
+  // 异常分析
+  async analyzeExceptions(
+    tenantId: string,
+    timeRange: string = '24h',
+  ): Promise<{
+    summary: string;
+    possibleCauses: string[];
+    recommendations: string[];
+    confidence: number;
+    topErrors: any[];
+  }> {
+    const { start, end } = this.parseTimeRange(timeRange);
+
+    try {
+      // 聚合查询常见的错误消息
+      const response = await this.client.search({
+        index: this.indexName,
+        query: {
+          bool: {
+            must: [
+              { term: { tenantId: tenantId } },
+              { terms: { level: ['error', 'fatal'] } },
+              { range: { timestamp: { gte: start, lte: end } } },
+            ],
+          },
+        },
+        size: 0,
+        aggs: {
+          top_errors: {
+            terms: {
+              field: 'message.keyword', // 假设 message 有 keyword 子字段
+              size: 5,
+            },
+          },
+        },
+      });
+
+      const buckets = (response.aggregations?.top_errors as any)?.buckets || [];
+
+      if (buckets.length === 0) {
+        return {
+          summary: '未检测到明显异常',
+          possibleCauses: [],
+          recommendations: [],
+          confidence: 1.0,
+          topErrors: [],
+        };
+      }
+
+      // 基于最频繁的错误生成简报 (简单的规则引擎)
+      const topError = buckets[0].key;
+      let summary = `检测到高频异常: ${topError}`;
+      let possibleCauses = ['代码逻辑错误', '配置错误', '外部依赖故障'];
+      let recommendations = ['查看详细堆栈信息', '检查最近的代码部署', '检查系统负载'];
+
+      if (topError.includes('NullPointer') || topError.includes('undefined')) {
+        possibleCauses = ['变量未初始化', '对象属性访问前未检查空值'];
+        recommendations = ['添加空值检查', '使用 Optional Chaining 操作符'];
+      } else if (topError.includes('Timeout') || topError.includes('ECONNREFUSED')) {
+        possibleCauses = ['网络连接超时', '目标服务不可用', '防火墙拦截'];
+        recommendations = ['检查网络连接', '确认目标服务状态', '调整超时设置'];
+      }
+
+      return {
+        summary,
+        possibleCauses,
+        recommendations,
+        confidence: 0.85,
+        topErrors: buckets.map((b: any) => ({ message: b.key, count: b.doc_count })),
+      };
+    } catch (error) {
+      console.error('异常分析失败:', error);
+      throw error;
+    }
   }
 
   // 构建导出查询
@@ -520,297 +931,6 @@ export class ElasticsearchClient {
   }
 
   // 关闭连接
-  async getLogTrends(
-    timeRange: string,
-    interval: AggregationsCalendarInterval,
-    tenantId: string,
-    userId?: string,
-    groupBy?: string[],
-  ): Promise<Array<{ timestamp: number; count: number; groups?: Record<string, number> }>> {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<
-      { term: Record<string, any> } | { range: { timestamp: { gte: number; lte: number } } }
-    > = [{ range: { timestamp: { gte: start, lte: end } } }, { term: { tenantId: tenantId } }];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs: any = {
-      trends: {
-        date_histogram: {
-          field: 'timestamp',
-          calendar_interval: interval,
-          format: 'epoch_millis',
-        },
-      },
-    };
-    if (groupBy && groupBy.length > 0) {
-      aggs.trends.aggs = {
-        groups: {
-          terms: {
-            field: groupBy[0],
-            size: 100,
-          },
-        },
-      };
-    }
-    try {
-      const response = await this.client.search({
-        index: this.indexName,
-        query: { bool: { must } },
-        size: 0,
-        aggs,
-      });
-      const buckets = (response.aggregations?.trends as any)?.buckets || [];
-      return buckets.map((bucket) => ({
-        timestamp: bucket.key,
-        count: bucket.doc_count,
-        groups: bucket.groups
-          ? bucket.groups.buckets.reduce((acc, b) => ({ ...acc, [b.key]: b.doc_count }), {})
-          : undefined,
-      }));
-    } catch (error) {
-      console.error('获取日志趋势失败:', error);
-      throw error;
-    }
-  }
-
-  async getErrorRateStats(
-    timeRange: string,
-    interval: AggregationsCalendarInterval,
-    tenantId: string,
-    groupBy?: string,
-    userId?: string,
-  ): Promise<{
-    errorRate: number;
-    errorTrends: Array<{
-      timestamp: number;
-      errorCount: number;
-      totalCount: number;
-      errorRate: number;
-    }>;
-    topErrors: Array<{ message: string; count: number }>;
-  }> {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<{ range: { timestamp: { gte: number; lte: number } } } | { term: Record<string, any> }> = [{ range: { timestamp: { gte: start, lte: end } } }, { term: { tenantId: tenantId } }];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs = {
-      error_trends: {
-        date_histogram: {
-          field: 'timestamp',
-          calendar_interval: interval,
-          format: 'epoch_millis',
-        },
-        aggs: {
-          error_count: {
-            filter: { term: { level: 'error' } },
-          },
-        },
-      },
-      top_errors: {
-        terms: {
-          field: 'message.keyword',
-          size: 10,
-        },
-        query: { term: { level: 'error' } },
-      },
-    };
-    const response = await this.client.search({
-      index: this.indexName,
-      query: { bool: { must } },
-      size: 0,
-      aggs,
-    });
-    const totalResponse = await this.client.count({
-      index: this.indexName,
-      query: { bool: { must } },
-    });
-    const total = totalResponse.count;
-    const errorCountResponse = await this.client.count({
-      index: this.indexName,
-      query: { bool: { must: [...must, { term: { level: 'error' } }] } },
-    });
-    const errorCount = errorCountResponse.count;
-    const errorRate = total > 0 ? errorCount / total : 0;
-    const errorTrends =
-      (response.aggregations?.error_trends as any)?.buckets.map((bucket) => ({
-        timestamp: bucket.key,
-        errorCount: bucket.error_count.doc_count,
-        totalCount: bucket.doc_count,
-        errorRate: bucket.doc_count > 0 ? bucket.error_count.doc_count / bucket.doc_count : 0,
-      })) || [];
-    const topErrors =
-      (response.aggregations?.top_errors as any)?.buckets.map((bucket) => ({
-        message: bucket.key,
-        count: bucket.doc_count,
-      })) || [];
-    return { errorRate, errorTrends, topErrors };
-  }
-
-  async getTopServicesStats(
-    timeRange: string,
-    tenantId: string,
-    limit: number,
-    userId?: string,
-  ): Promise<
-    Array<{
-      service: string;
-      logCount: number;
-      errorCount: number;
-      errorRate: number;
-      avgResponseTime?: number;
-    }>
-  > {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<{ range: { timestamp: { gte: number; lte: number } } } | { term: Record<string, any> }> = [{ range: { timestamp: { gte: start, lte: end } } }, { term: { tenantId: tenantId } }];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs = {
-      top_services: {
-        terms: {
-          field: 'service',
-          size: limit,
-        },
-        aggs: {
-          error_count: {
-            filter: { term: { level: 'error' } },
-          },
-          avg_response: {
-            avg: { field: 'metadata.responseTime' },
-          },
-        },
-      },
-    };
-    const response = await this.client.search({
-      index: this.indexName,
-      query: { bool: { must } },
-      size: 0,
-      aggs,
-    });
-    return (
-      (response.aggregations?.top_services as any)?.buckets.map((bucket) => ({
-        service: bucket.key,
-        logCount: bucket.doc_count,
-        errorCount: bucket.error_count.doc_count,
-        errorRate: bucket.doc_count > 0 ? bucket.error_count.doc_count / bucket.doc_count : 0,
-        avgResponseTime: bucket.avg_response.value,
-      })) || []
-    );
-  }
-
-  async getLogLevelDistribution(
-    timeRange: string,
-    tenantId: string,
-    userId?: string,
-  ): Promise<Array<{ level: LogLevel; count: number }>> {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<{ range: { timestamp: { gte: number; lte: number } } } | { term: Record<string, any> }> = [{ range: { timestamp: { gte: start, lte: end } } }, { term: { tenantId: tenantId } }];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs = {
-      levels: {
-        terms: {
-          field: 'level',
-          size: 10,
-        },
-      },
-    };
-    const response = await this.client.search({
-      index: this.indexName,
-      query: { bool: { must } },
-      size: 0,
-      aggs,
-    });
-    return (
-      (response.aggregations?.levels as any)?.buckets.map((bucket) => ({
-        level: bucket.key,
-        count: bucket.doc_count,
-      })) || []
-    );
-  }
-
-  async getLogSourceDistribution(
-    timeRange: string,
-    tenantId: string,
-    limit: number,
-    userId?: string,
-  ): Promise<Array<{ source: LogSource; count: number }>> {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<{ range: { timestamp: { gte: number; lte: number } } } | { term: Record<string, any> }> = [{ range: { timestamp: { gte: start, lte: end } } }, { term: { tenantId: tenantId } }];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs = {
-      sources: {
-        terms: {
-          field: 'source',
-          size: limit,
-        },
-      },
-    };
-    const response = await this.client.search({
-      index: this.indexName,
-      query: { bool: { must } },
-      size: 0,
-      aggs,
-    });
-    return (
-      (response.aggregations?.sources as any)?.buckets.map((bucket) => ({
-        source: bucket.key,
-        count: bucket.doc_count,
-      })) || []
-    );
-  }
-
-  async detectAnomalies(
-    timeRange: string,
-    tenantId: string,
-    sensitivity: 'low' | 'medium' | 'high',
-    userId?: string,
-  ): Promise<
-    Array<{
-      timestamp: number;
-      type: 'spike' | 'drop' | 'pattern';
-      severity: 'low' | 'medium' | 'high';
-      description: string;
-      affectedServices?: string[];
-      confidence: number;
-    }>
-  > {
-    const { start, end } = this.parseTimeRange(timeRange);
-    const must: Array<{ range: { timestamp: { gte: number; lte: number } } } | { term: Record<string, any> }> = [
-      { range: { timestamp: { gte: start, lte: end } } },
-      { term: { tenantId: tenantId } },
-      { term: { level: 'error' } },
-    ];
-    if (userId) must.push({ term: { userId: userId } });
-    const aggs: Record<string, any> = {
-      errors_per_hour: {
-        date_histogram: {
-          field: 'timestamp',
-          calendar_interval: 'hour',
-          format: 'epoch_millis',
-        },
-      },
-    };
-    const response = await this.client.search({
-      index: this.indexName,
-      query: { bool: { must } },
-      size: 0,
-      aggs,
-    });
-    const buckets = (response.aggregations?.errors_per_hour as any)?.buckets || [];
-    const counts = buckets.map((b) => b.doc_count);
-    const mean = counts.reduce((sum, c) => sum + c, 0) / counts.length;
-    const variance = counts.reduce((sum, c) => sum + Math.pow(c - mean, 2), 0) / counts.length;
-    const std = Math.sqrt(variance);
-    const threshold = mean + 3 * std;
-    const anomalies = buckets
-      .filter((b) => b.doc_count > threshold)
-      .map((b) => ({
-        timestamp: b.key,
-        type: 'spike',
-        severity: 'high',
-        description: `Error count spike: ${b.doc_count}`,
-        affectedServices: [],
-        confidence: 0.9,
-      }));
-    return anomalies;
-  }
-
   async close(): Promise<void> {
     await this.client.close();
   }

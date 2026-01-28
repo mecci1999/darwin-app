@@ -33,11 +33,19 @@ export interface QuotaCheckResult {
 }
 
 export class QuotaChecker {
+  private static instance: QuotaChecker;
   private usageCache: Map<string, QuotaUsage> = new Map();
   private limitsCache: Map<string, QuotaLimits> = new Map();
   private rateLimitCache: Map<string, { count: number; resetTime: number }> = new Map();
 
   constructor(private logger?: any) {}
+
+  public static getInstance(): QuotaChecker {
+    if (!QuotaChecker.instance) {
+      QuotaChecker.instance = new QuotaChecker();
+    }
+    return QuotaChecker.instance;
+  }
 
   /**
    * 检查日志摄取配额

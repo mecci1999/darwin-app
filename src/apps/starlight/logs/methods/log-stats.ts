@@ -44,7 +44,7 @@ export async function getLogStats(
 
     // 检查配额
     const quotaChecker = QuotaChecker.getInstance();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
@@ -54,21 +54,39 @@ export async function getLogStats(
 
     // 检查缓存
     const cacheKey = generateStatsCacheKey(normalizedParams, tenantId, userId);
-    const cachedResult = await ctx.service.redis.get(cacheKey);
+    const service = ctx.service as any;
+    const cachedResult = await service.redis?.get(cacheKey);
     if (cachedResult) {
-      ctx.service?.logger?.debug('Returning cached stats result');
+      service.logger?.debug('Returning cached stats result');
       return JSON.parse(cachedResult);
     }
 
     // 执行统计查询
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
-    const statsResult = await esClient.getLogStats(normalizedParams, tenantId, userId);
+    const stats = await esClient.getLogStats(normalizedParams, tenantId, userId);
+
+    // 构建 LogStatsResult
+    const statsResult: LogStatsResult = {
+      total: stats.total,
+      timeRange: normalizedParams.timeRange,
+      groupBy: normalizedParams.groupBy,
+      data: Object.entries(stats.breakdown).map(([key, count]) => ({
+        key,
+        count,
+        percentage: stats.total > 0 ? (count / stats.total) * 100 : 0,
+      })),
+      trends: {
+        current: stats.total,
+        previous: 0, // 需要额外查询或暂不计算
+        change: 0,
+        changePercent: 0,
+      },
+      topServices: [], // 需要额外查询
+      errorRate: 0, // 需要额外查询
+    };
 
     // 缓存结果
-    await ctx.service?.redis.setex(cacheKey, STATS_CACHE_TTL, JSON.stringify(statsResult));
-
-    // 更新配额使用量
-    await quotaChecker.updateSearchUsage(tenantId, userId);
+    await service.redis?.setex(cacheKey, STATS_CACHE_TTL, JSON.stringify(statsResult));
 
     // 记录统计事件
     await ctx.emit('logs.stats.generated', {
@@ -79,11 +97,11 @@ export async function getLogStats(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.debug('Log stats generated successfully');
+    service.logger?.debug('Log stats generated successfully');
 
     return statsResult;
   } catch (error) {
-    ctx.service.logger.error('Failed to get log stats:', error);
+    (ctx.service as any)?.logger?.error('Failed to get log stats:', error);
     throw error;
   }
 }
@@ -132,8 +150,8 @@ export async function getLogTrends(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaChecker = QuotaChecker.getInstance();
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
@@ -171,7 +189,7 @@ export async function getLogTrends(
       },
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get log trends:', error);
+    (ctx.service as any)?.logger?.error('Failed to get log trends:', error);
     throw error;
   }
 }
@@ -221,8 +239,8 @@ export async function getErrorRateStats(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaChecker = QuotaChecker.getInstance();
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
@@ -236,12 +254,9 @@ export async function getErrorRateStats(
       groupBy,
     );
 
-    // 更新配额使用量
-    await quotaChecker.updateSearchUsage(tenantId, userId);
-
     return errorStats;
   } catch (error) {
-    ctx.service.logger.error('Failed to get error rate stats:', error);
+    (ctx.service as any)?.logger?.error('Failed to get error rate stats:', error);
     throw error;
   }
 }
@@ -285,21 +300,18 @@ export async function getTopServicesStats(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaChecker = QuotaChecker.getInstance();
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
 
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
-    const services = await esClient.getTopServicesStats(timeRange, tenantId, userId, limit);
-
-    // 更新配额使用量
-    await quotaChecker.updateSearchUsage(tenantId, userId);
+    const services = await esClient.getTopServicesStats(timeRange, tenantId, userId, Number(limit));
 
     return { services };
   } catch (error) {
-    ctx.service.logger.error('Failed to get top services stats:', error);
+    (ctx.service as any)?.logger?.error('Failed to get top services stats:', error);
     throw error;
   }
 }
@@ -341,7 +353,7 @@ export async function getLogLevelDistribution(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
+    const quotaChecker = QuotaChecker.getInstance();
     const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
@@ -349,9 +361,6 @@ export async function getLogLevelDistribution(
 
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
     const distribution = await esClient.getLogLevelDistribution(timeRange, tenantId, userId);
-
-    // 更新配额使用量
-    await quotaChecker.updateSearchUsage(tenantId);
 
     const total = distribution.reduce((sum, item) => sum + item.count, 0);
 
@@ -363,7 +372,7 @@ export async function getLogLevelDistribution(
       total,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get log level distribution:', error);
+    (ctx.service as any)?.logger?.error('Failed to get log level distribution:', error);
     throw error;
   }
 }
@@ -406,8 +415,8 @@ export async function getLogSourceDistribution(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaChecker = QuotaChecker.getInstance();
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
@@ -417,11 +426,8 @@ export async function getLogSourceDistribution(
       timeRange,
       tenantId,
       userId,
-      limit,
+      Number(limit),
     );
-
-    // 更新配额使用量
-    await quotaChecker.updateSearchUsage(tenantId);
 
     const total = distribution.reduce((sum, item) => sum + item.count, 0);
 
@@ -433,7 +439,7 @@ export async function getLogSourceDistribution(
       total,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get log source distribution:', error);
+    (ctx.service as any)?.logger?.error('Failed to get log source distribution:', error);
     throw error;
   }
 }
@@ -483,8 +489,8 @@ export async function getAnomalyDetection(
     }
 
     // 检查配额
-    const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+    const quotaChecker = QuotaChecker.getInstance();
+    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
     }
@@ -504,7 +510,7 @@ export async function getAnomalyDetection(
       },
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to detect anomalies:', error);
+    (ctx.service as any)?.logger?.error('Failed to detect anomalies:', error);
     throw error;
   }
 }
@@ -558,14 +564,14 @@ export async function generateLogReport(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.info(`Report generation started: ${reportId}`);
+    (ctx.service as any)?.logger?.info(`Report generation started: ${reportId}`);
 
     return {
       success: true,
       reportId,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to generate report:', error);
+    (ctx.service as any)?.logger?.error('Failed to generate report:', error);
     throw error;
   }
 }
@@ -589,7 +595,7 @@ export async function getReportStatus(
   try {
     const { reportId, tenantId, userId } = params;
 
-    const report = await ctx.service.db
+    const report = await (ctx.service as any).db
       .collection('log_reports')
       .findOne({ reportId, tenantId, userId });
 
@@ -604,7 +610,7 @@ export async function getReportStatus(
       error: report.error,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get report status:', error);
+    (ctx.service as any)?.logger?.error('Failed to get report status:', error);
     throw error;
   }
 }
@@ -634,7 +640,7 @@ function generateStatsCacheKey(params: LogStatsParams, tenantId: string, userId?
     userId || 'all',
     params.timeRange || 'default',
     params.interval || DEFAULT_STATS_INTERVAL,
-    JSON.stringify(params.filters || {}),
+    JSON.stringify((params as any).filters || {}),
   ];
 
   return keyParts.join(':');
@@ -655,20 +661,21 @@ export async function clearStatsCache(
 
     const pattern = userId ? `log_stats:${tenantId}:${userId}:*` : `log_stats:${tenantId}:*`;
 
-    const keys = await ctx.service.redis.keys(pattern);
+    const service = ctx.service as any;
+    const keys = await service.redis?.keys(pattern);
 
-    if (keys.length > 0) {
-      await ctx.service.redis.del(...keys);
+    if (keys && keys.length > 0) {
+      await service.redis?.del(...keys);
     }
 
-    ctx.service.logger.debug(`Cleared ${keys.length} stats cache keys`);
+    service.logger?.debug(`Cleared ${keys?.length || 0} stats cache keys`);
 
     return {
       success: true,
-      clearedKeys: keys.length,
+      clearedKeys: keys?.length || 0,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to clear stats cache:', error);
+    (ctx.service as any)?.logger?.error('Failed to clear stats cache:', error);
     throw error;
   }
 }

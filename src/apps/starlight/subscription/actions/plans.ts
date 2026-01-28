@@ -2,6 +2,8 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { validators } from '../validators';
 
+console.log('Plans Actions - Validators:', validators);
+
 const plans = (star: Starlight) => {
   return {
     // 获取所有订阅计划
@@ -201,6 +203,38 @@ const plans = (star: Starlight) => {
               message: '订阅计划比较失败',
               success: false,
             },
+          };
+        }
+      },
+    },
+
+    // 获取计划配额限制
+    'v1.plans.limits': {
+      params: {
+        planName: { type: 'string', required: true },
+      },
+      async handler(ctx: Context) {
+        try {
+          const { planName } = ctx.params;
+          const plan = await (this as any).getPlanByName(planName);
+
+          if (!plan) {
+            // 默认返回基础配额
+            return {
+              metrics: { hourly: 100, daily: 1000, monthly: 10000 },
+              apiKeys: 1,
+              storage: 104857600, // 100MB
+            };
+          }
+
+          return plan.limits;
+        } catch (error) {
+          star.logger?.error('Get plan limits failed:', error);
+          // 出错时返回默认配额
+          return {
+            metrics: { hourly: 100, daily: 1000, monthly: 10000 },
+            apiKeys: 1,
+            storage: 104857600,
           };
         }
       },

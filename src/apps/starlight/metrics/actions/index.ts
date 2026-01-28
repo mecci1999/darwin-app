@@ -3,19 +3,25 @@ import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import appkey from './appkey';
 import ingest from './ingest';
 import query from './query';
+import realtime from './realtime';
 import schema from './schema';
+import topology from './topology';
 
 const metricsActions = (star: Starlight) => {
   const ingestAction = ingest(star);
   const queryAction = query(star);
   const schemaAction = schema(star);
   const appkeyAction = appkey(star);
+  const topologyAction = topology(star);
+  const realtimeAction = realtime(star);
 
   return {
     ...ingestAction,
     ...queryAction,
     ...schemaAction,
     ...appkeyAction,
+    ...topologyAction,
+    ...realtimeAction,
 
     // 健康检查
     health: {
@@ -51,7 +57,7 @@ const metricsActions = (star: Starlight) => {
     },
 
     // 获取服务统计信息
-    stats: {
+    'v1.stats': {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const stats = await (this as any).getServiceStats();

@@ -10,7 +10,7 @@ let _cleanupInterval: NodeJS.Timeout | undefined;
 
 export default function stream(star: Starlight) {
   return {
-    'v1.logStream': {
+    'v1.stream': {
       metadata: {
         auth: true,
         roles: ['admin', 'user'],

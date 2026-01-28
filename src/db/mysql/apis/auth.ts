@@ -33,6 +33,7 @@ export async function saveOrUpdateEmailAuth(params: {
       .then(() => true);
   } catch (error) {
     console.log(error);
+    throw error;
   }
 }
 
@@ -72,5 +73,6 @@ export async function saveOrUpdateScanAuth(params: { userId: string; deviceInfo:
       .then(() => true);
   } catch (error) {
     console.log(error);
+    throw error;
   }
 }

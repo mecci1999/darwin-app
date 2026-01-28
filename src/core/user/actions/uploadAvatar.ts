@@ -2,7 +2,7 @@
  * 用户头像上传动作
  */
 
-import { FileCategory } from 'core/file';
+import { FileCategory } from 'core/file/types';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 

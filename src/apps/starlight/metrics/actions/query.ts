@@ -5,7 +5,7 @@ import { validators, metricsValidators } from '../validators';
 const query = (star: Starlight) => {
   return {
     // 查询指标数据
-    query: {
+    'v1.query': {
       metadata: {
         auth: true,
       },
@@ -196,6 +196,41 @@ const query = (star: Starlight) => {
               success: false,
             },
           };
+        }
+      },
+    },
+
+    // 内部调用：获取用户指标使用量
+    getUserMetricsCount: {
+      visibility: 'public',
+      params: {
+        userId: { type: 'string', required: true },
+        timeRanges: { type: 'object', optional: true },
+      },
+      async handler(ctx: Context) {
+        try {
+          const { userId, timeRanges } = ctx.params;
+          return await (this as any).getMetricsUsage(userId, timeRanges);
+        } catch (error) {
+          star.logger?.error('Get user metrics count failed:', error);
+          return { hourly: 0, daily: 0, monthly: 0 };
+        }
+      },
+    },
+
+    // 内部调用：获取用户存储使用量
+    getUserStorageUsage: {
+      visibility: 'public',
+      params: {
+        userId: { type: 'string', required: true },
+      },
+      async handler(ctx: Context) {
+        try {
+          const { userId } = ctx.params;
+          return await (this as any).getStorageUsage(userId);
+        } catch (error) {
+          star.logger?.error('Get user storage usage failed:', error);
+          return 0;
         }
       },
     },

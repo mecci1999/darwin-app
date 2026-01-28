@@ -24,6 +24,8 @@ export const SUPPORTED_FORMATS = ['prometheus', 'statsd', 'datadog', 'otlp', 'cu
 export const KAFKA_CLIENT_ID = 'metrics-service';
 export const KAFKA_GROUP_ID = 'metrics-group';
 export const KAFKA_BROKERS = process.env.KAFKA_BROKERS || 'localhost:9092';
+export const KAFKA_USER = process.env.KAFKA_USER || '';
+export const KAFKA_PASSWORD = process.env.KAFKA_PASSWORD || '';
 
 // Redis配置
 export const REDIS_HOST = process.env.REDIS_HOST || 'localhost';

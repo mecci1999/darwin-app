@@ -4,7 +4,15 @@
  */
 
 import { Context } from 'node-universe';
-import { LogEntry, LogBatch, LogFormat, LogErrorCode, ApiPermission, StoredLog, LogSource } from '../types';
+import {
+  LogEntry,
+  LogBatch,
+  LogFormat,
+  LogErrorCode,
+  ApiPermission,
+  StoredLog,
+  LogSource,
+} from '../types';
 import { elasticsearchManager } from '../utils/elasticsearch-manager';
 import { LogProcessor } from '../utils/log-processor';
 import { QuotaChecker } from '../utils/quota-checker';
@@ -27,13 +35,14 @@ export async function ingestSingleLog(
     const { apiKey, log, tenantId, userId } = params;
 
     // 验证API密钥
-    const keyValidation = await api.validateApiKey(apiKey);
+    const apiKeyManager = ApiKeyManager.getInstance();
+    const keyValidation = await apiKeyManager.validateApiKey(apiKey);
     if (!keyValidation) {
       throw new Error('无效的API密钥');
     }
 
     // 检查权限
-    if (!ApiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
+    if (!apiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
       throw new Error('API密钥缺少摄取权限');
     }
 
@@ -117,13 +126,14 @@ export async function ingestLogBatch(
     }
 
     // 验证API密钥
-    const keyValidation = await ApiKeyManager.validateApiKey(apiKey);
+    const apiKeyManager = ApiKeyManager.getInstance();
+    const keyValidation = await apiKeyManager.validateApiKey(apiKey);
     if (!keyValidation) {
       throw new Error('无效的API密钥');
     }
 
     // 检查权限
-    if (!ApiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
+    if (!apiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
       throw new Error('API密钥缺少批量摄取权限');
     }
 
@@ -198,13 +208,14 @@ export async function ingestLogStream(
     const { apiKey, stream, tenantId, userId, format = 'json' } = params;
 
     // 验证API密钥
-    const keyValidation = await ApiKeyManager.validateApiKey(apiKey);
+    const apiKeyManager = ApiKeyManager.getInstance();
+    const keyValidation = await apiKeyManager.validateApiKey(apiKey);
     if (!keyValidation) {
       throw new Error('无效的API密钥');
     }
 
     // 检查权限
-    if (!ApiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
+    if (!apiKeyManager.hasPermission(keyValidation, ApiPermission.INGEST)) {
       throw new Error('API密钥缺少流式摄取权限');
     }
 
@@ -405,12 +416,16 @@ export async function getIngestionStats(
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
 
     // 获取日志统计（使用现有的 getLogStats 方法）
-    const stats = await esClient.getLogStats({
+    const stats = await esClient.getLogStats(
+      {
+        tenantId,
+        userId,
+        timeRange,
+        groupBy: 'source',
+      },
       tenantId,
       userId,
-      timeRange,
-      groupBy: 'source',
-    });
+    );
 
     // 转换为期望的格式
     const result = {

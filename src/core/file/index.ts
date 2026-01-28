@@ -25,15 +25,20 @@ async function initializeFileService() {
       namespace: 'darwin-app',
       transporter: {
         type: 'KAFKA',
-        debug: process.env.NODE_ENV !== 'production',
+        debug: true,
         host: process.env.KAFKA_HOST || 'localhost:9092',
         options: {
           sasl: {
             mechanism: 'plain',
-            username: process.env.KAFKA_USER || 'kafka_user',
-            password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2024!$',
+            username: process.env.KAFKA_USER || 'darwin_app',
+            password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2025!',
           },
           ssl: false,
+          // 心跳配置 - 解决节点超时警告
+          heartbeatInterval: 3000, // 3秒发送一次心跳
+          sessionTimeout: 30000,   // 30秒会话超时
+          requestTimeout: 25000,   // 25秒请求超时
+          connectionTimeout: 10000, // 10秒连接超时
         },
       },
       serializer: {
@@ -41,16 +46,16 @@ async function initializeFileService() {
       },
       // logger: pinoOptions,
       cacher: {
-      type: 'Redis',
-      clone: true,
-      options: {
-        redis: {
-          port: parseInt(process.env.REDIS_PORT || '6379'),
-          host: process.env.REDIS_HOST || 'localhost',
-          password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+        type: 'Redis',
+        clone: true,
+        options: {
+          redis: {
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+            host: process.env.REDIS_HOST || 'localhost',
+            password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+          },
         },
       },
-    },
       metrics: {
         enabled: true,
         reporter: {
@@ -124,6 +129,3 @@ initializeFileService().catch((error) => {
   console.error('Failed to initialize file service:', error);
   process.exit(1);
 });
-
-// 导出必要的类型定义供其他微服务使用
-export * from './types';

@@ -95,7 +95,7 @@ export class GatewayHelper {
   static setAuthCookies(res: GatewayResponse, token: string, refreshToken: string) {
     res.setHeader(
       'Set-Cookie',
-      `ACCESS_TOKEN=${token}; REFRESH_TOKEN=${refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
+      `ACCESS_TOKEN=${token}; REFRESH_TOKEN=${refreshToken}; Path=/; SameSite=Strict;`,
     );
   }
 
@@ -104,8 +104,8 @@ export class GatewayHelper {
    */
   static clearAuthCookies(res: GatewayResponse) {
     res.setHeader('Set-Cookie', [
-      'ACCESS_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-      'REFRESH_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'ACCESS_TOKEN=; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'REFRESH_TOKEN=; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
     ]);
   }
 
@@ -214,14 +214,16 @@ export class GatewayHelper {
 
     res.setHeader('Content-Type', 'text/plain');
     res.writeHead(err.code || 500);
-    res.end({
-      status: HttpStatusCode.BAD_REQUEST,
-      data: {
-        content: err,
-        message: 'Bad request',
-        code: HttpResponseCode.BAD_REQUEST,
-        success: false,
-      },
-    });
+    res.end(
+      JSON.stringify({
+        status: HttpStatusCode.BAD_REQUEST,
+        data: {
+          content: err,
+          message: 'Bad request',
+          code: HttpResponseCode.BAD_REQUEST,
+          success: false,
+        },
+      }),
+    );
   }
 }

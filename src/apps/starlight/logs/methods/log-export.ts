@@ -3,15 +3,15 @@
  * 处理日志数据的导出和下载
  */
 
-import * as csv from 'csv-writer';
-import { searchLogs as _searchLogs } from 'db/es';
 import * as fs from 'fs';
 import { Context } from 'node-universe';
 import * as path from 'path';
 import { EXPORT_LIMITS } from '../constants';
 import { ApiPermission, LogEntry, LogExportParams, LogFormat } from '../types';
 import { ApiKeyManager } from '../utils/api-key-manager';
+import { elasticsearchManager } from '../utils/elasticsearch-manager';
 import { LogProcessor } from '../utils/log-processor';
+import { convertToCSV, convertToJSON } from '../utils/log-utils';
 import { QuotaChecker } from '../utils/quota-checker';
 
 /**
@@ -129,14 +129,16 @@ export async function performLogExport(
     await updateExportStatus(ctx, exportId, 'processing', 0);
 
     const logProcessor = new LogProcessor();
+    const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
 
     // 获取日志数据
-    const logs = await _searchLogs(tenantId, {
+    const logs = await esClient.searchLogs({
       query: exportParams.query,
-      startTime: exportParams.startTime ? new Date(exportParams.startTime) : undefined,
-      endTime: exportParams.endTime ? new Date(exportParams.endTime) : undefined,
-      size: exportParams.limit || EXPORT_LIMITS.MAX_RECORDS,
-      from: 0,
+      startTime: exportParams.startTime ? new Date(exportParams.startTime).getTime() : undefined,
+      endTime: exportParams.endTime ? new Date(exportParams.endTime).getTime() : undefined,
+      limit: exportParams.limit || EXPORT_LIMITS.MAX_RECORDS,
+      tenantId,
+      userId,
     });
 
     // 更新进度
@@ -533,7 +535,7 @@ async function generateExportFile(
  * 生成JSON文件
  */
 async function generateJsonFile(logs: LogEntry[], filePath: string): Promise<void> {
-  const jsonData = JSON.stringify(logs, null, 2);
+  const jsonData = convertToJSON(logs);
   fs.writeFileSync(filePath, jsonData, 'utf8');
 }
 
@@ -541,28 +543,8 @@ async function generateJsonFile(logs: LogEntry[], filePath: string): Promise<voi
  * 生成CSV文件
  */
 async function generateCsvFile(logs: LogEntry[], filePath: string): Promise<void> {
-  const csvWriter = csv.createObjectCsvWriter({
-    path: filePath,
-    header: [
-      { id: 'timestamp', title: 'Timestamp' },
-      { id: 'level', title: 'Level' },
-      { id: 'source', title: 'Source' },
-      { id: 'message', title: 'Message' },
-      { id: 'hostname', title: 'Hostname' },
-      { id: 'userId', title: 'User ID' },
-    ],
-  });
-
-  const csvData = logs.map((log) => ({
-    timestamp: new Date(log.timestamp).toISOString(),
-    level: log.level,
-    source: log.source,
-    message: log.message,
-    hostname: log.hostname || '',
-    userId: log.userId || '',
-  }));
-
-  await csvWriter.writeRecords(csvData);
+  const csvData = convertToCSV(logs);
+  fs.writeFileSync(filePath, csvData, 'utf8');
 }
 
 /**

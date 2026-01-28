@@ -49,8 +49,30 @@ async function initializeAuthService() {
     // 通信模块使用kafka
     transporter: {
       type: 'KAFKA',
-      debug: true,
-      host: 'localhost:9092',
+      debug: process.env.NODE_ENV !== 'production',
+      host: process.env.KAFKA_HOST || '127.0.0.1:9092',
+      options: {
+        producer: {
+          'linger.ms': 0, // 立即发送，禁用缓冲延迟
+          'batch.size': 0, // 禁用批处理
+          acks: 1,
+        },
+        consumer: {
+          'fetch.min.bytes': 1, // 有数据立即拉取
+          'fetch.wait.max.ms': 100, // 最多等待100ms
+        },
+        sasl: {
+          mechanism: 'plain',
+          username: process.env.KAFKA_USER || 'darwin_app',
+          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2025!',
+        },
+        ssl: false,
+        groupId: `auth-group-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
+      },
     },
     serializer: {
       type: 'NotePack',

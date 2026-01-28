@@ -29,6 +29,7 @@ export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
       .then(() => users);
   } catch (error) {
     console.log(error);
+    throw error; // Throw error to let caller know something went wrong
   }
 }
 

@@ -5,13 +5,13 @@
 
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
-import { searchLogsSecord } from '../methods/log-search';
+import { searchLogs } from '../methods/log-search';
 import { LogSearchParams } from '../types';
 import { validateLogSearch } from '../validators';
 
 export default function search(star: Starlight) {
   return {
-    'v1.searchLogs': {
+    'v1.search': {
       metadata: {
         auth: true,
         roles: ['admin', 'user', 'viewer'],
@@ -75,7 +75,7 @@ export default function search(star: Starlight) {
           };
 
           // 调用搜索方法
-          const result = await searchLogsSecord(ctx, {
+          const result = await searchLogs(ctx, {
             tenantId,
             apiKey,
             searchParams,

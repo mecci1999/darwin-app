@@ -39,7 +39,7 @@ export default {
   },
 
   // 处理指标处理完成事件
-  'metrics.processed': {
+  'metrics-processed': {
     async handler(ctx: any) {
       try {
         const { tenantId, batchId, count } = ctx.params;
@@ -90,6 +90,50 @@ export default {
         );
       } catch (error) {
         ctx.service.logger.error('Failed to handle metrics.aggregate event:', error);
+      }
+    },
+  },
+
+  // 处理系统指标上报事件 (node-universe metrics reporter)
+  'metrics.report': {
+    async handler(ctx: any) {
+      try {
+        const { nodeID, metrics } = ctx.params;
+        const metricsState: MetricsState = ctx.service.metricsState;
+
+        if (!metrics || !Array.isArray(metrics)) {
+          return;
+        }
+
+        // 转换系统指标为统一格式
+        const enrichedData = metrics.map((metric: any) => ({
+          measurement: metric.name,
+          tags: {
+            nodeID,
+            type: metric.type,
+            unit: metric.unit,
+            ...metric.tags,
+          },
+          fields: {
+            value: metric.value,
+          },
+          timestamp: Date.now(),
+          tenantId: 'system', // 系统级指标归类为 system 租户
+          serviceId: ctx.service.fullName,
+        }));
+
+        // 添加到处理队列
+        metricsState.processingQueue.push({
+          id: `system-${nodeID}-${Date.now()}`,
+          format: 'system',
+          data: enrichedData,
+          timestamp: Date.now(),
+          retryCount: 0,
+        });
+
+        ctx.service.logger.debug(`System metrics received from node: ${nodeID}`);
+      } catch (error) {
+        ctx.service.logger.error('Failed to handle metrics.report event:', error);
       }
     },
   },

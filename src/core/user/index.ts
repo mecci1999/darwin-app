@@ -8,6 +8,7 @@ import userActions from './actions';
 // 导入基本类型和常量
 import { APP_NAME } from './constants';
 import { EventHandler } from './utils';
+import { LogLevel } from 'apps/starlight/logs/types';
 
 async function initializeUserService() {
   // const pinoOptions = await pinoLoggerOptions(APP_NAME);
@@ -17,14 +18,28 @@ async function initializeUserService() {
     transporter: {
       type: 'KAFKA',
       debug: true,
-      host: process.env.KAFKA_HOST || 'localhost:9092',
+      host: process.env.KAFKA_HOST || '127.0.0.1:9092',
       options: {
+        producer: {
+          'linger.ms': 0,
+          'batch.size': 0,
+          acks: 1,
+        },
+        consumer: {
+          'fetch.min.bytes': 1,
+          'fetch.wait.max.ms': 100,
+        },
         sasl: {
           mechanism: 'plain',
-          username: process.env.KAFKA_USER || 'kafka_user',
-          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2024!$',
+          username: process.env.KAFKA_USER || 'darwin_app',
+          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2025!',
         },
         ssl: false,
+        groupId: `user-group-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
       },
     },
     serializer: {
@@ -42,12 +57,12 @@ async function initializeUserService() {
         },
       },
     },
-    // metrics: {
-    //   enabled: true,
-    //   reporter: {
-    //     type: 'Event',
-    //   },
-    // },
+    metrics: {
+      enabled: false,
+      reporter: {
+        type: 'Event',
+      },
+    },
   }) as Starlight;
 
   star.createService({

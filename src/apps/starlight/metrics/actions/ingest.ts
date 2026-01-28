@@ -5,7 +5,7 @@ import { validators } from '../validators';
 const ingest = (star: Starlight) => {
   return {
     // 单条指标数据接收
-    ingest: {
+    'v1.ingest': {
       metadata: {
         auth: true, // 需要AppKey验证
       },
@@ -154,7 +154,7 @@ const ingest = (star: Starlight) => {
     },
 
     // 批量指标数据接收
-    batchIngest: {
+    'v1.batchIngest': {
       metadata: {
         auth: true,
       },

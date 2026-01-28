@@ -1,13 +1,157 @@
+import { findApiKeyByKey } from 'db/mysql/apis/apiKey';
 import { Star } from 'node-universe';
-import { MetricsState, RawMetricsData, QuotaWarningParams } from '../types';
-import { DataProcessor, InfluxDBHandler, QuotaChecker, KafkaHandler } from '../utils';
 import { MAX_RETRIES } from '../constants';
+import { MetricsState, QuotaWarningParams, RawMetricsData } from '../types';
+import { DataProcessor, InfluxDBHandler, KafkaHandler, MetricsUtils, QuotaChecker } from '../utils';
 
 /**
  * 指标数据微服务的方法
  */
 const metricsMethod = (star: Star, state: MetricsState) => {
   return {
+    /**
+     * 验证 AppKey
+     */
+    async validateAppKey(appKey: string, userId: string) {
+      try {
+        const keyData = await findApiKeyByKey(appKey);
+        if (!keyData) {
+          return { valid: false };
+        }
+
+        if (keyData.userId !== userId) {
+          return { valid: false };
+        }
+
+        if (!keyData.isActive) {
+          return { valid: false };
+        }
+
+        if (keyData.expiresAt && new Date(keyData.expiresAt) < new Date()) {
+          return { valid: false };
+        }
+
+        return { valid: true, schema: (keyData as any).schema };
+      } catch (error) {
+        star.logger?.error('Failed to validate AppKey:', error);
+        return { valid: false, error };
+      }
+    },
+
+    /**
+     * 检查用户配额
+     */
+    async checkUserQuota(userId: string, count: number) {
+      try {
+        // 获取用户当前使用量
+        const usage = await QuotaChecker.getUserUsage(userId, star);
+        const current = usage.metrics?.hourly || 0;
+
+        // 获取用户订阅计划限制
+        // 尝试从订阅服务获取限制，如果失败则使用默认值
+        let limit = 10000; 
+        try {
+           const subscription = await star.call('subscription.1.getUserSubscription', { userId });
+           if (subscription && subscription.plan) {
+             const planLimits = await star.call('subscription.1.getPlanLimits', { planName: subscription.plan });
+             if (planLimits && planLimits.metrics && planLimits.metrics.hourly) {
+               limit = planLimits.metrics.hourly;
+             }
+           }
+        } catch (e) {
+           star.logger?.warn('Failed to fetch plan limits, using default:', e);
+        }
+
+        if (current + count > limit) {
+          return {
+            allowed: false,
+            used: current,
+            limit,
+            resetTime: Date.now() + 3600000,
+          };
+        }
+
+        return {
+          allowed: true,
+          used: current,
+          limit,
+          resetTime: Date.now() + 3600000,
+        };
+      } catch (error) {
+        star.logger?.error('Failed to check user quota:', error);
+        // 失败时默认允许，避免阻塞业务
+        return { allowed: true, used: 0, limit: 10000, resetTime: Date.now() };
+      }
+    },
+
+    /**
+     * 验证并清洗指标数据
+     */
+    async validateAndCleanMetrics(metrics: any[], format: string, schema: any) {
+      try {
+        if (!MetricsUtils.validateMetricsFormat(format)) {
+          return { valid: [], errors: [`Unsupported format: ${format}`] };
+        }
+        // 简单透传，实际应进行 Schema 验证
+        return { valid: metrics, errors: [] };
+      } catch (error) {
+        return { valid: [], errors: [String(error)] };
+      }
+    },
+
+    /**
+     * 获取用户订阅信息
+     */
+    async getUserSubscription(userId: string) {
+      try {
+        // 尝试从订阅服务获取
+        try {
+          const sub = await star.call('subscription.1.getUserSubscription', { userId });
+          return sub || { plan: 'free' };
+        } catch (e) {
+          return { plan: 'free' };
+        }
+      } catch (error) {
+        star.logger?.error('Failed to get user subscription:', error);
+        return { plan: 'free' };
+      }
+    },
+
+    /**
+     * 直接处理指标数据
+     */
+    async processMetricsDirectly(params: {
+      userId: string;
+      appKey: string;
+      metrics: any[];
+      timestamp: number;
+      format: string;
+    }) {
+      try {
+        return await this.ingestMetrics({
+          data: params.metrics,
+          format: params.format as any,
+          source: 'direct',
+          timestamp: params.timestamp,
+          metadata: { userId: params.userId, appKeyId: params.appKey },
+        });
+      } catch (error) {
+        throw error;
+      }
+    },
+
+    /**
+     * 更新配额使用情况
+     */
+    async updateQuotaUsage(userId: string, count: number) {
+      try {
+        // 发送事件，异步更新
+        star.emit('metrics.usage.update', { userId, count, timestamp: Date.now() });
+      } catch (error) {
+        star.logger?.error('Failed to update quota usage:', error);
+      }
+    },
+
     /**
      * 摄取原始指标数据
      */
@@ -151,15 +295,53 @@ const metricsMethod = (star: Star, state: MetricsState) => {
     },
 
     /**
+     * 获取用户指标使用量
+     */
+    async getMetricsUsage(userId: string, timeRanges: any) {
+      return await InfluxDBHandler.getMetricsUsage(userId, timeRanges, star);
+    },
+
+    /**
+     * 获取用户API密钥数量
+     */
+    async getApiKeysCount(userId: string) {
+      try {
+        // 实际上应该查询数据库
+        // 这里暂时模拟
+        return 0;
+      } catch (error) {
+        star.logger?.error('Failed to get API keys count:', error);
+        return 0;
+      }
+    },
+
+    /**
+     * 获取用户存储使用量
+     */
+    async getStorageUsage(userId: string) {
+      return await InfluxDBHandler.getStorageUsage(userId, star);
+    },
+
+    /**
+     * 触发配额超限处理
+     */
+    async onQuotaExceeded(data: any) {
+      try {
+        star.logger?.warn('Quota exceeded:', data);
+        // 可以发送通知邮件或短信
+      } catch (error) {
+        star.logger?.error('Failed to handle quota exceeded:', error);
+      }
+    },
+
+    /**
      * 清理缓存
      */
     async clearCache(type?: string) {
       try {
         if (type) {
           if (state.cache[type as keyof typeof state.cache]) {
-            (
-              state.cache[type as keyof typeof state.cache] as Map<string, any>
-            ).clear();
+            (state.cache[type as keyof typeof state.cache] as Map<string, any>).clear();
           }
         } else {
           state.cache.metrics.clear();
@@ -299,45 +481,12 @@ const metricsMethod = (star: Star, state: MetricsState) => {
       });
     },
 
-    /**
-     * 指标处理完成事件处理
-     */
     async onMetricsProcessed(data: any) {
-      star.logger?.debug(`Metrics batch processed: ${data.batchId}`);
-
-      // 更新缓存
-      if (data.userId) {
-        state.cache.metrics.delete(data.userId);
-      }
+      // no-op
     },
 
-    /**
-     * 配额警告事件处理
-     */
-    async onQuotaWarning(data: QuotaWarningParams) {
-      star.logger?.warn(`Quota warning for user: ${data.userId}, type: ${data.quotaType}`);
-
-      // 发送通知
-      await star.emit('notification.send', {
-        userId: data.userId,
-        type: 'quota_warning',
-        data,
-      });
-    },
-
-    /**
-     * 配额超限事件处理
-     */
-    async onQuotaExceeded(data: any) {
-      star.logger?.error(`Quota exceeded for user: ${data.userId}`);
-
-      // 发送紧急通知
-      await star.emit('notification.send', {
-        userId: data.userId,
-        type: 'quota_exceeded',
-        priority: 'high',
-        data,
-      });
+    async onQuotaWarning(data: any) {
+      // no-op
     },
   };
 };

@@ -161,120 +161,22 @@ export class PlanManager {
   static async getActivePlans(star: any): Promise<SubscriptionPlan[]> {
     try {
       // 从数据库获取所有活跃计划
-      // const plans = await this.getPlansFromDatabase({ status: 'active' }, star);
+      const SubscriptionPlanModel = star.db.models.SubscriptionPlanTable;
+      if (!SubscriptionPlanModel) {
+        throw new Error('SubscriptionPlanTable model not found');
+      }
 
-      // 模拟返回计划列表
-      const mockPlans: SubscriptionPlan[] = [
-        {
-          id: 'plan_free',
-          name: 'Free',
-          description: 'Free plan with basic features',
-          price: 0,
-          currency: 'USD',
-          billingCycle: 'monthly',
-          features: [
-            {
-              id: 'api_calls',
-              name: 'API Calls',
-              description: 'Monthly API call limit',
-              enabled: true,
-              value: 1000,
-            },
-          ],
-          limits: {
-            apiCalls: 1000,
-            storage: 1,
-            bandwidth: 10,
-            users: 1,
-            projects: 1,
-            customDomains: 0,
-            supportLevel: 'basic',
-          },
-          status: 'active',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: 'plan_basic',
-          name: 'Basic',
-          description: 'Basic plan for small teams',
-          price: 999,
-          currency: 'USD',
-          billingCycle: 'monthly',
-          features: [
-            {
-              id: 'api_calls',
-              name: 'API Calls',
-              description: 'Monthly API call limit',
-              enabled: true,
-              value: 10000,
-            },
-            {
-              id: 'storage',
-              name: 'Storage',
-              description: 'Storage space in GB',
-              enabled: true,
-              value: 10,
-            },
-          ],
-          limits: {
-            apiCalls: 10000,
-            storage: 10,
-            bandwidth: 100,
-            users: 5,
-            projects: 3,
-            customDomains: 1,
-            supportLevel: 'standard',
-          },
-          status: 'active',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: 'plan_pro',
-          name: 'Professional',
-          description: 'Professional plan for growing businesses',
-          price: 2999,
-          currency: 'USD',
-          billingCycle: 'monthly',
-          features: [
-            {
-              id: 'api_calls',
-              name: 'API Calls',
-              description: 'Monthly API call limit',
-              enabled: true,
-              value: 100000,
-            },
-            {
-              id: 'storage',
-              name: 'Storage',
-              description: 'Storage space in GB',
-              enabled: true,
-              value: 100,
-            },
-            {
-              id: 'priority_support',
-              name: 'Priority Support',
-              description: 'Priority customer support',
-              enabled: true,
-            },
-          ],
-          limits: {
-            apiCalls: 100000,
-            storage: 100,
-            bandwidth: 1000,
-            users: 25,
-            projects: 10,
-            customDomains: 5,
-            supportLevel: 'premium',
-          },
-          status: 'active',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+      const plans = await SubscriptionPlanModel.findAll({
+        where: { isActive: true },
+        order: [['sortOrder', 'ASC']]
+      });
 
-      return mockPlans;
+      if (plans && plans.length > 0) {
+        return plans.map((p: any) => p.toJSON() as SubscriptionPlan);
+      }
+      
+      // 如果数据库为空，且为开发环境，可以返回默认种子数据（可选，这里选择直接返回空）
+      return [];
     } catch (error) {
       star.logger?.error('Failed to get active plans:', error);
       return [];

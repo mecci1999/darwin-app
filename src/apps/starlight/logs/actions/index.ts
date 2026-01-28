@@ -2,9 +2,10 @@ import batchIngest from './batch-ingest';
 import ingest from './ingest';
 import search from './search';
 import stats from './stats';
+import exportLogs from './export';
+import exceptionAnalysis from './exception-analysis';
 // import trends from './trends';
 // import reports from './reports';
-// import exportAction from './export';
 // import exportStatus from './export-status';
 import { Starlight } from 'typings';
 import stream from './stream';
@@ -30,9 +31,10 @@ const logsAction = (star: Starlight) => {
   const batchIngestAction = batchIngest(star);
   const searchAction = search(star);
   const statsAction = stats(star);
+  const exportAction = exportLogs(star);
+  const exceptionAnalysisAction = exceptionAnalysis(star);
   // const trendsAction = trends(star);
   // const reportsAction = reports(star);
-  // const exportActionResult = exportAction(star);
   // const exportStatusAction = exportStatus(star);
   const streamAction = stream(star);
   // const streamManagementAction = streamManagement(star);
@@ -54,9 +56,10 @@ const logsAction = (star: Starlight) => {
     ...batchIngestAction,
     ...searchAction,
     ...statsAction,
+    ...exportAction,
+    ...exceptionAnalysisAction,
     // ...trendsAction,
     // ...reportsAction,
-    // ...exportActionResult,
     // ...exportStatusAction,
     ...streamAction,
     // ...streamManagementAction,

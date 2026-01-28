@@ -171,7 +171,7 @@ const authMethods = (star: Star, state?: AuthState) => {
           if (result.length > 0) {
             const rsaData = JSON.parse(result[0].value);
             if (rsaData.publicKey && rsaData.privateKey) {
-              star.logger?.info('RSA密钥对已存在，跳过生成');
+              star.logger?.info('RSA密钥对已存在，跳过生成', rsaData.privateKey);
               return;
             }
           }

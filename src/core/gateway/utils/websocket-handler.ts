@@ -38,6 +38,7 @@ export class WebSocketHandler {
    */
   public static createWebSocketAction(messageType: string, successMessage: string) {
     return {
+      // visibility: "published",
       timeout: 0,
       handler(ctx: Context) {
         const { channel, data, clientId, userId } = ctx.params;

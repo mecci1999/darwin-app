@@ -85,10 +85,14 @@ export default function register(star: Starlight) {
           const userId = generateUserId();
 
           // 调用user服务，新增用户动作
-          const createUser = await ctx.call('user.v1.create', {
-            userId,
-            source: 'email',
-          });
+          const createUser = await ctx.call(
+            'user.v1.create',
+            {
+              userId,
+              source: 'email',
+            },
+            { timeout: 60000 },
+          );
 
           if (createUser.status !== 201) {
             return {

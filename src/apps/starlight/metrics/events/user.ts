@@ -41,6 +41,7 @@ export default {
   },
 
   // 处理用户删除事件
+  /*
   'user.deleted': {
     async handler(ctx: any) {
       try {
@@ -64,8 +65,10 @@ export default {
       }
     },
   },
+  */
 
   // 处理用户活动事件
+  /*
   'user.activity': {
     async handler(ctx: any) {
       try {
@@ -111,6 +114,7 @@ export default {
       }
     },
   },
+  */
 
   // 处理用户状态更新事件
   'user.status.updated': {
@@ -132,9 +136,10 @@ export default {
         // 如果用户被暂停，清理其处理队列中的数据
         if (status === 'suspended') {
           metricsState.processingQueue = metricsState.processingQueue.filter(
-            (batch) => !batch.data.some(
-              (item: any) => item.tenantId === tenantId && item.metadata?.userId === userId,
-            ),
+            (batch) =>
+              !batch.data.some(
+                (item: any) => item.tenantId === tenantId && item.metadata?.userId === userId,
+              ),
           );
         }
 

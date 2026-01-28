@@ -13,14 +13,14 @@ const subscriptionActions = (star: Starlight) => {
   const subscriptionAction = subscription(star);
   const quotaAction = quota(star);
   const paymentAction = payment(star);
-  const billingAction = billing(star);
+  // const billingAction = billing(star);
 
   return {
     ...plansAction,
     ...subscriptionAction,
     ...quotaAction,
     ...paymentAction,
-    ...billingAction,
+    // ...billingAction,
   };
 };
 

@@ -13,7 +13,21 @@ import gatewayMethods from './methods';
 
 // 导入模块化的工具类和类型
 import { DatabaseService } from 'db/mysql';
-import { APP_NAME, DEFAULT_PORT, RATE_LIMIT_COUNT, RATE_LIMIT_WINDOW } from './constants';
+import {
+  APP_NAME,
+  DEFAULT_PORT,
+  KAFKA_BROKERS,
+  KAFKA_CLIENT_ID,
+  KAFKA_GROUP_ID,
+  KAFKA_PASSWORD,
+  KAFKA_USER,
+  RATE_LIMIT_COUNT,
+  RATE_LIMIT_WINDOW,
+  REDIS_DB,
+  REDIS_HOST,
+  REDIS_PASSWORD,
+  REDIS_PORT,
+} from './constants';
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
 
@@ -35,14 +49,32 @@ async function initializeGatewayService() {
     transporter: {
       type: 'KAFKA',
       debug: true,
-      host: process.env.KAFKA_HOST || 'localhost:9092',
+      host: KAFKA_BROKERS,
       options: {
-        sasl: {
-          mechanism: 'plain',
-          username: process.env.KAFKA_USER || 'kafka_user',
-          password: process.env.KAFKA_PASSWORD,
+        producer: {
+          'linger.ms': 0,
+          'batch.size': 0,
+          acks: 1,
         },
+        consumer: {
+          'fetch.min.bytes': 1,
+          'fetch.wait.max.ms': 100,
+        },
+        sasl:
+          KAFKA_USER && KAFKA_PASSWORD
+            ? {
+                mechanism: 'plain',
+                username: KAFKA_USER,
+                password: KAFKA_PASSWORD,
+              }
+            : undefined,
         ssl: false,
+        groupId: `${KAFKA_GROUP_ID}-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
+        clientId: KAFKA_CLIENT_ID,
+        heartbeatInterval: 3000,
+        sessionTimeout: 30000,
+        requestTimeout: 60000,
+        connectionTimeout: 10000,
       },
     },
     serializer: {
@@ -55,9 +87,10 @@ async function initializeGatewayService() {
       clone: true,
       options: {
         redis: {
-          port: parseInt(process.env.REDIS_PORT || '6379'),
-          host: process.env.REDIS_HOST || 'localhost',
-          password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+          port: REDIS_PORT,
+          host: REDIS_HOST,
+          password: REDIS_PASSWORD,
+          db: REDIS_DB,
         },
       },
     },
@@ -177,42 +210,43 @@ async function initializeGatewayService() {
           return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta });
         },
       },
-      // WebSocket状态查询
-      'websocket.status': {
-        timeout: 0,
-        handler(ctx: Context) {
-          const status = (this as any).getWebSocketStatus?.() || {
-            enabled: false,
-            clients: 0,
-            port: 6668,
-          };
+      // // WebSocket状态查询
+      // 'websocket.status': {
+      //   visibility: 'published',
+      //   timeout: 0,
+      //   handler(ctx: Context) {
+      //     const status = (this as any).getWebSocketStatus?.() || {
+      //       enabled: false,
+      //       clients: 0,
+      //       port: 6668,
+      //     };
 
-          return {
-            status: HttpStatusCode.OK,
-            data: {
-              content: status,
-              message: 'WebSocket status retrieved successfully',
-              code: HttpResponseCode.Success,
-              success: true,
-            },
-          };
-        },
-      },
+      //     return {
+      //       status: HttpStatusCode.OK,
+      //       data: {
+      //         content: status,
+      //         message: 'WebSocket status retrieved successfully',
+      //         code: HttpResponseCode.Success,
+      //         success: true,
+      //       },
+      //     };
+      //   },
+      // },
 
-      // WebSocket事件触发
-      'websocket.trigger': WebSocketHandler.createWebSocketAction(
-        'custom_event',
-        'WebSocket event triggered successfully',
-      ),
+      // // WebSocket事件触发
+      // 'websocket.trigger': WebSocketHandler.createWebSocketAction(
+      //   'custom_event',
+      //   'WebSocket event triggered successfully',
+      // ),
 
-      // 告警推送
-      'alert.send': WebSocketHandler.createWebSocketAction('alert', 'Alert sent successfully'),
+      // // 告警推送
+      // 'alert.send': WebSocketHandler.createWebSocketAction('alert', 'Alert sent successfully'),
 
-      // 消息推送
-      'message.send': WebSocketHandler.createWebSocketAction(
-        'message',
-        'Message sent successfully',
-      ),
+      // // 消息推送
+      // 'message.send': WebSocketHandler.createWebSocketAction(
+      //   'message',
+      //   'Message sent successfully',
+      // ),
     },
 
     methods: gatewayMethods(star),

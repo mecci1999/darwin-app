@@ -34,7 +34,7 @@ export class AuthUtils {
       if (result.length > 0) {
         const rsaData = JSON.parse(result[0].value);
         if (rsaData.publicKey && rsaData.privateKey) {
-          logger?.info('RSA密钥对已存在，跳过生成');
+          logger?.info('RSA密钥对已存在，跳过生成', rsaData.privateKey);
           return;
         }
       }

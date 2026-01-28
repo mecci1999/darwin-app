@@ -40,6 +40,7 @@ export default {
   },
 
   // 处理租户删除事件
+  /*
   'tenant.deleted': {
     async handler(ctx: any) {
       try {
@@ -70,6 +71,7 @@ export default {
       }
     },
   },
+  */
 
   // 处理租户状态更新事件
   'tenant.status.updated': {

@@ -23,7 +23,8 @@ class MainDatabaseConnection {
   public getConnection(): Promise<Sequelize.Sequelize> {
     if (this.promise !== null) return this.promise.then(() => this.connection as any);
 
-    throw new Error('请先调用bindMember方法，建立连接');
+    // 尝试自动连接
+    return this.bindManinConnection().then(() => this.connection as any);
   }
 
   /**

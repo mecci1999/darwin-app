@@ -10,7 +10,7 @@ import { validateLogBatchIngest } from '../validators';
 
 export default function batchIngest(star: Starlight) {
   return {
-    'v1.batchIngest': {
+    'v1.batch-ingest': {
       metadata: {
         auth: true,
         roles: ['admin', 'user'],
