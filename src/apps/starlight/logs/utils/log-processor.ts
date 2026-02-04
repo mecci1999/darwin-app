@@ -5,6 +5,7 @@
 
 import { BaseLog, StoredLog, LogLevel, LogSource } from '../types';
 import { LOG_LEVELS, LOG_SOURCES, SENSITIVE_FIELDS, MAX_LOG_SIZE } from '../constants';
+import { grokParser } from './grok-parser';
 
 export class LogProcessor {
   private sensitiveFields: Set<string>;
@@ -258,7 +259,20 @@ export class LogProcessor {
    */
   private parsePlainTextLog(logString: string): BaseLog | null {
     try {
-      // 简单的日志格式解析：[LEVEL] TIMESTAMP MESSAGE
+      // 1. 尝试使用 Grok 解析器
+      const grokResult = grokParser.parse(logString);
+      if (grokResult) {
+        return {
+          level: (grokResult.level?.toLowerCase() as LogLevel) || LogLevel.INFO,
+          timestamp: grokResult.timestamp || new Date().toISOString(),
+          message: grokResult.message || logString,
+          service: grokResult.service,
+          traceId: grokResult.traceId,
+          metadata: grokResult.metadata,
+        };
+      }
+
+      // 2. 简单的日志格式解析：[LEVEL] TIMESTAMP MESSAGE
       const match = logString.match(/^\[([A-Z]+)\]\s+(\S+)\s+(.+)$/);
 
       if (match) {
@@ -270,7 +284,7 @@ export class LogProcessor {
         };
       }
 
-      // 如果无法解析，创建一个基本的日志条目
+      // 3. 如果无法解析，创建一个基本的日志条目
       return {
         level: LogLevel.INFO,
         timestamp: new Date().toISOString(),

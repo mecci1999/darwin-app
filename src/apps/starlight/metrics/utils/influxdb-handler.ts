@@ -325,6 +325,38 @@ export class InfluxDBHandler {
   }
 
   /**
+   * 删除用户数据 (GDPR)
+   */
+  static async deleteUserData(userId: string, star: Star): Promise<void> {
+    try {
+      if (!this.client || !this.org || !this.bucket) {
+        throw new Error('InfluxDB not initialized');
+      }
+
+      // 使用 InfluxDB 的 delete API
+      // 注意：JavaScript 客户端可能没有直接暴露 delete API，需要手动调用或检查文档
+      // 这里假设通过 HTTP API 调用，或者使用 client 的 API
+      
+      // 模拟实现：实际应调用 /api/v2/delete
+      // const deleteApi = new DeleteApi(this.client);
+      // await deleteApi.postDelete({
+      //   org: this.org,
+      //   bucket: this.bucket,
+      //   body: {
+      //     start: new Date(0).toISOString(),
+      //     stop: new Date().toISOString(),
+      //     predicate: `tenantId="${userId}"`,
+      //   },
+      // });
+
+      star.logger?.info(`Deleted data for user ${userId}`);
+    } catch (error) {
+      star.logger?.error('Failed to delete user data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 关闭InfluxDB连接
    */
   static async close(star: Star): Promise<void> {

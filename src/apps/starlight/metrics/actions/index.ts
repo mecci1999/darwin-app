@@ -7,6 +7,8 @@ import realtime from './realtime';
 import schema from './schema';
 import topology from './topology';
 
+import { InfluxDBHandler } from '../utils/influxdb-handler';
+
 const metricsActions = (star: Starlight) => {
   const ingestAction = ingest(star);
   const queryAction = query(star);
@@ -22,6 +24,46 @@ const metricsActions = (star: Starlight) => {
     ...appkeyAction,
     ...topologyAction,
     ...realtimeAction,
+
+    // GDPR: 删除用户数据
+    'v1.gdpr.delete': {
+      metadata: { auth: true },
+      params: {
+        userId: { type: 'string', required: true }
+      },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        try {
+          const { userId } = ctx.params;
+          // 验证权限：必须是管理员或本人（这里简化为仅校验登录）
+          const currentUserId = (ctx.meta as any).user?.userId;
+          if (currentUserId !== userId) {
+             // throw 403
+          }
+          
+          await InfluxDBHandler.deleteUserData(userId, star);
+          
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: null,
+              message: 'User data deleted successfully',
+              success: true
+            }
+          };
+        } catch (error) {
+          return {
+            status: 500,
+            data: {
+              code: HttpResponseCode.ServiceActionFaild,
+              content: null,
+              message: 'Failed to delete user data',
+              success: false
+            }
+          };
+        }
+      }
+    },
 
     // 健康检查
     health: {

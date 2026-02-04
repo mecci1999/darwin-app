@@ -31,6 +31,7 @@ import {
 import events from './events';
 import createMethods from './methods';
 import { MetricsState } from './types';
+import { AlertEngine } from './utils/alert-engine';
 
 // 服务状态管理
 const metricsState: MetricsState = {
@@ -39,6 +40,7 @@ const metricsState: MetricsState = {
   kafkaConsumers: [],
   processingQueue: [],
   lastFlushTime: 0,
+  alertEngine: undefined,
   timers: {
     dataProcessor: null,
     quotaChecker: null,
@@ -217,6 +219,7 @@ function createMetricsService() {
       // 初始化服务状态
       metricsState.serviceId = this.fullName;
       metricsState.startTime = Date.now();
+      metricsState.alertEngine = new AlertEngine(star);
       (this as any).metricsState = metricsState;
 
       this.logger.info('Metrics service state initialized');
@@ -233,6 +236,10 @@ function createMetricsService() {
         await InfluxDBHandler.initialize(this.settings.influxdb, star);
         metricsState.influxdbConnected = true;
         this.logger.info('InfluxDB connection initialized');
+
+        // 启动告警引擎
+        await metricsState.alertEngine?.loadRules();
+        metricsState.alertEngine?.start();
 
         // 启动处理器（示例实现）
         this.logger.info('Starting metrics processors...');
@@ -261,6 +268,9 @@ function createMetricsService() {
       this.logger.info('Stopping metrics service...');
 
       try {
+        // 停止告警引擎
+        metricsState.alertEngine?.stop();
+
         // 停止定时任务
         if (metricsState.timers.batchProcessor) {
           clearInterval(metricsState.timers.batchProcessor);

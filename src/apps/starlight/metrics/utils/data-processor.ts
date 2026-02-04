@@ -81,6 +81,7 @@ export class DataProcessor {
 
           // 只添加非空的元数据字段
           if (rawData.metadata?.userId) {
+            newTags.tenantId = rawData.metadata.userId; // 强制使用 tenantId 作为租户标识
             newTags.userId = rawData.metadata.userId;
           }
           if (rawData.metadata?.appKeyId) {

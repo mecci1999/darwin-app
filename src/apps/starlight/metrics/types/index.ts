@@ -2,6 +2,7 @@
  * 指标数据微服务类型定义
  */
 import { DatabaseState } from 'db/mysql';
+import { AlertEngine } from '../utils/alert-engine';
 
 /**
  * 指标数据微服务全局状态接口
@@ -14,6 +15,7 @@ export interface MetricsState extends DatabaseState {
   lastFlushTime: number;
   serviceId?: string;
   startTime?: number;
+  alertEngine?: AlertEngine;
   timers: {
     dataProcessor: NodeJS.Timeout | null;
     quotaChecker: NodeJS.Timeout | null;
