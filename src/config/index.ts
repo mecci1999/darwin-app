@@ -22,6 +22,7 @@ export const {
   GATEWAY_PORT,
   WS_SERVER_PORT,
   WS_SERVER_PATH,
+  ADMIN_EMAILS,
 } = process.env;
 
 /**

@@ -97,6 +97,91 @@ const subscription = (star: Starlight) => {
       },
     },
 
+    'v1.current.detail': {
+      metadata: {
+        auth: true,
+      },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        try {
+          const userId = (ctx.meta as any).user?.userId;
+
+          if (!userId) {
+            return {
+              status: 401,
+              data: {
+                code: HttpResponseCode.UserNotLoginError,
+                content: null,
+                message: '用户未认证',
+                success: false,
+              },
+            };
+          }
+
+          const subscription = await (this as any).getUserCurrentSubscription(userId);
+          if (!subscription) {
+            return {
+              status: 404,
+              data: {
+                code: HttpResponseCode.ParamsError,
+                content: null,
+                message: '用户当前没有订阅',
+                success: false,
+              },
+            };
+          }
+
+          const plan = await (this as any).getPlanByName(subscription.planName);
+          const usage = await (this as any).getUserCurrentUsage(userId);
+
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: {
+                plan: {
+                  id: subscription.planName,
+                  name: subscription.planName,
+                  displayName: subscription.planDisplayName,
+                  price: subscription.price,
+                  currency: subscription.currency,
+                  billingCycle: subscription.billingCycle,
+                },
+                subscription: {
+                  id: subscription.id,
+                  status: subscription.status,
+                  startDate: subscription.startDate,
+                  expiresAt: subscription.expiresAt,
+                  autoRenew: subscription.autoRenew,
+                  trialEndsAt: subscription.trialEndsAt,
+                },
+                usage: usage || null,
+                limits: plan?.features || null,
+                daysUntilExpiry: subscription.expiresAt
+                  ? Math.ceil(
+                      (new Date(subscription.expiresAt).getTime() - Date.now()) /
+                        (1000 * 60 * 60 * 24),
+                    )
+                  : null,
+              },
+              message: '获取当前订阅详情成功',
+              success: true,
+            },
+          };
+        } catch (error) {
+          star.logger?.error('Get current detail failed:', error);
+          return {
+            status: 500,
+            data: {
+              code: HttpResponseCode.ServiceActionFaild,
+              content: null,
+              message: '获取当前订阅详情失败',
+              success: false,
+            },
+          };
+        }
+      },
+    },
+
     // 内部调用：获取用户订阅信息
     getUserSubscription: {
       params: {
@@ -232,6 +317,31 @@ const subscription = (star: Starlight) => {
             paymentMethodId,
             autoRenew,
           });
+          const paymentProvider = await (this as any).getPaymentProvider(
+            paymentOrder.paymentMethod,
+          );
+          const paymentUrl = paymentProvider
+            ? await (this as any)
+                .generatePaymentUrl(paymentOrder, paymentProvider)
+                .catch(() => null)
+            : null;
+
+          if (!paymentUrl) {
+            return {
+              status: 409,
+              data: {
+                code: HttpResponseCode.ServiceActionFaild,
+                content: {
+                  orderId: paymentOrder.id,
+                  requiresPayment: true,
+                  paymentUrl: null,
+                  reason: 'payment_provider_not_available',
+                },
+                message: '当前环境未配置可用的支付跳转能力',
+                success: false,
+              },
+            };
+          }
 
           return {
             status: 201,
@@ -242,7 +352,7 @@ const subscription = (star: Starlight) => {
                 planName,
                 pricing,
                 requiresPayment: true,
-                paymentUrl: paymentOrder.paymentUrl,
+                paymentUrl,
                 expiresAt: paymentOrder.expiresAt,
               },
               message: '订阅订单创建成功，请完成支付',
@@ -386,6 +496,35 @@ const subscription = (star: Starlight) => {
             paymentMethodId,
             upgradeType,
           });
+          const upgradePaymentProvider = await (this as any).getPaymentProvider(
+            upgradeOrder.paymentMethod,
+          );
+          const paymentUrl = upgradePaymentProvider
+            ? await (this as any)
+                .generatePaymentUrl(upgradeOrder, upgradePaymentProvider)
+                .catch(() => null)
+            : null;
+
+          if (!paymentUrl) {
+            return {
+              status: 409,
+              data: {
+                code: HttpResponseCode.ServiceActionFaild,
+                content: {
+                  orderId: upgradeOrder.id,
+                  currentPlan: currentSubscription.planName,
+                  targetPlan,
+                  upgradeCost,
+                  requiresPayment: true,
+                  paymentUrl: null,
+                  reason: 'payment_provider_not_available',
+                  upgradeType,
+                },
+                message: '当前环境未配置可用的支付跳转能力',
+                success: false,
+              },
+            };
+          }
 
           return {
             status: 201,
@@ -397,7 +536,7 @@ const subscription = (star: Starlight) => {
                 targetPlan,
                 upgradeCost,
                 requiresPayment: true,
-                paymentUrl: upgradeOrder.paymentUrl,
+                paymentUrl,
                 upgradeType,
                 effectiveDate: upgradeOrder.effectiveDate,
               },

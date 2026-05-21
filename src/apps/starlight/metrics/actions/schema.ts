@@ -3,10 +3,41 @@ import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 
 const schema = (star: Starlight) => {
   return {
-    // 获取支持的指标格式列表
-    listFormats: {
+    // 获取支持的指标格式列表 (合并 listFormats 和 getFormat)
+    'v1.schema.formats': {
+      params: {
+        type: { type: 'string', optional: true },
+      },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
+          const { type } = ctx.params;
+
+          if (type) {
+            // getFormat logic
+            const formatDetail = await (this as any).getFormatDetail(type);
+            if (!formatDetail) {
+              return {
+                status: 404,
+                data: {
+                  code: HttpResponseCode.ParamsError,
+                  content: null,
+                  message: '不支持的格式类型',
+                  success: false,
+                },
+              };
+            }
+            return {
+              status: 200,
+              data: {
+                code: HttpResponseCode.Success,
+                content: formatDetail,
+                message: '获取格式详情成功',
+                success: true,
+              },
+            };
+          }
+
+          // listFormats logic
           const formats = [
             {
               type: 'prometheus',
@@ -132,59 +163,13 @@ const schema = (star: Starlight) => {
             },
           };
         } catch (error) {
-          star.logger?.error('List formats failed:', error);
+          star.logger?.error('Get schema formats failed:', error);
           return {
             status: 500,
             data: {
               code: HttpResponseCode.ServiceActionFaild,
               content: null,
-              message: '获取格式列表失败',
-              success: false,
-            },
-          };
-        }
-      },
-    },
-
-    // 获取指定格式的详细信息
-    getFormat: {
-      params: {
-        type: { type: 'string', required: true },
-      },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
-        try {
-          const { type } = ctx.params;
-
-          const formatDetail = await (this as any).getFormatDetail(type);
-          if (!formatDetail) {
-            return {
-              status: 404,
-              data: {
-                code: HttpResponseCode.ParamsError,
-                content: null,
-                message: '不支持的格式类型',
-                success: false,
-              },
-            };
-          }
-
-          return {
-            status: 200,
-            data: {
-              code: HttpResponseCode.Success,
-              content: formatDetail,
-              message: '获取格式详情成功',
-              success: true,
-            },
-          };
-        } catch (error) {
-          star.logger?.error('Get format failed:', error);
-          return {
-            status: 500,
-            data: {
-              code: HttpResponseCode.ServiceActionFaild,
-              content: null,
-              message: '获取格式详情失败',
+              message: '获取格式信息失败',
               success: false,
             },
           };

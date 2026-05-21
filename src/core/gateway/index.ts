@@ -1,6 +1,7 @@
 import { GATEWAY_PORT } from 'config';
 import { Context, Star } from 'node-universe';
 import { UniverseWeb } from 'node-universe-gateway';
+import { IPNotPermissionAccess } from 'error';
 import {
   GatewayResponse,
   HttpResponseCode,
@@ -9,10 +10,11 @@ import {
   Route,
   Starlight,
 } from 'typings';
-import gatewayMethods from './methods';
+import { DatabaseService } from 'db/mysql';
+import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import gatewayMethods, { createWebSocketManager } from './methods';
 
 // 导入模块化的工具类和类型
-import { DatabaseService } from 'db/mysql';
 import {
   APP_NAME,
   DEFAULT_PORT,
@@ -39,12 +41,119 @@ const state: GatewayState = {
   ipTimer: null,
 };
 
+const INTERNAL_ONLY_SERVICES = new Set([
+  'metrics-alerts',
+  'metrics-compat',
+  'metrics-query',
+  'subscription-billing',
+]);
+
+const INTERNAL_ONLY_ACTIONS = new Set(['logs.v1.capture-darwin']);
+
+const createInternalServiceAccessError = (service: string) => ({
+  code: 404,
+  message: `Service '${service}' is not publicly accessible`,
+  data: {
+    status: 404,
+    data: {
+      content: null,
+      message: `Service '${service}' is not publicly accessible`,
+      code: HttpResponseCode.ParamsError,
+      success: false,
+    },
+  },
+});
+
+const remapMetricsRoute = (rawService: string, rawVersion: string, rawAction: string, rawParams: any = {}) => {
+  let service = rawService;
+  let action = rawAction;
+  const params = { ...rawParams };
+
+  if (service === 'metrics') {
+    if ((rawVersion === 'v2' || rawVersion === '2') && action === 'schema') {
+      service = 'metrics-query';
+      return { service, action, params };
+    }
+
+    if ((rawVersion === 'v2' || rawVersion === '2') && action.startsWith('query/')) {
+      service = 'metrics-query';
+      return { service, action, params };
+    }
+
+    const alertResolveMatch = action.match(/^alerts\/([^/]+)\/(resolve|suppress)$/);
+    const alertAssignMatch = action.match(/^alerts\/([^/]+)\/assign$/);
+    const notificationResendMatch = action.match(/^notifications\/([^/]+)\/resend$/);
+    const alertRuleDeleteMatch = action.match(/^alert-rules\/([^/]+)\/delete$/);
+    const alertRuleUpdateMatch = action.match(/^alert-rules\/([^/]+)$/);
+
+    if (alertResolveMatch) {
+      service = 'metrics-alerts';
+      params.id = alertResolveMatch[1];
+      action = `alerts/:id/${alertResolveMatch[2]}`;
+    } else if (alertAssignMatch) {
+      service = 'metrics-alerts';
+      params.id = alertAssignMatch[1];
+      action = 'alerts/:id/assign';
+    } else if (notificationResendMatch) {
+      service = 'metrics-alerts';
+      params.id = notificationResendMatch[1];
+      action = 'notifications/:id/resend';
+    } else if (alertRuleDeleteMatch) {
+      service = 'metrics-alerts';
+      params.id = alertRuleDeleteMatch[1];
+      action = 'alert-rules/:id/delete';
+    } else if (alertRuleUpdateMatch) {
+      service = 'metrics-alerts';
+      params.id = alertRuleUpdateMatch[1];
+      action = 'alert-rules/:id';
+    } else if (
+      action === 'alerts' ||
+      action.startsWith('alerts/') ||
+      action === 'alert-rules' ||
+      action.startsWith('alert-rules/') ||
+      action === 'notifications' ||
+      action.startsWith('notifications/')
+    ) {
+      service = 'metrics-alerts';
+    }
+
+    if (action === 'services') {
+      action = 'topology';
+      params.type = 'services';
+    } else if (action === 'instances') {
+      action = 'topology';
+      params.type = 'instances';
+    } else if (action === 'metrics/analysis') {
+      action = 'metrics/explorer';
+    } else if (action === 'realtime' || action === 'catalog/service/detail') {
+      service = 'metrics-compat';
+    }
+  }
+
+  return { service, action, params };
+};
+
+const remapSubscriptionRoute = (rawService: string, rawAction: string, rawParams: any = {}) => {
+  let service = rawService;
+  let action = rawAction;
+  const params = { ...rawParams };
+
+  if (service === 'subscription' && (action === 'billing' || action.startsWith('billing/'))) {
+    service = 'subscription-billing';
+  }
+
+  return { service, action, params };
+};
+
+let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
+
 // 主应用初始化
 async function initializeGatewayService() {
   // const pinoOptions = await pinoLoggerOptions(APP_NAME);
 
   const star = new Star({
     namespace: 'darwin-app',
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     // 通信模块使用kafka
     transporter: {
       type: 'KAFKA',
@@ -82,6 +191,7 @@ async function initializeGatewayService() {
     },
     // 日志模块
     // logger: pinoOptions,
+    logger: true,
     cacher: {
       type: 'Redis',
       clone: true,
@@ -101,6 +211,7 @@ async function initializeGatewayService() {
       },
     },
   }) as Starlight;
+  registerDarwinLogForwarding(star);
 
   // 创建网关服务
   star.createService({
@@ -124,6 +235,15 @@ async function initializeGatewayService() {
       },
       path: '/api',
       routes: [
+        // 健康检查路由
+        {
+          path: '/health',
+          authorization: false,
+          aliases: {
+            'GET /': 'gateway.health',
+            GET: 'gateway.health',
+          },
+        },
         // 主要API路由
         {
           path: '/:service/:version/:action*',
@@ -141,7 +261,58 @@ async function initializeGatewayService() {
             req: IncomingRequest,
             res: GatewayResponse,
           ) {
-            await GatewayHelper.handleBeforeCall(ctx, route, req, res, star, state, true);
+            // 设置请求元数据
+            (ctx.meta as any).req = {
+              userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
+              headers: req.headers,
+            };
+
+            // IP黑名单检查
+            if (req?.socket?.remoteAddress) {
+              // 强制禁用 IP 检查，解决重启后黑名单依然生效的问题
+              // if (GatewayHelper.isIpBlocked(req.socket.remoteAddress, state)) {
+              //   throw new IPNotPermissionAccess();
+              // }
+              (ctx.meta as any).req = { ...(ctx.meta as any).req, ip: req.socket.remoteAddress };
+            }
+
+            // 禁止直接通过公网访问内部拆分服务
+            if (INTERNAL_ONLY_SERVICES.has(String(req.$params.service || ''))) {
+              throw createInternalServiceAccessError(String(req.$params.service));
+            }
+
+            // 认证处理
+            const actions = star.registry?.actions.list() || [];
+            const normalizedVersion =
+              req.$params.version === '1' ? 'v1' : String(req.$params.version || '');
+            const remappedMetrics = remapMetricsRoute(
+              req.$params.service,
+              req.$params.version,
+              req.$params.action || '',
+              req.$params || {},
+            );
+            const remapped = remapSubscriptionRoute(
+              remappedMetrics.service,
+              remappedMetrics.action || '',
+              remappedMetrics.params || {},
+            );
+            const actionName = remapped.action ? remapped.action.replace(/\//g, '.') : '';
+
+            let targetActionName = `${remapped.service}.${normalizedVersion}.${actionName}`;
+            let action = actions.find((item) => item.name === targetActionName);
+
+            if (!action) {
+              targetActionName = `${remapped.service}.${actionName}`;
+              action = actions.find((item) => item.name === targetActionName);
+            }
+
+            if (INTERNAL_ONLY_ACTIONS.has(targetActionName)) {
+              throw createInternalServiceAccessError(targetActionName);
+            }
+
+            await GatewayHelper.handleAuthentication(ctx, req, action, async (ctx, token) => {
+              await (this as any).authorize(ctx, token);
+            });
           },
           onAfterCall(
             ctx: Context,
@@ -150,64 +321,138 @@ async function initializeGatewayService() {
             res: GatewayResponse,
             data: any,
           ) {
-            return GatewayHelper.handleAfterCall(ctx, route, req, res, data);
+            // 设置认证cookie
+            if ((ctx.meta as any)?.token && (ctx.meta as any)?.refreshToken) {
+              GatewayHelper.setAuthCookies(
+                res,
+                (ctx.meta as any).token,
+                (ctx.meta as any).refreshToken,
+              );
+            }
+
+            // 清除cookie
+            if ((ctx.meta as any)?.clearCookies) {
+              GatewayHelper.clearAuthCookies(res);
+            }
+
+            return data;
           },
           onError(req: IncomingRequest, res: GatewayResponse, err: any) {
-            GatewayHelper.handleError(req, res, err, state);
+            // 处理频率限制错误
+            if (err.code === 429 && req?.socket?.remoteAddress) {
+              GatewayHelper.addIpToBlacklist(req.socket.remoteAddress, state, '频繁请求');
+            }
+
+            res.setHeader('Content-Type', 'application/json');
+            res.writeHead(err.code || 500);
+            res.end(
+              JSON.stringify({
+                status: HttpStatusCode.BAD_REQUEST,
+                data: {
+                  content: err,
+                  message: err.message || 'Bad request',
+                  code: HttpResponseCode.BAD_REQUEST,
+                  success: false,
+                },
+              }),
+            );
           },
         },
         // 日志服务路由
         {
           path: '/logs/:service/:action',
         },
-        // 监控服务路由
-        // {
-        //   path: '/metrics',
-        //   authorization: false,
-        //   aliases: {
-        //     '/': 'gateway.metrics',
-        //   },
-        //   bodyParsers: {
-        //     json: true,
-        //   },
-        //   async onBeforeCall(
-        //     ctx: Context,
-        //     route: Route,
-        //     req: IncomingRequest,
-        //     res: GatewayResponse,
-        //   ) {
-        //     await GatewayHelper.handleBeforeCall(ctx, route, req, res, star, state, false);
-        //   },
-        //   onAfterCall(
-        //     ctx: Context,
-        //     route: Route,
-        //     req: IncomingRequest,
-        //     res: GatewayResponse,
-        //     data: any,
-        //   ) {
-        //     return GatewayHelper.handleAfterCall(ctx, route, req, res, data);
-        //   },
-        //   onError(req: IncomingRequest, res: GatewayResponse, err: any) {
-        //     GatewayHelper.handleError(req, res, err, state);
-        //   },
-        // },
       ],
     },
     actions: {
+      // 健康检查
+      health: {
+        handler(ctx: Context) {
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: {
+                status: 'ok',
+                timestamp: Date.now(),
+                service: APP_NAME,
+              },
+              message: 'Gateway is healthy',
+              success: true,
+            },
+          };
+        },
+      },
       // 请求分发
       dispatch: {
         timeout: 0,
         handler(ctx: Context) {
+          const rawService = String(ctx.params?.service || '');
+          if (INTERNAL_ONLY_SERVICES.has(rawService)) {
+            return createInternalServiceAccessError(rawService).data;
+          }
+
           let { service, version, action } = ctx.params;
-          const params = ctx.params || {};
+          let params = ctx.params || {};
+          version = version === '1' ? 'v1' : version;
+
+          const remappedMetrics = remapMetricsRoute(service, version, action || '', params);
+          const remapped = remapSubscriptionRoute(
+            remappedMetrics.service,
+            remappedMetrics.action || '',
+            remappedMetrics.params || {},
+          );
+          service = remapped.service;
+          action = remapped.action;
+          params = remapped.params;
 
           action = GatewayHelper.processActionPath(action);
+
+          const targetActionName = `${service}.${version}.${action}`;
+          if (INTERNAL_ONLY_ACTIONS.has(targetActionName)) {
+            return createInternalServiceAccessError(targetActionName).data;
+          }
 
           if (params?.meta) {
             ctx.meta = { ...ctx.meta, ...params.meta };
           }
 
+          // 确保 userId 被传递到 params 中，作为 ctx.meta 传递失败的兜底
+          if ((ctx.meta as any).user?.userId) {
+            params.userId = (ctx.meta as any).user.userId;
+          }
+
           return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta });
+        },
+      },
+      'websocket.trigger': {
+        timeout: 0,
+        async handler(ctx: Context) {
+          const eventName = String(ctx.params?.eventName || '').trim();
+          const data = ctx.params?.data;
+
+          if (!eventName) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                code: HttpResponseCode.ServiceActionFaild,
+                content: null,
+                message: 'eventName is required',
+                success: false,
+              },
+            };
+          }
+
+          const result = (this as any).triggerWebSocketEvent(eventName, data);
+          return {
+            status: HttpStatusCode.OK,
+            data: {
+              code: HttpResponseCode.Success,
+              content: result,
+              message: 'WebSocket event triggered successfully',
+              success: true,
+            },
+          };
         },
       },
       // // WebSocket状态查询
@@ -259,8 +504,12 @@ async function initializeGatewayService() {
       await star.db.initialize(state, {
         enableSlowQueryLog: true,
         slowQueryThreshold: 1000,
-        enableIpBlacklist: true,
+        enableIpBlacklist: false,
         enableIpSyncTimer: true,
+      });
+
+      wsManager = createWebSocketManager(star, async (ctx, token) => {
+        await (this as any).authorize(ctx, token);
       });
 
       star.logger?.info('Gateway service with database initialized successfully');
@@ -268,7 +517,6 @@ async function initializeGatewayService() {
 
     async started() {
       try {
-        // await (this as any).initWebSocketServer();
         star.logger?.info('WebSocket server initialized successfully');
       } catch (error) {
         star.logger?.error('Failed to initialize WebSocket server:', error);
@@ -277,7 +525,7 @@ async function initializeGatewayService() {
 
     async stopped() {
       try {
-        await (this as any).cleanupWebSocket();
+        await wsManager?.cleanupWebSocket();
         star.logger?.info('WebSocket server cleaned up successfully');
       } catch (error) {
         star.logger?.error('Failed to cleanup WebSocket server:', error);

@@ -9,8 +9,13 @@ import {
   countActiveApiKeysByTenantId,
   createApiKey as dbCreateApiKey,
   findApiKeyById,
+  findApiKeyByKey,
   findApiKeysByTenantId,
   findApiKeysByUserId,
+  getApiKeyStats,
+  getApiKeyTotalStats,
+  updateApiKeyLastUsed,
+  updateApiKeyStats,
   updateApiKeyStatus,
 } from 'db/mysql/apis/apiKey';
 import { Context } from 'node-universe';
@@ -130,6 +135,7 @@ export async function createApiKey(
     // 保存到数据库
     await dbCreateApiKey({
       id: keyId,
+      tenantId,
       userId,
       keyName: name,
       keyHash: hashedKey,
@@ -215,25 +221,33 @@ export async function getApiKeys(
       apiKeys = await findApiKeysByTenantId(tenantId);
     }
 
+    apiKeys = apiKeys.filter((key) => (key as any).tenantId === tenantId && (!userId || key.userId === userId));
+
     // 过滤非活跃的密钥
     if (!includeInactive) {
       apiKeys = apiKeys.filter((key) => key.isActive);
     }
 
     return {
-      apiKeys: apiKeys.map((key) => ({
-        id: key.id,
-        name: key.keyName,
-        permissions: key.permissions ? (Object.keys(key.permissions) as ApiPermission[]) : [],
-        description: key.description || '',
-        isActive: key.isActive,
-        createdAt: key.createdAt || new Date(),
-        updatedAt: key.updatedAt || new Date(),
-        expiresAt: key.expiresAt,
-        lastUsedAt: key.lastUsedAt,
-        usageCount: key.usageCount || 0,
-        maskedKey: maskApiKey(key.keyHash),
-      })),
+      apiKeys: await Promise.all(
+        apiKeys.map(async (key) => {
+          const totalStats = await getApiKeyTotalStats(key.id);
+
+          return {
+            id: key.id,
+            name: key.keyName,
+            permissions: key.permissions ? (Object.keys(key.permissions) as ApiPermission[]) : [],
+            description: key.description || '',
+            isActive: key.isActive,
+            createdAt: key.createdAt || new Date(),
+            updatedAt: key.updatedAt || new Date(),
+            expiresAt: key.expiresAt,
+            lastUsedAt: key.lastUsedAt,
+            usageCount: totalStats.totalRequests || 0,
+            maskedKey: maskApiKey(key.keyHash),
+          };
+        }),
+      ),
     };
   } catch (error) {
     ctx.service?.logger?.error('Failed to get API keys:', error);
@@ -353,14 +367,14 @@ export async function updateApiKey(
 
     // 验证API密钥存在性
     const existingKey = await findApiKeyById(keyId);
-    if (!existingKey) {
+    if (!existingKey || (existingKey as any).tenantId !== tenantId || (userId && existingKey.userId !== userId)) {
       throw new Error('API key not found');
     }
 
     // 使用Sequelize模型更新
     const model = await mainConnection.getModel(DataBaseTableNames.ApiKey);
     const [affectedRows] = await model.update(updateData, {
-      where: { id: keyId },
+      where: { id: keyId, tenantId, ...(userId ? { userId } : {}) },
     });
 
     if (affectedRows === 0) {
@@ -409,12 +423,16 @@ export async function deleteApiKey(
 
     // 验证API密钥存在性
     const existingKey = await findApiKeyById(keyId);
-    if (!existingKey) {
+    if (!existingKey || (existingKey as any).tenantId !== tenantId || (userId && existingKey.userId !== userId)) {
       throw new Error('API key not found');
     }
 
     // 软删除：标记为非活跃
-    const [affectedRows] = await updateApiKeyStatus(keyId, false);
+    const model = await mainConnection.getModel(DataBaseTableNames.ApiKey);
+    const [affectedRows] = await model.update(
+      { isActive: false, updatedAt: new Date() },
+      { where: { id: keyId, tenantId, ...(userId ? { userId } : {}) } },
+    );
     if (affectedRows === 0) {
       throw new Error('Failed to delete API key');
     }
@@ -541,7 +559,7 @@ export async function validateApiKey(
     const hashedKey = hashApiKey(apiKey);
 
     // 查找API密钥
-    const keyData = await findApiKeyById(hashedKey);
+    const keyData = await findApiKeyByKey(hashedKey);
     if (!keyData || !keyData.isActive) {
       return {
         isValid: false,
@@ -558,7 +576,7 @@ export async function validateApiKey(
     }
 
     // 检查租户
-    if ((keyData as any).tenantId !== tenantId) {
+    if ((keyData as any).tenantId && (keyData as any).tenantId !== tenantId) {
       return {
         isValid: false,
         error: 'API key not valid for this tenant',
@@ -577,8 +595,8 @@ export async function validateApiKey(
       };
     }
 
-    // TODO: 更新使用统计
-    // await updateApiKeyLastUsed(keyData.id);
+    await updateApiKeyLastUsed(keyData.id);
+    await updateApiKeyStats(keyData.id, 1);
 
     return {
       isValid: true,
@@ -655,11 +673,12 @@ export async function getApiKeyUsageStats(
     for (const key of apiKeys) {
       // 获取每日使用统计
       const dailyUsage = await getApiKeyDailyUsage(ctx, key.id, timeRange);
+      const totalStats = await getApiKeyTotalStats(key.id);
 
       stats.push({
         keyId: key.id,
         keyName: key.keyName,
-        usageCount: key.usageCount || 0,
+        usageCount: totalStats.totalRequests || 0,
         lastUsedAt: key.lastUsedAt,
         dailyUsage,
       });
@@ -724,21 +743,23 @@ async function getApiKeyDailyUsage(
   timeRange: string,
 ): Promise<Array<{ date: string; count: number }>> {
   try {
-    // 这里应该从日志或使用统计表中获取数据
-    // 简化实现，返回模拟数据
-    const days = parseInt(timeRange.replace('d', '')) || 7;
-    const dailyUsage: Array<{ date: string; count: number }> = [];
+    const now = new Date();
+    const normalizedRange = String(timeRange || '7d');
+    const days = normalizedRange.endsWith('d') ? Number(normalizedRange.replace('d', '')) || 7 : 7;
+    const start = new Date(now);
+    start.setDate(start.getDate() - Math.max(days - 1, 0));
+    start.setHours(0, 0, 0, 0);
 
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const stats = await getApiKeyStats(
+      keyId,
+      start.toISOString().split('T')[0],
+      now.toISOString().split('T')[0],
+    );
 
-      // 这里应该查询实际的使用统计
-      const count = Math.floor(Math.random() * 100); // 模拟数据
-
-      dailyUsage.push({ date, count });
-    }
-
-    return dailyUsage;
+    return stats.map((item) => ({
+      date: new Date(item.date).toISOString().split('T')[0],
+      count: Number(item.requestCount) || 0,
+    }));
   } catch (error) {
     ctx.service?.logger?.error('Failed to get daily usage:', error);
     return [];

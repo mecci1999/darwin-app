@@ -20,17 +20,17 @@ export async function getTenantQuota(
 ): Promise<{
   quota: Quota;
   usage: {
-    logsIngested: number;
-    searchRequests: number;
-    exportRequests: number;
+    logsPerMinute: number;
+    searchRequestsToday: number;
+    exportRequestsToday: number;
     storageUsed: number;
     streamConnections: number;
   };
   limits: {
-    logsPerDay: number;
-    searchesPerDay: number;
-    exportsPerDay: number;
-    maxStorageGB: number;
+    logsPerMinute: number;
+    searchRequestsPerDay: number;
+    exportRequestsPerDay: number;
+    storageGB: number;
     maxStreamConnections: number;
   };
   resetTime: Date;
@@ -40,8 +40,8 @@ export async function getTenantQuota(
 
     const quotaChecker = new QuotaChecker();
     const quota = await quotaChecker.getQuota(tenantId, userId);
-    const usage = await quotaChecker.getUsage(tenantId, userId);
-    const limits = await quotaChecker.getLimits(tenantId, userId);
+    const usage = await quotaChecker.getUsage(tenantId);
+    const limits = await quotaChecker.getLimits(tenantId);
 
     // 计算下次重置时间
     const resetTime = calculateNextResetTime(quota.resetInterval);
@@ -99,13 +99,13 @@ export async function updateTenantQuota(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.info(
+    ctx.service?.logger?.info(
       `Quota updated for tenant ${tenantId}${userId ? ` user ${userId}` : ''}`,
     );
 
     return { success: true };
   } catch (error) {
-    ctx.service.logger.error('Failed to update tenant quota:', error);
+    ctx.service?.logger?.error('Failed to update tenant quota:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -138,13 +138,13 @@ export async function resetQuotaUsage(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.info(
+    ctx.service?.logger?.info(
       `Quota usage reset for tenant ${tenantId}${userId ? ` user ${userId}` : ''}: ${resetType}`,
     );
 
     return { success: true };
   } catch (error) {
-    ctx.service.logger.error('Failed to reset quota usage:', error);
+    ctx.service?.logger?.error('Failed to reset quota usage:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -173,7 +173,7 @@ export async function checkQuotaStatus(
   reason?: string;
 }> {
   try {
-    const { tenantId, userId, quotaType, requestedAmount = 1 } = params;
+    const { tenantId, quotaType, requestedAmount = 1 } = params;
 
     const quotaChecker = new QuotaChecker();
     let quotaCheck;
@@ -181,27 +181,27 @@ export async function checkQuotaStatus(
     // 根据配额类型检查
     switch (quotaType) {
       case 'ingestion':
-        quotaCheck = await quotaChecker.checkIngestQuota(tenantId, userId, requestedAmount);
+        quotaCheck = await quotaChecker.checkIngestQuota(tenantId, requestedAmount);
         break;
       case 'search':
-        quotaCheck = await quotaChecker.checkSearchQuota(tenantId, userId);
+        quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
         break;
       case 'export':
-        quotaCheck = await quotaChecker.checkExportQuota(tenantId, userId);
+        quotaCheck = await quotaChecker.checkExportQuota(tenantId);
         break;
       case 'storage':
-        quotaCheck = await quotaChecker.checkStorageQuota(tenantId, userId, requestedAmount);
+        quotaCheck = await quotaChecker.checkStorageQuota(tenantId, requestedAmount);
         break;
       case 'stream':
-        quotaCheck = await quotaChecker.checkStreamQuota(tenantId, userId);
+        quotaCheck = await quotaChecker.checkStreamQuota(tenantId);
         break;
       default:
         throw new Error(`Invalid quota type: ${quotaType}`);
     }
 
-    const usage = await quotaChecker.getUsage(tenantId, userId);
-    const limits = await quotaChecker.getLimits(tenantId, userId);
-    const quota = await quotaChecker.getQuota(tenantId, userId);
+    const usage = await quotaChecker.getUsage(tenantId);
+    const limits = await quotaChecker.getLimits(tenantId);
+    const quota = await quotaChecker.getQuota(tenantId);
 
     // 计算使用百分比和警告级别
     const { usagePercentage, warningLevel } = calculateUsageMetrics(quotaType, usage, limits);
@@ -218,7 +218,7 @@ export async function checkQuotaStatus(
       reason: quotaCheck.reason,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to check quota status:', error);
+    ctx.service?.logger?.error('Failed to check quota status:', error);
     throw error;
   }
 }
@@ -280,7 +280,7 @@ export async function getQuotaUsageHistory(
       },
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get quota usage history:', error);
+    ctx.service?.logger?.error('Failed to get quota usage history:', error);
     throw error;
   }
 }
@@ -327,7 +327,12 @@ export async function setQuotaAlert(
     const alertId = `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // 保存警报配置
-    await ctx.service.db.collection('quota_alerts').insertOne({
+    const db = (ctx.service as any)?.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+
+    await db.collection('quota_alerts').insertOne({
       alertId,
       tenantId,
       userId,
@@ -350,14 +355,14 @@ export async function setQuotaAlert(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.info(`Quota alert created: ${alertId}`);
+    ctx.service?.logger?.info(`Quota alert created: ${alertId}`);
 
     return {
       success: true,
       alertId,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to set quota alert:', error);
+    ctx.service?.logger?.error('Failed to set quota alert:', error);
     return {
       success: false,
       alertId: '',
@@ -399,7 +404,12 @@ export async function getQuotaAlerts(
       filter.isActive = isActive;
     }
 
-    const alerts = await ctx.service.db
+    const db = (ctx.service as any)?.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+
+    const alerts = await db
       .collection('quota_alerts')
       .find(filter)
       .sort({ createdAt: -1 })
@@ -418,7 +428,7 @@ export async function getQuotaAlerts(
       })),
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get quota alerts:', error);
+    ctx.service?.logger?.error('Failed to get quota alerts:', error);
     throw error;
   }
 }
@@ -442,7 +452,12 @@ export async function deleteQuotaAlert(
       filter.userId = userId;
     }
 
-    const result = await ctx.service.db.collection('quota_alerts').deleteOne(filter);
+    const db = (ctx.service as any)?.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+
+    const result = await db.collection('quota_alerts').deleteOne(filter);
 
     if (result.deletedCount === 0) {
       throw new Error('Quota alert not found');
@@ -456,11 +471,11 @@ export async function deleteQuotaAlert(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.info(`Quota alert deleted: ${alertId}`);
+    ctx.service?.logger?.info(`Quota alert deleted: ${alertId}`);
 
     return { success: true };
   } catch (error) {
-    ctx.service.logger.error('Failed to delete quota alert:', error);
+    ctx.service?.logger?.error('Failed to delete quota alert:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -482,11 +497,16 @@ export async function checkQuotaAlerts(
     const { tenantId, userId } = params;
 
     const quotaChecker = new QuotaChecker();
-    const usage = await quotaChecker.getUsage(tenantId, userId);
-    const limits = await quotaChecker.getLimits(tenantId, userId);
+    const usage = await quotaChecker.getUsage(tenantId);
+    const limits = await quotaChecker.getLimits(tenantId);
 
     // 获取活跃的警报
-    const alerts = await ctx.service.db
+    const db = (ctx.service as any)?.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+
+    const alerts = await db
       .collection('quota_alerts')
       .find({ tenantId, userId, isActive: true })
       .toArray();
@@ -502,7 +522,7 @@ export async function checkQuotaAlerts(
         triggeredAlerts++;
 
         // 更新最后触发时间
-        await ctx.service.db
+        await db
           .collection('quota_alerts')
           .updateOne({ alertId: alert.alertId }, { $set: { lastTriggered: new Date() } });
       }
@@ -513,7 +533,7 @@ export async function checkQuotaAlerts(
       triggeredAlerts,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to check quota alerts:', error);
+    ctx.service?.logger?.error('Failed to check quota alerts:', error);
     return {
       success: false,
       triggeredAlerts: 0,
@@ -528,16 +548,16 @@ export async function getAllTenantsQuotaSummary(ctx: Context): Promise<{
   tenants: Array<{
     tenantId: string;
     totalUsage: {
-      logsIngested: number;
-      searchRequests: number;
-      exportRequests: number;
+      logsPerMinute: number;
+      searchRequestsToday: number;
+      exportRequestsToday: number;
       storageUsed: number;
     };
     limits: {
-      logsPerDay: number;
-      searchesPerDay: number;
-      exportsPerDay: number;
-      maxStorageGB: number;
+      logsPerMinute: number;
+      searchRequestsPerDay: number;
+      exportRequestsPerDay: number;
+      storageGB: number;
     };
     usagePercentages: {
       ingestion: number;
@@ -550,20 +570,46 @@ export async function getAllTenantsQuotaSummary(ctx: Context): Promise<{
 }> {
   try {
     // 获取所有活跃租户
-    const tenants = await ctx.service.db.collection('quotas').find({ isActive: true }).toArray();
+    const db = (ctx.service as any)?.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+
+    const tenants = await db.collection('quotas').find({ isActive: true }).toArray();
 
     const quotaChecker = new QuotaChecker();
-    const tenantSummaries = [];
+    const tenantSummaries: Array<{
+      tenantId: string;
+      totalUsage: {
+        logsPerMinute: number;
+        searchRequestsToday: number;
+        exportRequestsToday: number;
+        storageUsed: number;
+      };
+      limits: {
+        logsPerMinute: number;
+        searchRequestsPerDay: number;
+        exportRequestsPerDay: number;
+        storageGB: number;
+      };
+      usagePercentages: {
+        ingestion: number;
+        search: number;
+        export: number;
+        storage: number;
+      };
+      warningLevel: 'none' | 'low' | 'medium' | 'high' | 'critical';
+    }> = [];
 
     for (const tenant of tenants) {
       const usage = await quotaChecker.getUsage(tenant.tenantId);
       const limits = await quotaChecker.getLimits(tenant.tenantId);
 
       const usagePercentages = {
-        ingestion: (usage.logsIngested / limits.logsPerDay) * 100,
-        search: (usage.searchRequests / limits.searchesPerDay) * 100,
-        export: (usage.exportRequests / limits.exportsPerDay) * 100,
-        storage: (usage.storageUsed / (limits.maxStorageGB * 1024 * 1024 * 1024)) * 100,
+        ingestion: (usage.logsPerMinute / limits.logsPerMinute) * 100,
+        search: (usage.searchRequestsToday / limits.searchRequestsPerDay) * 100,
+        export: (usage.exportRequestsToday / limits.exportRequestsPerDay) * 100,
+        storage: (usage.storageUsed / limits.storageGB) * 100,
       };
 
       // 计算整体警告级别
@@ -581,7 +627,7 @@ export async function getAllTenantsQuotaSummary(ctx: Context): Promise<{
 
     return { tenants: tenantSummaries };
   } catch (error) {
-    ctx.service.logger.error('Failed to get all tenants quota summary:', error);
+    ctx.service?.logger?.error('Failed to get all tenants quota summary:', error);
     throw error;
   }
 }
@@ -615,7 +661,8 @@ function validateQuotaUpdates(updates: any): {
     errors.push('Max stream connections must be non-negative');
   }
 
-  if (updates.resetInterval && !QUOTA_RESET_INTERVALS.includes(updates.resetInterval)) {
+  const resetIntervals = Object.values(QUOTA_RESET_INTERVALS);
+  if (updates.resetInterval && !resetIntervals.includes(updates.resetInterval)) {
     errors.push(`Invalid reset interval: ${updates.resetInterval}`);
   }
 
@@ -632,21 +679,21 @@ function calculateUsageMetrics(
   quotaType: string,
   usage: any,
   limits: any,
-): { usagePercentage: number; warningLevel: string } {
+): { usagePercentage: number; warningLevel: 'none' | 'low' | 'medium' | 'high' | 'critical' } {
   let usagePercentage = 0;
 
   switch (quotaType) {
     case 'ingestion':
-      usagePercentage = (usage.logsIngested / limits.logsPerDay) * 100;
+      usagePercentage = (usage.logsPerMinute / limits.logsPerMinute) * 100;
       break;
     case 'search':
-      usagePercentage = (usage.searchRequests / limits.searchesPerDay) * 100;
+      usagePercentage = (usage.searchRequestsToday / limits.searchRequestsPerDay) * 100;
       break;
     case 'export':
-      usagePercentage = (usage.exportRequests / limits.exportsPerDay) * 100;
+      usagePercentage = (usage.exportRequestsToday / limits.exportRequestsPerDay) * 100;
       break;
     case 'storage':
-      usagePercentage = (usage.storageUsed / (limits.maxStorageGB * 1024 * 1024 * 1024)) * 100;
+      usagePercentage = (usage.storageUsed / limits.storageGB) * 100;
       break;
     case 'stream':
       usagePercentage = (usage.streamConnections / limits.maxStreamConnections) * 100;
@@ -661,7 +708,7 @@ function calculateUsageMetrics(
 /**
  * 获取警告级别
  */
-function getWarningLevel(usagePercentage: number): string {
+function getWarningLevel(usagePercentage: number): 'none' | 'low' | 'medium' | 'high' | 'critical' {
   if (usagePercentage >= QUOTA_WARNING_THRESHOLDS.CRITICAL) {
     return 'critical';
   } else if (usagePercentage >= QUOTA_WARNING_THRESHOLDS.HIGH) {
@@ -730,9 +777,11 @@ async function triggerQuotaAlert(
     // 发送警报事件
     await ctx.emit('quota.alert.triggered', alertData);
 
-    ctx.service.logger.warn(`Quota alert triggered: ${alert.alertId} for tenant ${alert.tenantId}`);
+    ctx.service?.logger?.warn(
+      `Quota alert triggered: ${alert.alertId} for tenant ${alert.tenantId}`,
+    );
   } catch (error) {
-    ctx.service.logger.error('Failed to trigger quota alert:', error);
+    ctx.service?.logger?.error('Failed to trigger quota alert:', error);
   }
 }
 

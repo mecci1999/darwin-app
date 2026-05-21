@@ -46,41 +46,50 @@ export default function (sequelize: Sequelize) {
       paymentOrderId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'payment_order_id',
       },
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       refundAmount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'refund_amount',
       },
       refundReason: {
         type: DataTypes.TEXT,
         allowNull: false,
+        field: 'refund_reason',
       },
       status: {
         type: DataTypes.ENUM('pending', 'approved', 'rejected', 'processed'),
         allowNull: false,
         defaultValue: 'pending',
+        field: 'status',
       },
       adminNotes: {
         type: DataTypes.TEXT,
         allowNull: true,
+        field: 'admin_notes',
       },
       processedAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'processed_at',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -89,10 +98,10 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['paymentOrderId'],
+          fields: ['payment_order_id'],
         },
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
           fields: ['status'],

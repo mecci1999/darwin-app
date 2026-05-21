@@ -459,24 +459,33 @@ export class UsageTracker {
       }
 
       const quotas = await UserQuotaModel.findAll({
-        where: { userId }
+        where: { userId },
       });
 
       if (!quotas || quotas.length === 0) {
         return null;
       }
 
-      const usage: UsageStats = {};
-      
+      const usage = this.createEmptyUsageStats(userId);
+
       quotas.forEach((quota: any) => {
-        // 将数据库中的配额记录转换为 UsageStats 格式
-        // 假设 UsageStats 的 key 是 quotaType
-        usage[quota.quotaType] = {
-          used: Number(quota.quotaUsed),
-          limit: Number(quota.quotaLimit),
-          resetPeriod: quota.resetPeriod,
-          lastReset: quota.lastResetAt ? new Date(quota.lastResetAt).getTime() : Date.now()
-        };
+        const used = Number(quota.quotaUsed ?? 0);
+
+        switch (quota.quotaType) {
+          case 'apiCalls':
+            usage.apiCalls.total = used;
+            usage.apiCalls.today = Number(quota.quotaUsedToday ?? used);
+            usage.apiCalls.thisMonth = Number(quota.quotaUsedThisMonth ?? used);
+            break;
+          case 'storage':
+            usage.storage.used = used;
+            break;
+          case 'bandwidth':
+            usage.bandwidth.total = used;
+            break;
+          default:
+            break;
+        }
       });
 
       return usage;
@@ -564,26 +573,8 @@ export class UsageTracker {
       // const endDate = new Date();
       // const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
 
-      // 模拟返回历史数据
-      const historicalData: Array<{
-        date: string;
-        apiCalls: number;
-        storage: number;
-        bandwidth: number;
-      }> = [];
-      for (let i = days - 1; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-
-        historicalData.push({
-          date: date.toISOString().split('T')[0],
-          apiCalls: Math.floor(Math.random() * 1000),
-          storage: Math.floor(Math.random() * 1024 * 1024 * 1024), // Random GB in bytes
-          bandwidth: Math.floor(Math.random() * 1024 * 1024 * 1024), // Random GB in bytes
-        });
-      }
-
-      return historicalData;
+      // 当前未查询到历史归档数据时返回空数组
+      return [];
     } catch (error) {
       star.logger?.error('Failed to get historical usage:', error);
       return [];
@@ -664,7 +655,7 @@ export class UsageTracker {
       //   })
       //   .toArray();
 
-      // 模拟返回数据
+      // 当前未查询到归档区间数据时返回空数组
       return [];
     } catch (error) {
       star.logger?.error('Failed to get historical usage range:', error);

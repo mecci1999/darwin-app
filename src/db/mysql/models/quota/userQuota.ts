@@ -44,39 +44,47 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       quotaType: {
         type: DataTypes.STRING(50),
         allowNull: false,
+        field: 'quota_type',
       },
       quotaLimit: {
         type: DataTypes.BIGINT,
         allowNull: false,
+        field: 'quota_limit',
       },
       quotaUsed: {
         type: DataTypes.BIGINT,
         allowNull: false,
         defaultValue: 0,
+        field: 'quota_used',
       },
       resetPeriod: {
         type: DataTypes.ENUM('daily', 'monthly', 'yearly', 'never'),
         allowNull: false,
         defaultValue: 'monthly',
+        field: 'reset_period',
       },
       lastResetAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'last_reset_at',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -85,14 +93,14 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId', 'quotaType'],
+          fields: ['user_id', 'quota_type'],
           unique: true,
         },
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
-          fields: ['quotaType'],
+          fields: ['quota_type'],
         },
       ],
     },

@@ -16,8 +16,9 @@
     "resolveJsonModule": true,
     "moduleResolution": "node",
     "declaration": true,
+    "skipLibCheck": true,
     "lib": ["esnext"],
-    "types": ["node"],
+    "types": ["node", "jest"],
     "paths": {
       "@/*": ["./src/*"],
       "@utils": ["./src/utils/*"]

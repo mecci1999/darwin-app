@@ -31,17 +31,19 @@ export default function (sequelize: Sequelize) {
   const model = IPBlackListTable.init(
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-      ipv4: { type: DataTypes.STRING(32), allowNull: true },
-      ipv6: { type: DataTypes.STRING(45), allowNull: true },
-      reason: { type: DataTypes.TEXT, allowNull: true, defaultValue: '' },
+      ipv4: { type: DataTypes.STRING(32), allowNull: true, field: 'ipv4' },
+      ipv6: { type: DataTypes.STRING(45), allowNull: true, field: 'ipv6' },
+      reason: { type: DataTypes.TEXT, allowNull: true, defaultValue: '', field: 'reason' },
       status: {
         type: DataTypes.STRING(32),
         allowNull: false,
         defaultValue: IPAddressBanStatus.active,
+        field: 'status',
       },
       isArtificial: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
+        field: 'is_artificial',
       },
     },
     {

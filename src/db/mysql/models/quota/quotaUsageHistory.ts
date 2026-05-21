@@ -40,27 +40,33 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       quotaType: {
         type: DataTypes.STRING(50),
         allowNull: false,
+        field: 'quota_type',
       },
       usageAmount: {
         type: DataTypes.BIGINT,
         allowNull: false,
+        field: 'usage_amount',
       },
       usageDate: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+        field: 'usage_date',
       },
       metadata: {
         type: DataTypes.JSON,
         allowNull: true,
+        field: 'metadata',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
     },
     {
@@ -69,13 +75,13 @@ export default function (sequelize: Sequelize) {
       timestamps: false,
       indexes: [
         {
-          fields: ['userId', 'usageDate'],
+          fields: ['user_id', 'usage_date'],
         },
         {
-          fields: ['quotaType'],
+          fields: ['quota_type'],
         },
         {
-          fields: ['usageDate'],
+          fields: ['usage_date'],
         },
       ],
     },

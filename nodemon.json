@@ -4,7 +4,7 @@
   "watch": ["src/"],
   "script": "./src/index.ts",
   "execMap": {
-    "ts": "node --inspect=7000 -r tsconfig-paths/register -r ts-node/register"
+    "ts": "node -r tsconfig-paths/register -r ts-node/register"
   },
   "options": {
     "extensions": ["js", "ts"],

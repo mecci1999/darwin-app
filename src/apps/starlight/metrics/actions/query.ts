@@ -55,23 +55,39 @@ const query = (star: Starlight) => {
             };
           }
 
-          // 验证AppKey
-          const appKeyValid = await (this as any).validateAppKey(appKey, userId);
-          if (!appKeyValid.valid) {
+          const isSystemAccess = appKey === 'system' && (ctx.meta as any).user?.isAdmin;
+          if (appKey === 'system' && !isSystemAccess) {
             return {
               status: 403,
               data: {
-                code: HttpResponseCode.ERR_INVALID_TOKEN,
+                code: HttpResponseCode.NoPermissionError,
                 content: null,
-                message: 'Invalid AppKey',
+                message: 'No permission',
                 success: false,
               },
             };
           }
 
+          if (!isSystemAccess) {
+            const appKeyValid = await (this as any).validateAppKey(appKey, userId);
+            if (!appKeyValid.valid) {
+              return {
+                status: 403,
+                data: {
+                  code: HttpResponseCode.ERR_INVALID_TOKEN,
+                  content: null,
+                  message: 'Invalid AppKey',
+                  success: false,
+                },
+              };
+            }
+          }
+
+          const effectiveUserId = isSystemAccess ? 'system' : userId;
+
           // 构建查询参数
           const queryParams = {
-            userId,
+            userId: effectiveUserId,
             appKey,
             metric,
             tags,
@@ -147,23 +163,39 @@ const query = (star: Starlight) => {
             };
           }
 
-          // 验证AppKey
-          const appKeyValid = await (this as any).validateAppKey(appKey, userId);
-          if (!appKeyValid.valid) {
+          const isSystemAccess = appKey === 'system' && (ctx.meta as any).user?.isAdmin;
+          if (appKey === 'system' && !isSystemAccess) {
             return {
               status: 403,
               data: {
-                code: HttpResponseCode.ERR_INVALID_TOKEN,
+                code: HttpResponseCode.NoPermissionError,
                 content: null,
-                message: 'Invalid AppKey',
+                message: 'No permission',
                 success: false,
               },
             };
           }
 
+          if (!isSystemAccess) {
+            const appKeyValid = await (this as any).validateAppKey(appKey, userId);
+            if (!appKeyValid.valid) {
+              return {
+                status: 403,
+                data: {
+                  code: HttpResponseCode.ERR_INVALID_TOKEN,
+                  content: null,
+                  message: 'Invalid AppKey',
+                  success: false,
+                },
+              };
+            }
+          }
+
+          const effectiveUserId = isSystemAccess ? 'system' : userId;
+
           // 获取指标列表
           const metrics = await (this as any).getMetricsList({
-            userId,
+            userId: effectiveUserId,
             appKey,
             search,
             limit,
@@ -200,41 +232,6 @@ const query = (star: Starlight) => {
       },
     },
 
-    // 内部调用：获取用户指标使用量
-    getUserMetricsCount: {
-      visibility: 'public',
-      params: {
-        userId: { type: 'string', required: true },
-        timeRanges: { type: 'object', optional: true },
-      },
-      async handler(ctx: Context) {
-        try {
-          const { userId, timeRanges } = ctx.params;
-          return await (this as any).getMetricsUsage(userId, timeRanges);
-        } catch (error) {
-          star.logger?.error('Get user metrics count failed:', error);
-          return { hourly: 0, daily: 0, monthly: 0 };
-        }
-      },
-    },
-
-    // 内部调用：获取用户存储使用量
-    getUserStorageUsage: {
-      visibility: 'public',
-      params: {
-        userId: { type: 'string', required: true },
-      },
-      async handler(ctx: Context) {
-        try {
-          const { userId } = ctx.params;
-          return await (this as any).getStorageUsage(userId);
-        } catch (error) {
-          star.logger?.error('Get user storage usage failed:', error);
-          return 0;
-        }
-      },
-    },
-
     // 获取标签值
     getTagValues: {
       metadata: {
@@ -264,23 +261,39 @@ const query = (star: Starlight) => {
             };
           }
 
-          // 验证AppKey
-          const appKeyValid = await (this as any).validateAppKey(appKey, userId);
-          if (!appKeyValid.valid) {
+          const isSystemAccess = appKey === 'system' && (ctx.meta as any).user?.isAdmin;
+          if (appKey === 'system' && !isSystemAccess) {
             return {
               status: 403,
               data: {
-                code: HttpResponseCode.ERR_INVALID_TOKEN,
+                code: HttpResponseCode.NoPermissionError,
                 content: null,
-                message: 'Invalid AppKey',
+                message: 'No permission',
                 success: false,
               },
             };
           }
 
+          if (!isSystemAccess) {
+            const appKeyValid = await (this as any).validateAppKey(appKey, userId);
+            if (!appKeyValid.valid) {
+              return {
+                status: 403,
+                data: {
+                  code: HttpResponseCode.ERR_INVALID_TOKEN,
+                  content: null,
+                  message: 'Invalid AppKey',
+                  success: false,
+                },
+              };
+            }
+          }
+
+          const effectiveUserId = isSystemAccess ? 'system' : userId;
+
           // 获取标签值
           const tagValues = await (this as any).getTagValues({
-            userId,
+            userId: effectiveUserId,
             appKey,
             metric,
             tagKey,
@@ -352,37 +365,55 @@ const query = (star: Starlight) => {
             };
           }
 
-          // 验证AppKey
-          const appKeyValid = await (this as any).validateAppKey(appKey, userId);
-          if (!appKeyValid.valid) {
-            return {
-              status: 403,
-              data: {
-                code: HttpResponseCode.ERR_INVALID_TOKEN,
-                content: null,
-                message: 'Invalid AppKey',
-                success: false,
-              },
-            };
-          }
-
-          // 检查用户订阅是否支持导出功能
-          const subscription = await (this as any).getUserSubscription(userId);
-          if (subscription.plan === 'free') {
+          const isSystemAccess = appKey === 'system' && (ctx.meta as any).user?.isAdmin;
+          if (appKey === 'system' && !isSystemAccess) {
             return {
               status: 403,
               data: {
                 code: HttpResponseCode.NoPermissionError,
                 content: null,
-                message: '免费用户不支持数据导出功能，请升级订阅',
+                message: 'No permission',
                 success: false,
               },
             };
           }
 
+          if (!isSystemAccess) {
+            const appKeyValid = await (this as any).validateAppKey(appKey, userId);
+            if (!appKeyValid.valid) {
+              return {
+                status: 403,
+                data: {
+                  code: HttpResponseCode.ERR_INVALID_TOKEN,
+                  content: null,
+                  message: 'Invalid AppKey',
+                  success: false,
+                },
+              };
+            }
+          }
+
+          const effectiveUserId = isSystemAccess ? 'system' : userId;
+
+          // 检查用户订阅是否支持导出功能
+          if (!isSystemAccess) {
+            const subscription = await (this as any).getUserSubscription(effectiveUserId);
+            if (subscription.plan === 'free') {
+              return {
+                status: 403,
+                data: {
+                  code: HttpResponseCode.NoPermissionError,
+                  content: null,
+                  message: '免费用户不支持数据导出功能，请升级订阅',
+                  success: false,
+                },
+              };
+            }
+          }
+
           // 创建导出任务
           const exportTask = await (this as any).createExportTask({
-            userId,
+            userId: effectiveUserId,
             appKey,
             format,
             timeRange: {

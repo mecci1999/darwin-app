@@ -36,12 +36,14 @@ export default function createUser(star: Starlight) {
         const defaultNickname = `星际公民${id}`;
 
         // console.time('UserSaveDB'); // Start timing DB save
+        const allowPower = (ctx.meta as any)?.internal === true && typeof params.power === 'number';
         const user = await star.db.user.saveOrUpdateUsers([
           {
             userId: params.userId,
             nickname: defaultNickname,
             source: params.source,
             status: 'active',
+            ...(allowPower ? { power: params.power } : {}),
           },
         ]);
         // console.timeEnd('UserSaveDB'); // End timing DB save

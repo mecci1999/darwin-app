@@ -56,63 +56,77 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       subscriptionId: {
         type: DataTypes.STRING(36),
         allowNull: true,
+        field: 'subscription_id',
       },
       orderNo: {
         type: DataTypes.STRING(50),
         allowNull: false,
         unique: true,
+        field: 'order_no',
       },
       amount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'amount',
       },
       currency: {
         type: DataTypes.STRING(3),
         allowNull: false,
         defaultValue: 'CNY',
+        field: 'currency',
       },
       paymentMethod: {
         type: DataTypes.STRING(50),
         allowNull: false,
+        field: 'payment_method',
       },
       paymentProvider: {
         type: DataTypes.STRING(50),
         allowNull: false,
+        field: 'payment_provider',
       },
       providerOrderId: {
         type: DataTypes.STRING(100),
         allowNull: true,
+        field: 'provider_order_id',
       },
       status: {
         type: DataTypes.ENUM('pending', 'paid', 'failed', 'cancelled', 'refunded'),
         allowNull: false,
         defaultValue: 'pending',
+        field: 'status',
       },
       paidAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'paid_at',
       },
       failedReason: {
         type: DataTypes.TEXT,
         allowNull: true,
+        field: 'failed_reason',
       },
       metadata: {
         type: DataTypes.JSON,
         allowNull: true,
+        field: 'metadata',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -121,20 +135,20 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
-          fields: ['orderNo'],
+          fields: ['order_no'],
           unique: true,
         },
         {
           fields: ['status'],
         },
         {
-          fields: ['paymentProvider'],
+          fields: ['payment_provider'],
         },
         {
-          fields: ['providerOrderId'],
+          fields: ['provider_order_id'],
         },
       ],
     },

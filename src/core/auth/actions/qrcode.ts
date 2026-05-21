@@ -193,10 +193,12 @@ export default function qrcode(star: Starlight) {
 
               // 生成token
               const token = await (this as any).generateToken({ userId: userInfo.userId });
+              const refreshToken = await (this as any).generateRefreshToken({ userId: userInfo.userId });
 
-              if (token) {
+              if (token && refreshToken) {
                 // 设置cookies
                 (ctx.meta as any).token = token;
+                (ctx.meta as any).refreshToken = refreshToken;
               }
 
               // 清楚缓存
@@ -212,6 +214,8 @@ export default function qrcode(star: Starlight) {
                   content: {
                     status,
                     userInfo,
+                    accessToken: token,
+                    refreshToken,
                   },
                   message: '登录成功',
                   code: HttpResponseCode.Success,

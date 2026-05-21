@@ -24,10 +24,22 @@ const loadModelsRecursive = (
       const fileName = path.parse(file).name;
       const modelKey = fileName.endsWith('Table') ? fileName.replace('Table', '') : fileName;
 
-      if (tables.includes(modelKey)) {
+      // 查找匹配的表名（忽略大小写）
+      const matchedTable = tables.find((t) => t.toLowerCase() === modelKey.toLowerCase());
+
+      if (matchedTable) {
         try {
-          const importedModule = require(fullPath).default;
-          models[modelKey] = importedModule(sequelize);
+          // 这里使用 path.join 可能导致 require 路径问题，应该使用 require 的相对路径或者绝对路径
+          // 但是 require(fullPath) 在 ts-node 下通常是可以的
+          // 关键问题是 importedModule 可能是 default export 也可能是 named export
+          const importedModule = require(fullPath);
+          const modelInit = importedModule.default || importedModule;
+          
+          if (typeof modelInit === 'function') {
+             models[matchedTable] = modelInit(sequelize);
+          } else {
+             console.error(`Model ${file} does not export a default initialization function`);
+          }
         } catch (e) {
           console.error(`Error loading model ${file}:`, e);
         }

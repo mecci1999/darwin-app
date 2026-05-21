@@ -8,6 +8,7 @@ import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 't
 import { searchLogs } from '../methods/log-search';
 import { LogSearchParams } from '../types';
 import { validateLogSearch } from '../validators';
+import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
 
 export default function search(star: Starlight) {
   return {
@@ -33,21 +34,49 @@ export default function search(star: Starlight) {
           environment,
           traceId,
           sessionId,
+          hostname,
+          containerId,
           apiKey,
+          originType,
         } = ctx.params;
 
-        const tenantId = (ctx.meta as any)?.tenantId;
+        const tenantId = resolveLogTenantId(ctx, originType);
         const userId = (ctx.meta as any)?.userId;
 
         try {
           // 验证搜索参数
-          const validation = validateLogSearch(ctx.params);
+          if (isDarwinLogRequest(originType) && !isAdminContext(ctx)) {
+            return {
+              status: HttpStatusCode.FORBIDDEN,
+              data: {
+                content: null,
+                message: 'Only administrators can access Darwin logs',
+                code: HttpResponseCode.NoPermissionError,
+                success: false,
+              },
+            };
+          }
+
+          const effectiveApiKey = apiKey || (isDarwinLogRequest(originType) ? 'system-admin' : 'tenant-authenticated');
+          const validation = validateLogSearch({ ...ctx.params, tenantId, apiKey: effectiveApiKey });
           if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
                 message: validation.errors.join(', '),
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
+
+          if (!tenantId) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: 'tenantId is required',
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },
@@ -70,8 +99,17 @@ export default function search(star: Starlight) {
             environment,
             traceId,
             sessionId,
+            hostname,
+            filters: containerId ? { containerId } : undefined,
             tenantId,
             userId,
+            page: validatedPage,
+            pageSize: validatedLimit,
+            limit: validatedLimit,
+            sortBy,
+            sortOrder,
+            originType,
+            visibility: originType === 'darwin-app' ? 'admin' : undefined,
           };
 
           // 调用搜索方法

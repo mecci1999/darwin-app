@@ -1,4 +1,4 @@
-import { IPNotPermissionAccess, UserNotLoginError } from 'error';
+import { IPNotPermissionAccess, UnAuthorizedError, UserNotLoginError } from 'error';
 import { Context, Star } from 'node-universe';
 import {
   GatewayResponse,
@@ -43,7 +43,7 @@ export class GatewayHelper {
   static extractTokenFromCookie(cookie: string, tokenName: string): string | undefined {
     return cookie
       ?.split(';')
-      .find((item) => item.includes(tokenName))
+      .find((item) => item.trim().startsWith(tokenName + '='))
       ?.split('=')[1];
   }
 
@@ -80,7 +80,6 @@ export class GatewayHelper {
     const accessToken = cookie ? this.extractTokenFromCookie(cookie, 'ACCESS_TOKEN') : undefined;
     const refreshToken = cookie ? this.extractTokenFromCookie(cookie, 'REFRESH_TOKEN') : undefined;
     const bearerToken = authorization?.split(' ')[1];
-
     return {
       accessToken,
       refreshToken,
@@ -95,7 +94,7 @@ export class GatewayHelper {
   static setAuthCookies(res: GatewayResponse, token: string, refreshToken: string) {
     res.setHeader(
       'Set-Cookie',
-      `ACCESS_TOKEN=${token}; REFRESH_TOKEN=${refreshToken}; Path=/; SameSite=Strict;`,
+      `ACCESS_TOKEN=${token}; REFRESH_TOKEN=${refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
     );
   }
 
@@ -104,8 +103,8 @@ export class GatewayHelper {
    */
   static clearAuthCookies(res: GatewayResponse) {
     res.setHeader('Set-Cookie', [
-      'ACCESS_TOKEN=; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-      'REFRESH_TOKEN=; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'ACCESS_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'REFRESH_TOKEN=; HttpOnly; Path=/; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
     ]);
   }
 
@@ -129,16 +128,79 @@ export class GatewayHelper {
     }
 
     // 将token传递到ctx.meta中
-    (ctx.meta as any).authToken = tokens.finalToken;
-    if (tokens.refreshToken) {
-      (ctx.meta as any).refreshToken = tokens.refreshToken;
-    }
+    // (ctx.meta as any).authToken = tokens.finalToken;
+    // if (tokens.refreshToken) {
+    //   (ctx.meta as any).refreshToken = tokens.refreshToken;
+    // }
 
     try {
       await authorizeFn(ctx, tokens.finalToken);
     } catch (error) {
       throw error;
     }
+  }
+
+  static getMtlsSubject(req: IncomingRequest): string | undefined {
+    const headerSubject = req.headers['x-mtls-subject'] || req.headers['x-ssl-client-subject'];
+    const headerValue = Array.isArray(headerSubject) ? headerSubject[0] : headerSubject;
+    if (headerValue) return String(headerValue);
+
+    const socket: any = req.socket as any;
+    const cert = socket?.getPeerCertificate?.();
+    if (cert?.subject) {
+      if (typeof cert.subject === 'string') return cert.subject;
+      return JSON.stringify(cert.subject);
+    }
+
+    return undefined;
+  }
+
+  static isMtlsVerified(req: IncomingRequest) {
+    const headerVerified =
+      req.headers['x-mtls-verified'] ||
+      req.headers['x-ssl-client-verify'] ||
+      req.headers['x-forwarded-client-verify'];
+    const verifiedValue = Array.isArray(headerVerified) ? headerVerified[0] : headerVerified;
+
+    const headerOk = ['true', '1', 'SUCCESS', 'success', 'yes', 'y'].includes(
+      String(verifiedValue || ''),
+    );
+
+    const socket: any = req.socket as any;
+    const tlsOk = socket?.authorized === true || !!socket?.getPeerCertificate?.()?.subject;
+
+    const subject = this.getMtlsSubject(req);
+    const allowedSubjects = (process.env.ADMIN_MTLS_SUBJECTS || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const subjectAllowed =
+      allowedSubjects.length === 0 ||
+      (subject ? allowedSubjects.some((item) => subject.includes(item)) : false);
+
+    return {
+      verified: headerOk || tlsOk,
+      subject,
+      subjectAllowed,
+    };
+  }
+
+  static verifyAdminAccess(ctx: Context, req: IncomingRequest) {
+    const user = (ctx.meta as any)?.user;
+    if (!user?.isAdmin) {
+      throw new UnAuthorizedError();
+    }
+
+    const mtlsState = this.isMtlsVerified(req);
+    if (!mtlsState.verified || !mtlsState.subjectAllowed) {
+      throw new UnAuthorizedError();
+    }
+
+    (ctx.meta as any).mtls = {
+      verified: true,
+      subject: mtlsState.subject,
+    };
   }
 
   /**

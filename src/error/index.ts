@@ -36,7 +36,7 @@ export class NoPermissionError extends Errors.StarClientError {
  */
 export class UserNotLoginError extends Errors.StarClientError {
   constructor(type?: string, data?: any) {
-    super('请先登录~', 200, type || '', {
+    super('请先登录~', 401, type || '', {
       content: data,
       code: HttpResponseCode.NotLogin,
     });

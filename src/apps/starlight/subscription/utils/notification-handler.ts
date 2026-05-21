@@ -96,17 +96,10 @@ export class NotificationHandler {
 
       const emailContent = await this.renderEmailTemplate(params.template, params.data);
 
-      // 模拟发送邮件
-      // const result = await this.emailClient.sendMail({
-      //   from: NOTIFICATION_CONFIG.EMAIL.SMTP_USER,
-      //   to: params.recipient,
-      //   subject: emailContent.subject,
-      //   html: emailContent.html,
-      //   text: emailContent.text,
-      // });
-
-      star.logger?.info(`Email sent to ${params.recipient} with template ${params.template}`);
-      return true;
+      star.logger?.warn(
+        `Email channel configured but SDK send path is not implemented: ${params.recipient}`,
+      );
+      return false;
     } catch (error) {
       star.logger?.error('Failed to send email:', error);
       return false;
@@ -125,22 +118,16 @@ export class NotificationHandler {
 
       const smsContent = await this.renderSMSTemplate(params.template, params.data);
 
-      // 模拟发送短信
       switch (NOTIFICATION_CONFIG.SMS.PROVIDER) {
         case 'twilio':
-          // await this.smsClient.messages.create({
-          //   body: smsContent,
-          //   from: '+1234567890',
-          //   to: params.recipient,
-          // });
-          break;
         case 'aliyun':
-          // 阿里云短信发送逻辑
           break;
       }
 
-      star.logger?.info(`SMS sent to ${params.recipient} with template ${params.template}`);
-      return true;
+      star.logger?.warn(
+        `SMS channel configured but SDK send path is not implemented: ${params.recipient}`,
+      );
+      return false;
     } catch (error) {
       star.logger?.error('Failed to send SMS:', error);
       return false;
@@ -159,14 +146,10 @@ export class NotificationHandler {
 
       const pushContent = await this.renderPushTemplate(params.template, params.data);
 
-      // 模拟发送推送
-      // FCM推送逻辑
-      // APNS推送逻辑
-
-      star.logger?.info(
-        `Push notification sent to ${params.recipient} with template ${params.template}`,
+      star.logger?.warn(
+        `Push channel configured but send path is not implemented: ${params.recipient}`,
       );
-      return true;
+      return false;
     } catch (error) {
       star.logger?.error('Failed to send push notification:', error);
       return false;
@@ -178,17 +161,10 @@ export class NotificationHandler {
    */
   private static async sendWebhook(params: NotificationParams, star: any): Promise<boolean> {
     try {
-      // 模拟发送Webhook
-      // const response = await fetch(params.recipient, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify(params.data),
-      // });
-
-      star.logger?.info(`Webhook sent to ${params.recipient}`);
-      return true;
+      star.logger?.warn(
+        `Webhook channel configured but send path is not implemented: ${params.recipient}`,
+      );
+      return false;
     } catch (error) {
       star.logger?.error('Failed to send webhook:', error);
       return false;

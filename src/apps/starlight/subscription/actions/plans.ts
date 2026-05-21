@@ -29,6 +29,7 @@ const plans = (star: Starlight) => {
               price: plan.price,
               currency: plan.currency,
               billingCycle: plan.billingCycle,
+              sortOrder: plan.sortOrder,
               popular: plan.name === 'pro', // 标记推荐计划
             };
 
@@ -185,6 +186,7 @@ const plans = (star: Starlight) => {
                   price: plan.price,
                   currency: plan.currency,
                   billingCycle: plan.billingCycle,
+                  sortOrder: plan.sortOrder,
                 })),
                 comparison,
                 currency,

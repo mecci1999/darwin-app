@@ -14,7 +14,7 @@ export * from './log-processing';
 
 // 从 log-search 模块导出
 export {
-  searchLogsSecord as searchLogs,
+  searchLogs,
   getSearchSuggestions,
   advancedSearchLogs,
   realtimeSearchLogs,

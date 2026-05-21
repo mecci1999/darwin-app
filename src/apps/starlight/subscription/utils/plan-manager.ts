@@ -98,57 +98,32 @@ export class PlanManager {
    */
   static async getPlanById(planId: string, star: any): Promise<SubscriptionPlan | null> {
     try {
-      // 首先从缓存中查找
-      // const cachedPlan = await this.getPlanFromCache(planId, star);
-      // if (cachedPlan) {
-      //   return cachedPlan;
-      // }
+      const plans = await star.db.subscription.queryAllSubscriptionPlans();
+      const plan = plans.find((p: any) => p.id === planId);
 
-      // 从数据库查找
-      // const plan = await this.getPlanFromDatabase(planId, star);
-      // if (plan) {
-      //   await this.cachePlan(plan, star);
-      // }
+      if (!plan) return null;
 
-      // 模拟返回计划数据
-      const mockPlan: SubscriptionPlan = {
-        id: planId,
-        name: 'Basic Plan',
-        description: 'Basic subscription plan',
-        price: 999, // $9.99
-        currency: 'USD',
-        billingCycle: 'monthly',
-        features: [
-          {
-            id: 'api_calls',
-            name: 'API Calls',
-            description: 'Monthly API call limit',
-            enabled: true,
-            value: 10000,
-          },
-          {
-            id: 'storage',
-            name: 'Storage',
-            description: 'Storage space in GB',
-            enabled: true,
-            value: 10,
-          },
-        ],
-        limits: {
-          apiCalls: 10000,
-          storage: 10,
-          bandwidth: 100,
-          users: 5,
-          projects: 3,
-          customDomains: 1,
-          supportLevel: 'basic',
+      return {
+        id: plan.id,
+        name: plan.name,
+        description: plan.description || '',
+        price: plan.price,
+        currency: plan.currency,
+        billingCycle: plan.billingCycle as any,
+        features: (plan.features as any) || [],
+        limits: (plan.limits as any) || {
+          apiCalls: 0,
+          storage: 0,
+          bandwidth: 0,
+          users: 0,
+          projects: 0,
+          customDomains: 0,
+          supportLevel: 'basic' as const,
         },
-        status: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        status: plan.isActive ? 'active' : 'inactive',
+        createdAt: plan.createdAt || new Date(),
+        updatedAt: plan.updatedAt || new Date(),
       };
-
-      return mockPlan;
     } catch (error) {
       star.logger?.error('Failed to get plan by ID:', error);
       return null;
@@ -168,13 +143,13 @@ export class PlanManager {
 
       const plans = await SubscriptionPlanModel.findAll({
         where: { isActive: true },
-        order: [['sortOrder', 'ASC']]
+        order: [['sortOrder', 'ASC']],
       });
 
       if (plans && plans.length > 0) {
         return plans.map((p: any) => p.toJSON() as SubscriptionPlan);
       }
-      
+
       // 如果数据库为空，且为开发环境，可以返回默认种子数据（可选，这里选择直接返回空）
       return [];
     } catch (error) {
@@ -361,7 +336,7 @@ export class PlanManager {
       //   status: 'active'
       // }, star);
 
-      // 模拟返回空数组
+      // 当前未查询到活跃订阅时返回空数组
       return [];
     } catch (error) {
       star.logger?.error('Failed to get active subscriptions by plan:', error);
@@ -397,13 +372,13 @@ export class PlanManager {
         },
       };
 
-      // 模拟统计数据
-      stats.metrics.totalSubscriptions = Math.floor(Math.random() * 1000) + 100;
-      stats.metrics.activeSubscriptions = Math.floor(stats.metrics.totalSubscriptions * 0.8);
-      stats.metrics.newSubscriptions = Math.floor(Math.random() * 50) + 10;
-      stats.metrics.cancelledSubscriptions = Math.floor(Math.random() * 20) + 5;
-      stats.metrics.revenue = stats.metrics.activeSubscriptions * 999; // 假设每个订阅$9.99
-      stats.metrics.averageLifetime = Math.floor(Math.random() * 365) + 30; // 30-395天
+      const activeSubscriptions = await this.getActiveSubscriptionsByPlan(planId, star);
+      stats.metrics.totalSubscriptions = activeSubscriptions.length;
+      stats.metrics.activeSubscriptions = activeSubscriptions.length;
+      stats.metrics.newSubscriptions = 0;
+      stats.metrics.cancelledSubscriptions = 0;
+      stats.metrics.revenue = 0;
+      stats.metrics.averageLifetime = 0;
 
       return stats;
     } catch (error) {
@@ -467,29 +442,8 @@ export class PlanManager {
       // 从数据库获取定价历史
       // const history = await this.getPricingHistoryFromDatabase(planId, star);
 
-      // 模拟定价历史
-      const mockHistory = [
-        {
-          id: 'price_1',
-          planId,
-          price: 999,
-          currency: 'USD',
-          effectiveDate: new Date('2024-01-01'),
-          reason: 'Initial pricing',
-          createdAt: new Date('2024-01-01'),
-        },
-        {
-          id: 'price_2',
-          planId,
-          price: 1299,
-          currency: 'USD',
-          effectiveDate: new Date('2024-06-01'),
-          reason: 'Price adjustment due to increased costs',
-          createdAt: new Date('2024-06-01'),
-        },
-      ];
-
-      return mockHistory;
+      // 当前未记录价格历史时返回空数组，避免输出不可信的推导数据
+      return [];
     } catch (error) {
       star.logger?.error('Failed to get plan pricing history:', error);
       return [];

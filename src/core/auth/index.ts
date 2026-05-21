@@ -17,13 +17,14 @@
  */
 
 import { Star } from 'node-universe';
+import { DatabaseService } from 'db/mysql';
+import { Starlight } from 'typings';
+import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import authActions from './actions/index';
 import authEvents from './events';
 import authMethods from './methods/index';
 
 // 导入基础工具类和类型
-import { DatabaseService } from 'db/mysql';
-import { Starlight } from 'typings';
 import { AuthState } from './types';
 import { AuthUtils } from './utils';
 
@@ -46,6 +47,7 @@ async function initializeAuthService() {
   // 创建Star实例
   const star = new Star({
     namespace: 'darwin-app',
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     // 通信模块使用kafka
     transporter: {
       type: 'KAFKA',
@@ -79,6 +81,7 @@ async function initializeAuthService() {
     },
     // 日志模块
     // logger: pinoOptions,
+    logger: true,
     cacher: {
       type: 'Redis',
       clone: true,
@@ -97,6 +100,7 @@ async function initializeAuthService() {
       },
     },
   }) as Starlight;
+  registerDarwinLogForwarding(star);
 
   // 创建认证服务
   star.createService({
@@ -115,7 +119,7 @@ async function initializeAuthService() {
       await star.db.initialize(state, {
         enableSlowQueryLog: true,
         slowQueryThreshold: 800, // 认证服务对响应时间要求较高
-        enableIpBlacklist: true, // 启用IP黑名单，防止暴力破解
+        enableIpBlacklist: false, // 启用IP黑名单，防止暴力破解
         enableIpSyncTimer: true, // 启用IP同步定时器
       });
 

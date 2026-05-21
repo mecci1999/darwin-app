@@ -56,61 +56,75 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       companyName: {
         type: DataTypes.STRING(200),
         allowNull: true,
+        field: 'company_name',
       },
       contactName: {
         type: DataTypes.STRING(100),
         allowNull: false,
+        field: 'contact_name',
       },
       email: {
         type: DataTypes.STRING(255),
         allowNull: false,
+        field: 'email',
       },
       phone: {
         type: DataTypes.STRING(50),
         allowNull: true,
+        field: 'phone',
       },
       country: {
         type: DataTypes.STRING(100),
         allowNull: false,
+        field: 'country',
       },
       state: {
         type: DataTypes.STRING(100),
         allowNull: true,
+        field: 'state',
       },
       city: {
         type: DataTypes.STRING(100),
         allowNull: false,
+        field: 'city',
       },
       address: {
         type: DataTypes.TEXT,
         allowNull: false,
+        field: 'address',
       },
       postalCode: {
         type: DataTypes.STRING(20),
         allowNull: true,
+        field: 'postal_code',
       },
       taxId: {
         type: DataTypes.STRING(50),
         allowNull: true,
+        field: 'tax_id',
       },
       isDefault: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: false,
+        field: 'is_default',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -119,10 +133,10 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
-          fields: ['userId', 'isDefault'],
+          fields: ['user_id', 'is_default'],
         },
       ],
     },

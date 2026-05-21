@@ -24,6 +24,7 @@ export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
           'version',
           'tenantId',
           'applicationIds',
+          'isOnboardingCompleted',
         ],
       })
       .then(() => users);
@@ -57,6 +58,7 @@ export async function queryAllUsers() {
           'version',
           'tenantId',
           'applicationIds',
+          'isOnboardingCompleted',
           'createdAt',
           'updatedAt',
         ],

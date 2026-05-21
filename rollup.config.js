@@ -3,11 +3,11 @@ const commonjs = require('@rollup/plugin-commonjs');
 const dts = require('rollup-plugin-dts');
 const tscAlias = require('rollup-plugin-tsc-alias');
 const json = require('@rollup/plugin-json');
-const { terser } = require('@rollup/plugin-terser');
+const terser = require('@rollup/plugin-terser');
 
 module.exports = [
   {
-    input: ['./src/gateway/index.ts', './src/custom/index.ts'], // 多个入口文件
+    input: ['./src/core/gateway/index.ts'], // 入口文件
     output: {
       dir: 'dist',
       format: 'cjs',

@@ -35,13 +35,15 @@ export default function (sequelize: Sequelize) {
           key: 'user_id',
         },
         onDelete: 'CASCADE',
+        field: 'user_id',
       },
       openid: {
         type: DataTypes.STRING(128),
         unique: true,
+        field: 'openid',
       },
-      unionid: { type: DataTypes.STRING(128) },
-      sessionKey: { type: DataTypes.STRING(255) },
+      unionid: { type: DataTypes.STRING(128), field: 'unionid' },
+      sessionKey: { type: DataTypes.STRING(255), field: 'session_key' },
     },
     {
       sequelize,

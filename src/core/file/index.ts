@@ -6,6 +6,7 @@ import { Star } from 'node-universe';
 import { pinoLoggerOptions } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
+import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import fileActions from './actions';
 
 // 导入基本类型和常量
@@ -23,6 +24,7 @@ async function initializeFileService() {
 
     const star = new Star({
       namespace: 'darwin-app',
+      nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
       transporter: {
         type: 'KAFKA',
         debug: true,
@@ -36,8 +38,8 @@ async function initializeFileService() {
           ssl: false,
           // 心跳配置 - 解决节点超时警告
           heartbeatInterval: 3000, // 3秒发送一次心跳
-          sessionTimeout: 30000,   // 30秒会话超时
-          requestTimeout: 25000,   // 25秒请求超时
+          sessionTimeout: 30000, // 30秒会话超时
+          requestTimeout: 25000, // 25秒请求超时
           connectionTimeout: 10000, // 10秒连接超时
         },
       },
@@ -45,6 +47,7 @@ async function initializeFileService() {
         type: 'NotePack',
       },
       // logger: pinoOptions,
+      logger: true,
       cacher: {
         type: 'Redis',
         clone: true,
@@ -70,6 +73,7 @@ async function initializeFileService() {
         delay: SERVICE_CONFIG.RETRY_DELAY,
       },
     }) as Starlight;
+    registerDarwinLogForwarding(star);
 
     star.createService({
       name: APP_NAME,

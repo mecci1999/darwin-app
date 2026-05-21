@@ -16,8 +16,12 @@ import {
  */
 export async function createApiKey(apiKey: ApiKeyCreationAttributes) {
   try {
-    const model = await mainConnection.getModel(DataBaseTableNames.ApiKey);
-    return await model.create(apiKey as any);
+    const model = await mainConnection.getModel<ApiKeyTable>(DataBaseTableNames.ApiKey);
+    if (!model) {
+      throw new Error(`Model ${DataBaseTableNames.ApiKey} not found`);
+    }
+    // @ts-ignore
+    return await model.create(apiKey);
   } catch (error) {
     console.log('createApiKey error:', error);
     throw error;
@@ -42,6 +46,26 @@ export async function findApiKeyByKey(keyHash: string): Promise<ApiKeyAttributes
     return apiKey ? apiKey.toJSON() : null;
   } catch (error) {
     console.log('findApiKeyByKey error:', error);
+    return null;
+  }
+}
+
+export async function findApiKeyByPair(keyHash: string, keyPrefix: string): Promise<ApiKeyAttributes | null> {
+  try {
+    const model = await mainConnection.getModel<ApiKeyTable>(DataBaseTableNames.ApiKey);
+    if (!model) return null;
+
+    const apiKey = await model.findOne({
+      where: {
+        keyHash,
+        keyPrefix,
+        isActive: true,
+      },
+    });
+
+    return apiKey ? apiKey.toJSON() : null;
+  } catch (error) {
+    console.log('findApiKeyByPair error:', error);
     return null;
   }
 }
@@ -264,7 +288,7 @@ export async function countActiveApiKeysByTenantId(tenantId: string): Promise<nu
 
     const count = await model.count({
       where: {
-        // tenantId, // 注意：当前ApiKey模型中没有tenantId字段，需要根据实际情况调整
+        tenantId,
         isActive: true,
       },
     });
@@ -286,7 +310,7 @@ export async function findApiKeysByTenantId(tenantId: string): Promise<ApiKeyAtt
 
     const apiKeys = await model.findAll({
       where: {
-        // tenantId, // 注意：当前ApiKey模型中没有tenantId字段，需要根据实际情况调整
+        tenantId,
         isActive: true,
       },
       order: [['createdAt', 'DESC']],

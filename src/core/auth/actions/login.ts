@@ -123,9 +123,19 @@ export default function login(star: Starlight) {
 
             try {
               // 获取用户详细信息
-              const userInfoResult = await ctx.call('user.v1.getUserInfo', {
-                userId: data.userId,
-              });
+              const userInfoResult = await ctx.call(
+                'user.v1.getUserInfo',
+                {
+                  userId: data.userId,
+                },
+                {
+                  meta: {
+                    ...ctx.meta,
+                    // 标记应用身份，用于获取 @StarlightExclusive 字段
+                    appId: ctx.meta?.appId || 'starlight',
+                  },
+                },
+              );
 
               // 如果获取用户信息成功，返回完整的用户信息
               if (

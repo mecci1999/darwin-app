@@ -52,54 +52,66 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       planName: {
         type: DataTypes.STRING(50),
         allowNull: false,
+        field: 'plan_name',
       },
       billingCycle: {
         type: DataTypes.ENUM('monthly', 'yearly'),
         allowNull: false,
+        field: 'billing_cycle',
       },
       status: {
         type: DataTypes.ENUM('active', 'cancelled', 'expired', 'suspended'),
         allowNull: false,
         defaultValue: 'active',
+        field: 'status',
       },
       startedAt: {
         type: DataTypes.DATE,
         allowNull: false,
+        field: 'started_at',
       },
       expiresAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'expires_at',
       },
       cancelledAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'cancelled_at',
       },
       cancelAtPeriodEnd: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: false,
+        field: 'cancel_at_period_end',
       },
       trialEndsAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'trial_ends_at',
       },
       metadata: {
         type: DataTypes.JSON,
         allowNull: true,
+        field: 'metadata',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -108,16 +120,16 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
           fields: ['status'],
         },
         {
-          fields: ['expiresAt'],
+          fields: ['expires_at'],
         },
         {
-          fields: ['planName'],
+          fields: ['plan_name'],
         },
       ],
     },

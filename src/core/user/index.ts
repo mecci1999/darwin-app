@@ -3,18 +3,20 @@ import { Star } from 'node-universe';
 import { pinoLoggerOptions } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
+import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { LogLevel } from 'apps/starlight/logs/types';
 import userActions from './actions';
 
 // 导入基本类型和常量
 import { APP_NAME } from './constants';
 import { EventHandler } from './utils';
-import { LogLevel } from 'apps/starlight/logs/types';
 
 async function initializeUserService() {
   // const pinoOptions = await pinoLoggerOptions(APP_NAME);
 
   const star = new Star({
     namespace: 'darwin-app',
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
       debug: true,
@@ -46,6 +48,7 @@ async function initializeUserService() {
       type: 'NotePack',
     },
     // logger: pinoOptions,
+    logger: true,
     cacher: {
       type: 'Redis',
       clone: true,
@@ -58,12 +61,13 @@ async function initializeUserService() {
       },
     },
     metrics: {
-      enabled: false,
+      enabled: true,
       reporter: {
         type: 'Event',
       },
     },
   }) as Starlight;
+  registerDarwinLogForwarding(star);
 
   star.createService({
     name: APP_NAME,

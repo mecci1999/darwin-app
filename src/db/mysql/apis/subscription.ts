@@ -40,7 +40,7 @@ export async function queryAllSubscriptionPlans(): Promise<SubscriptionPlanAttri
 
     const plans = await model.findAll({
       where: { isActive: true },
-      order: [['price', 'ASC']],
+      order: [['sortOrder', 'ASC'], ['price', 'ASC']],
     });
 
     return plans.map((plan) => plan.toJSON());
@@ -160,6 +160,23 @@ export async function updateSubscriptionStatus(
     return await model.update({ status }, { where: { id: subscriptionId } });
   } catch (error) {
     console.log('updateSubscriptionStatus error:', error);
+    throw error;
+  }
+}
+
+export async function updateUserSubscription(
+  subscriptionId: string,
+  updates: Partial<UserSubscriptionAttributes>,
+) {
+  try {
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
+    await model.update(updates, { where: { id: subscriptionId } });
+    const subscription = await model.findOne({ where: { id: subscriptionId } });
+    return subscription ? subscription.toJSON() : null;
+  } catch (error) {
+    console.log('updateUserSubscription error:', error);
     throw error;
   }
 }

@@ -1,8 +1,10 @@
 import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { LogStreamEvent } from '../types';
 import { validateLogStream } from '../validators';
+import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
 
 // 全局活跃流存储
 let _activeStreams: Map<string, any> | undefined;
@@ -17,13 +19,25 @@ export default function stream(star: Starlight) {
       },
 
       async handler(ctx: Context): Promise<HttpResponseItem> {
-        const { service, level } = ctx.params;
+        const { service, level, keywords, originType } = ctx.params;
         const apiKey = (ctx.meta as any)?.apiKey;
-        const tenantId = (ctx.meta as any)?.tenantId;
+        const tenantId = resolveLogTenantId(ctx, originType);
 
         try {
           // 验证流式传输参数
-          const validation = validateLogStream({ service, level, tenantId });
+          if (isDarwinLogRequest(originType) && !isAdminContext(ctx)) {
+            return {
+              status: HttpStatusCode.FORBIDDEN,
+              data: {
+                content: null,
+                message: 'Only administrators can access Darwin logs',
+                code: HttpResponseCode.NoPermissionError,
+                success: false,
+              },
+            };
+          }
+
+          const validation = validateLogStream({ service, level, keywords, tenantId, originType });
           if (!validation.valid) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
@@ -35,18 +49,38 @@ export default function stream(star: Starlight) {
               },
             };
           }
+
+          if (!tenantId) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: 'tenantId is required',
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
+          const requestOrigin =
+            (ctx.meta as any)?.$request?.headers?.origin ||
+            (ctx.meta as any)?.request?.headers?.origin ||
+            (ctx.meta as any)?.headers?.origin;
+
           // 设置SSE响应头
           (ctx.meta as any).$responseHeaders = {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Cache-Control',
+            ...(requestOrigin ? { 'Access-Control-Allow-Origin': requestOrigin } : {}),
+            'Access-Control-Allow-Credentials': 'true',
+            'Access-Control-Allow-Headers': 'Cache-Control, Content-Type',
+            Vary: 'Origin',
           };
 
           // 创建流连接
           const streamId = generateStreamId(tenantId, apiKey?.id);
-          const stream = createLogStream(streamId, { service, level, tenantId });
+          const responseStream = new PassThrough();
+          const stream = createLogStream(streamId, { service, level, keywords, tenantId, originType, responseStream });
 
           // 发送连接成功事件
           const connectEvent: LogStreamEvent = {
@@ -55,10 +89,10 @@ export default function stream(star: Starlight) {
             timestamp: new Date().toISOString(),
           };
 
-          sendStreamEvent(ctx, connectEvent);
+          sendStreamEvent(responseStream, connectEvent);
 
           // 注册流监听器
-          registerStreamListeners(stream, ctx, { service, level, tenantId });
+          registerStreamListeners(stream, responseStream, { service, level, keywords, tenantId, originType });
 
           // 记录流连接
           star.logger?.info('Log stream connected', {
@@ -66,12 +100,13 @@ export default function stream(star: Starlight) {
             tenantId,
             service,
             level,
+            keywords,
           });
 
           // 保持连接活跃
           const heartbeatInterval = setInterval(() => {
-            if (!(ctx.meta as any).$responseFinished) {
-              sendHeartbeat(ctx);
+            if (!responseStream.destroyed) {
+              sendHeartbeat(responseStream);
             } else {
               clearInterval(heartbeatInterval);
               cleanupStream(streamId);
@@ -79,25 +114,16 @@ export default function stream(star: Starlight) {
           }, 30000); // 30秒心跳
 
           // 处理客户端断开连接
-          (ctx.meta as any).$responseOnClose = () => {
+          responseStream.on('close', () => {
             clearInterval(heartbeatInterval);
             cleanupStream(streamId);
             star.logger?.info('Log stream disconnected', {
               streamId,
               tenantId,
             });
-          };
+          });
 
-          // 返回流响应
-          return {
-            status: HttpStatusCode.OK,
-            data: {
-              content: createStreamResponse(streamId),
-              message: 'Log stream established',
-              code: HttpResponseCode.Success,
-              success: true,
-            },
-          };
+          return responseStream as any;
         } catch (error: any) {
           star.logger?.error('Log stream creation failed', {
             error: error.message,
@@ -105,14 +131,6 @@ export default function stream(star: Starlight) {
             service,
             level,
           });
-
-          const errorEvent: LogStreamEvent = {
-            type: 'error',
-            data: `Stream creation failed: ${error.message}`,
-            timestamp: new Date().toISOString(),
-          };
-
-          sendStreamEvent(ctx, errorEvent);
 
           return {
             status: HttpStatusCode.INTERNAL_SERVER_ERROR,
@@ -139,7 +157,7 @@ function generateStreamId(tenantId: string, apiKeyId?: string): string {
 // 创建日志流
 function createLogStream(
   streamId: string,
-  filters: { service?: string; level?: string; tenantId: string },
+    filters: { service?: string; level?: string; keywords?: string; tenantId: string; originType?: string; responseStream?: PassThrough },
 ) {
   const stream = new EventEmitter();
 
@@ -159,19 +177,30 @@ function createLogStream(
 }
 
 // 注册流监听器
-function registerStreamListeners(stream: EventEmitter, ctx: Context, filters: any) {
-  // 这里可以添加事件监听逻辑
-  // 由于没有broker实例，暂时简化处理
-  // star.logger?.debug('Stream listeners registered', { filters });
+function registerStreamListeners(stream: EventEmitter, responseStream: PassThrough, filters: any) {
+  stream.on('broadcast', (event: LogStreamEvent) => {
+    if (event?.type === 'log' && event.data && shouldForwardToStream(event.data, filters)) {
+      sendStreamEvent(responseStream, event);
+      return;
+    }
+
+    if (event?.type === 'error') {
+      sendStreamEvent(responseStream, event);
+    }
+  });
 }
 
 // 判断是否应该转发到流
 function shouldForwardToStream(
   data: any,
-  filters: { service?: string; level?: string; tenantId: string },
+  filters: { service?: string; level?: string; keywords?: string; tenantId: string; originType?: string },
 ): boolean {
   // 租户隔离
   if (data.tenantId !== filters.tenantId) {
+    return false;
+  }
+
+  if (filters.originType && data.originType !== filters.originType) {
     return false;
   }
 
@@ -185,15 +214,23 @@ function shouldForwardToStream(
     return false;
   }
 
+  if (filters.keywords) {
+    const keyword = String(filters.keywords).toLowerCase();
+    const haystack = `${data.message || ''} ${data.service || ''}`.toLowerCase();
+    if (!haystack.includes(keyword)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
 // 发送流事件
-function sendStreamEvent(ctx: Context, event: LogStreamEvent) {
+function sendStreamEvent(responseStream: PassThrough, event: LogStreamEvent) {
   try {
-    if (!ctx.meta.$responseFinished) {
+    if (!responseStream.destroyed) {
       const eventData = `data: ${JSON.stringify(event)}\n\n`;
-      ctx.meta.$responseWrite?.(eventData);
+      responseStream.write(eventData);
     }
   } catch (error: any) {
     console.log('Failed to send stream event', { error: error.message });
@@ -201,14 +238,14 @@ function sendStreamEvent(ctx: Context, event: LogStreamEvent) {
 }
 
 // 发送心跳
-function sendHeartbeat(ctx: Context) {
+function sendHeartbeat(responseStream: PassThrough) {
   const heartbeatEvent: LogStreamEvent = {
     type: 'connected',
     data: 'heartbeat',
     timestamp: new Date().toISOString(),
   };
 
-  sendStreamEvent(ctx, heartbeatEvent);
+  sendStreamEvent(responseStream, heartbeatEvent);
 }
 
 // 清理流
@@ -279,7 +316,7 @@ function cleanupExpiredStreams() {
 }
 
 // 广播消息到所有流
-function broadcastToStreams(message: any, tenantId?: string) {
+export function broadcastToStreams(message: any, tenantId?: string) {
   if (!_activeStreams) return;
 
   const event: LogStreamEvent = {

@@ -3,14 +3,15 @@
  * 负责SaaS化的配额管理和限制检查
  */
 
-import { DEFAULT_QUOTAS, API_RATE_LIMIT } from '../constants';
-import { TenantConfig, ApiKey } from '../types';
+import { DEFAULT_QUOTAS, API_RATE_LIMIT, STREAM_CONFIG } from '../constants';
+import { TenantConfig, ApiKey, Quota } from '../types';
 
 export interface QuotaUsage {
   logsPerMinute: number;
   storageUsed: number; // GB
   searchRequestsToday: number;
   exportRequestsToday: number;
+  streamConnections: number;
   lastUpdated: string;
 }
 
@@ -20,6 +21,7 @@ export interface QuotaLimits {
   retentionDays: number;
   searchRequestsPerDay: number;
   exportRequestsPerDay: number;
+  maxStreamConnections: number;
 }
 
 export interface QuotaCheckResult {
@@ -73,7 +75,9 @@ export class QuotaChecker {
         limit,
         remaining: remaining - (allowed ? logCount : 0),
         resetTime: this.getNextMinuteReset(),
-        reason: allowed ? undefined : `日志摄取速率超过限制 (${current + logCount}/${limit} 条/分钟)`,
+        reason: allowed
+          ? undefined
+          : `日志摄取速率超过限制 (${current + logCount}/${limit} 条/分钟)`,
       };
     } catch (error: any) {
       this.logger?.error('检查摄取配额失败', {
@@ -177,6 +181,40 @@ export class QuotaChecker {
     }
   }
 
+  async checkStreamQuota(tenantId: string): Promise<QuotaCheckResult> {
+    try {
+      const usage = await this.getUsage(tenantId);
+      const limits = await this.getLimits(tenantId);
+
+      const current = usage.streamConnections;
+      const limit = limits.maxStreamConnections;
+      const remaining = Math.max(0, limit - current);
+      const allowed = current < limit;
+
+      return {
+        allowed,
+        quotaType: 'streamConnections',
+        current,
+        limit,
+        remaining,
+        reason: allowed ? undefined : `流连接数超过限制 (${current}/${limit})`,
+      };
+    } catch (error: any) {
+      this.logger?.error('检查流连接配额失败', {
+        error: error?.message || 'Unknown error',
+        tenantId,
+      });
+      return {
+        allowed: false,
+        quotaType: 'streamConnections',
+        current: 0,
+        limit: 0,
+        remaining: 0,
+        reason: '检查流连接配额时发生错误',
+      };
+    }
+  }
+
   /**
    * 检查存储配额
    */
@@ -200,7 +238,9 @@ export class QuotaChecker {
         current,
         limit,
         remaining,
-        reason: allowed ? undefined : `存储使用量超过限制 (${current + additionalSizeGB}/${limit} GB)`,
+        reason: allowed
+          ? undefined
+          : `存储使用量超过限制 (${current + additionalSizeGB}/${limit} GB)`,
       };
     } catch (error: any) {
       this.logger?.error('检查存储配额失败', {
@@ -279,7 +319,7 @@ export class QuotaChecker {
   /**
    * 获取租户使用量
    */
-  private async getUsage(tenantId: string): Promise<QuotaUsage> {
+  async getUsage(tenantId: string): Promise<QuotaUsage> {
     const cached = this.usageCache.get(tenantId);
 
     // 如果缓存存在且未过期（5分钟）
@@ -293,6 +333,7 @@ export class QuotaChecker {
       storageUsed: 0,
       searchRequestsToday: 0,
       exportRequestsToday: 0,
+      streamConnections: 0,
       lastUpdated: new Date().toISOString(),
     };
 
@@ -306,7 +347,7 @@ export class QuotaChecker {
   /**
    * 获取租户限制
    */
-  private async getLimits(tenantId: string): Promise<QuotaLimits> {
+  async getLimits(tenantId: string): Promise<QuotaLimits> {
     const cached = this.limitsCache.get(tenantId);
 
     if (cached) {
@@ -320,6 +361,7 @@ export class QuotaChecker {
       retentionDays: DEFAULT_QUOTAS.RETENTION_DAYS,
       searchRequestsPerDay: DEFAULT_QUOTAS.SEARCH_REQUESTS_PER_DAY,
       exportRequestsPerDay: DEFAULT_QUOTAS.EXPORT_REQUESTS_PER_DAY,
+      maxStreamConnections: STREAM_CONFIG.MAX_CONNECTIONS,
     };
 
     // 实际实现中应该从数据库获取租户的具体配额
@@ -348,6 +390,8 @@ export class QuotaChecker {
         (usage[type] as number) += increment;
       } else if (type === 'storageUsed') {
         usage.storageUsed += increment;
+      } else if (type === 'streamConnections') {
+        usage.streamConnections = Math.max(0, usage.streamConnections + increment);
       }
 
       usage.lastUpdated = new Date().toISOString();
@@ -404,6 +448,128 @@ export class QuotaChecker {
         amount,
       });
     }
+  }
+
+  async updateStreamUsage(tenantId: string, increment: number = 1): Promise<void> {
+    try {
+      await this.updateUsage(tenantId, 'streamConnections', increment);
+    } catch (error: any) {
+      this.logger?.error('更新流连接使用量失败', {
+        error: error?.message || 'Unknown error',
+        tenantId,
+        increment,
+      });
+    }
+  }
+
+  async getQuota(tenantId: string, userId?: string): Promise<Quota> {
+    const usage = await this.getUsage(tenantId);
+    const limits = await this.getLimits(tenantId);
+    const now = Date.now();
+
+    return {
+      tenantId,
+      userId,
+      planId: 'default',
+      resetInterval: 'daily',
+      limits: {
+        logsPerMinute: limits.logsPerMinute,
+        logsPerDay: limits.logsPerMinute * 1440,
+        storageGB: limits.storageGB,
+        retentionDays: limits.retentionDays,
+        searchRequestsPerDay: limits.searchRequestsPerDay,
+        exportRequestsPerDay: limits.exportRequestsPerDay,
+        streamConnections: limits.maxStreamConnections,
+      },
+      usage: {
+        logsToday: usage.logsPerMinute * 1440,
+        storageUsedGB: usage.storageUsed,
+        searchRequestsToday: usage.searchRequestsToday,
+        exportRequestsToday: usage.exportRequestsToday,
+        activeStreamConnections: usage.streamConnections,
+      },
+      resetDate: new Date(now).toISOString(),
+      warningThreshold: 0.8,
+      isExceeded: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  async updateQuota(
+    tenantId: string,
+    userId: string | undefined,
+    updates: Partial<{
+      logsPerDay: number;
+      searchesPerDay: number;
+      exportsPerDay: number;
+      maxStorageGB: number;
+      maxStreamConnections: number;
+    }>,
+  ): Promise<void> {
+    const currentLimits = await this.getLimits(tenantId);
+    const newLimits: QuotaLimits = {
+      ...currentLimits,
+      ...(updates.logsPerDay !== undefined
+        ? { logsPerMinute: Math.floor(updates.logsPerDay / 1440) }
+        : {}),
+      ...(updates.searchesPerDay !== undefined
+        ? { searchRequestsPerDay: updates.searchesPerDay }
+        : {}),
+      ...(updates.exportsPerDay !== undefined
+        ? { exportRequestsPerDay: updates.exportsPerDay }
+        : {}),
+      ...(updates.maxStorageGB !== undefined ? { storageGB: updates.maxStorageGB } : {}),
+      ...(updates.maxStreamConnections !== undefined
+        ? { maxStreamConnections: updates.maxStreamConnections }
+        : {}),
+    };
+
+    this.limitsCache.set(tenantId, newLimits);
+  }
+
+  async clearCache(tenantId: string, userId?: string): Promise<void> {
+    this.usageCache.delete(tenantId);
+    this.limitsCache.delete(tenantId);
+  }
+
+  async resetUsage(
+    tenantId: string,
+    userId: string | undefined,
+    resetType: 'all' | 'ingestion' | 'search' | 'export' | 'storage' | 'stream' = 'all',
+  ): Promise<void> {
+    const usage = await this.getUsage(tenantId);
+
+    if (resetType === 'all' || resetType === 'ingestion') {
+      usage.logsPerMinute = 0;
+    }
+    if (resetType === 'all' || resetType === 'search') {
+      usage.searchRequestsToday = 0;
+    }
+    if (resetType === 'all' || resetType === 'export') {
+      usage.exportRequestsToday = 0;
+    }
+    if (resetType === 'all' || resetType === 'storage') {
+      usage.storageUsed = 0;
+    }
+    if (resetType === 'all' || resetType === 'stream') {
+      usage.streamConnections = 0;
+    }
+
+    usage.lastUpdated = new Date().toISOString();
+    this.usageCache.set(tenantId, usage);
+  }
+
+  async getUsageHistory(
+    tenantId: string,
+    userId?: string,
+    quotaType?: string,
+    timeRange: string = '7d',
+    interval: 'hour' | 'day' | 'week' = 'day',
+  ): Promise<
+    Array<{ timestamp: Date; quotaType: string; usage: number; limit: number; percentage: number }>
+  > {
+    return [];
   }
 
   /**

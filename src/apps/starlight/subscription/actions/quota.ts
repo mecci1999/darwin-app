@@ -247,6 +247,93 @@ const quota = (star: Starlight) => {
       },
     },
 
+    'v1.usage.summary': {
+      metadata: {
+        auth: true,
+      },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        try {
+          const userId = (ctx.meta as any).user?.userId;
+
+          if (!userId) {
+            return {
+              status: 401,
+              data: {
+                code: HttpResponseCode.UserNotLoginError,
+                content: null,
+                message: '用户未认证',
+                success: false,
+              },
+            };
+          }
+
+          const subscription = await (this as any).getUserCurrentSubscription(userId);
+          if (!subscription) {
+            return {
+              status: 404,
+              data: {
+                code: HttpResponseCode.ParamsError,
+                content: null,
+                message: '用户没有有效订阅',
+                success: false,
+              },
+            };
+          }
+
+          const plan = await (this as any).getPlanByName(subscription.planName);
+          const quotaTypes = [
+            'maxAppKeys',
+            'maxMetricsPerHour',
+            'maxMetricsPerDay',
+            'maxMetricsPerMonth',
+            'maxCustomSchemas',
+            'maxDashboards',
+            'maxAlerts',
+          ];
+
+          const quotas = await Promise.all(
+            quotaTypes.map(async (quotaType) => {
+              const limit = plan?.features?.[quotaType] || 0;
+              const current = await (this as any).getCurrentUsage(userId, quotaType);
+              return {
+                type: quotaType,
+                current,
+                total: limit,
+              };
+            }),
+          );
+
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: {
+                quotas,
+                summary: {
+                  planName: subscription.planName,
+                  planDisplayName: subscription.planDisplayName,
+                  expiresAt: subscription.expiresAt,
+                },
+              },
+              message: '获取用量摘要成功',
+              success: true,
+            },
+          };
+        } catch (error) {
+          star.logger?.error('Get usage summary failed:', error);
+          return {
+            status: 500,
+            data: {
+              code: HttpResponseCode.ServiceActionFaild,
+              content: null,
+              message: '获取用量摘要失败',
+              success: false,
+            },
+          };
+        }
+      },
+    },
+
     // 使用配额
     'v1.quota.consume': {
       metadata: {
@@ -276,7 +363,7 @@ const quota = (star: Starlight) => {
 
           // 先检查配额
           const quotaCheckResult = await star.call(
-            'subscription.quota.check',
+            'subscription.v1.quota.check',
             {
               quotaType,
               amount,

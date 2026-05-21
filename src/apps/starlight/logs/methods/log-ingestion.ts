@@ -81,6 +81,7 @@ export async function ingestSingleLog(
       tenantId,
       userId,
       logId: processedLog.id,
+      log: processedLog,
       timestamp: Date.now(),
     });
 
@@ -161,6 +162,7 @@ export async function ingestLogBatch(
       batchId: batch.batchId || `batch_${Date.now()}`,
       processed: processedBatch.processed.length,
       failed: processedBatch.errors.length,
+      logs: processedBatch.processed,
       timestamp: Date.now(),
     });
 
@@ -227,6 +229,7 @@ export async function ingestLogStream(
     let failed = 0;
     const errors: string[] = [];
     const batchBuffer: any[] = [];
+    const deliveredLogs: StoredLog[] = [];
 
     try {
       for await (const log of stream) {
@@ -276,6 +279,7 @@ export async function ingestLogStream(
             try {
               await esClient.bulkIndex(batchBuffer as StoredLog[]);
               processed += batchBuffer.length;
+              deliveredLogs.push(...(batchBuffer as StoredLog[]));
             } catch (bulkError) {
               failed += batchBuffer.length;
               errors.push(bulkError instanceof Error ? bulkError.message : 'Bulk index error');
@@ -296,6 +300,7 @@ export async function ingestLogStream(
         try {
           await esClient.bulkIndex(batchBuffer as StoredLog[]);
           processed += batchBuffer.length;
+          deliveredLogs.push(...(batchBuffer as StoredLog[]));
         } catch (bulkError) {
           failed += batchBuffer.length;
           errors.push(bulkError instanceof Error ? bulkError.message : 'Bulk index error');
@@ -311,6 +316,7 @@ export async function ingestLogStream(
         processed,
         failed,
         format,
+        logs: deliveredLogs,
         timestamp: Date.now(),
       });
 

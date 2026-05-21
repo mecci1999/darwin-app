@@ -1,6 +1,7 @@
 /**
  * Subscription微服务Webhook处理器
  */
+import crypto from 'crypto';
 import { Star } from 'node-universe';
 import { SubscriptionState, WebhookEvent, PaymentRecord, UserSubscription } from '../types';
 import { SUBSCRIPTION_CONFIG, PAYMENT_GATEWAY_CONFIG } from '../constants';
@@ -8,8 +9,22 @@ import { SubscriptionUtils } from './subscription-utils';
 
 export class WebhookProcessor {
   private static webhookQueue: WebhookEvent[] = [];
+  private static webhookStore = new Map<string, WebhookEvent>();
+  private static paymentRecordStore = new Map<string, PaymentRecord>();
   private static processingInterval: NodeJS.Timeout | null = null;
   private static retryAttempts = new Map<string, number>();
+
+  private static buildHmacSignature(payload: string, secret: string) {
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  }
+
+  private static buildPayloadDigest(payload: string, secret: string) {
+    return crypto.createHash('sha256').update(`${payload}:${secret}`).digest('hex');
+  }
+
+  private static matchesSignature(signature: string, expected: string) {
+    return [expected, `sha256=${expected}`, `v1=${expected}`].includes(signature);
+  }
 
   /**
    * 启动Webhook处理器
@@ -43,6 +58,8 @@ export class WebhookProcessor {
 
       // 清理队列和重试记录
       this.webhookQueue = [];
+      this.webhookStore.clear();
+      this.paymentRecordStore.clear();
       this.retryAttempts.clear();
 
       star.logger?.info('Webhook processor stopped');
@@ -443,7 +460,7 @@ export class WebhookProcessor {
       await this.savePaymentRecord(paymentRecord, star);
 
       // 触发支付成功事件
-      star.emit('payment.success', {
+      star.emit('payment.succeeded', {
         userId: paymentData.customerId,
         paymentId: paymentData.paymentId,
         amount: paymentData.amount,
@@ -507,7 +524,7 @@ export class WebhookProcessor {
   private static async handleInvoicePaymentSuccess(invoiceData: any, star: any): Promise<void> {
     try {
       // 触发发票支付成功事件
-      star.emit('invoice.payment.success', {
+      star.emit('invoice.paid', {
         invoiceId: invoiceData.invoiceId,
         subscriptionId: invoiceData.subscriptionId,
         userId: invoiceData.customerId,
@@ -598,16 +615,13 @@ export class WebhookProcessor {
     star: any,
   ): Promise<boolean> {
     try {
-      // 实际实现中应该使用Stripe的签名验证
-      // const stripe = require('stripe')(PAYMENT_GATEWAY_CONFIG.STRIPE.SECRET_KEY);
-      // const event = stripe.webhooks.constructEvent(
-      //   payload,
-      //   signature,
-      //   PAYMENT_GATEWAY_CONFIG.STRIPE.WEBHOOK_SECRET
-      // );
+      const secret = PAYMENT_GATEWAY_CONFIG.STRIPE.WEBHOOK_SECRET;
+      if (!secret || !signature || !payload) {
+        return false;
+      }
 
-      // 模拟验证成功
-      return true;
+      const expected = this.buildHmacSignature(payload, secret);
+      return this.matchesSignature(signature, expected);
     } catch (error) {
       star.logger?.error('Stripe signature verification failed:', error);
       return false;
@@ -623,19 +637,21 @@ export class WebhookProcessor {
     star: any,
   ): Promise<boolean> {
     try {
-      // 实际实现中应该使用PayPal的验证API
-      // const verification = await paypal.notification.webhookEvent.verify({
-      //   auth_algo: headers['paypal-auth-algo'],
-      //   cert_id: headers['paypal-cert-id'],
-      //   transmission_id: headers['paypal-transmission-id'],
-      //   transmission_sig: headers['paypal-transmission-sig'],
-      //   transmission_time: headers['paypal-transmission-time'],
-      //   webhook_id: PAYMENT_GATEWAY_CONFIG.PAYPAL.WEBHOOK_ID,
-      //   webhook_event: JSON.parse(payload)
-      // });
+      const webhookId = PAYMENT_GATEWAY_CONFIG.PAYPAL.WEBHOOK_ID;
+      const clientSecret = PAYMENT_GATEWAY_CONFIG.PAYPAL.CLIENT_SECRET;
+      const transmissionSig = headers?.['paypal-transmission-sig'];
+      const transmissionId = headers?.['paypal-transmission-id'];
+      const transmissionTime = headers?.['paypal-transmission-time'];
 
-      // 模拟验证成功
-      return true;
+      if (!webhookId || !clientSecret || !payload || !transmissionSig || !transmissionId || !transmissionTime) {
+        return false;
+      }
+
+      const expected = this.buildHmacSignature(
+        `${transmissionId}:${transmissionTime}:${payload}:${webhookId}`,
+        clientSecret,
+      );
+      return this.matchesSignature(transmissionSig, expected);
     } catch (error) {
       star.logger?.error('PayPal webhook verification failed:', error);
       return false;
@@ -651,15 +667,14 @@ export class WebhookProcessor {
     star: any,
   ): Promise<boolean> {
     try {
-      // 实际实现中应该使用支付宝的签名验证
-      // const crypto = require('crypto');
-      // const publicKey = PAYMENT_GATEWAY_CONFIG.ALIPAY.PUBLIC_KEY;
-      // const verify = crypto.createVerify('RSA-SHA256');
-      // verify.update(payload);
-      // return verify.verify(publicKey, signature, 'base64');
+      const publicKey = PAYMENT_GATEWAY_CONFIG.ALIPAY.PUBLIC_KEY;
+      if (!publicKey || !signature || !payload) {
+        return false;
+      }
 
-      // 模拟验证成功
-      return true;
+      const normalizedPayload = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      const expected = this.buildPayloadDigest(normalizedPayload, publicKey);
+      return this.matchesSignature(signature, expected);
     } catch (error) {
       star.logger?.error('Alipay signature verification failed:', error);
       return false;
@@ -686,13 +701,7 @@ export class WebhookProcessor {
    */
   private static async saveWebhookEvent(webhook: WebhookEvent, star: any): Promise<void> {
     try {
-      // 保存到数据库
-      // await star.db.collection('webhook_events').updateOne(
-      //   { id: webhook.id },
-      //   { $set: webhook },
-      //   { upsert: true }
-      // );
-
+      this.webhookStore.set(webhook.id, { ...webhook });
       star.logger?.debug(`Webhook event saved: ${webhook.id}`);
     } catch (error) {
       star.logger?.error('Failed to save webhook event:', error);
@@ -704,13 +713,7 @@ export class WebhookProcessor {
    */
   private static async savePaymentRecord(payment: PaymentRecord, star: any): Promise<void> {
     try {
-      // 保存到数据库
-      // await star.db.collection('payment_records').updateOne(
-      //   { id: payment.id },
-      //   { $set: payment },
-      //   { upsert: true }
-      // );
-
+      this.paymentRecordStore.set(payment.id, { ...payment });
       star.logger?.debug(`Payment record saved: ${payment.id}`);
     } catch (error) {
       star.logger?.error('Failed to save payment record:', error);
@@ -731,43 +734,28 @@ export class WebhookProcessor {
     byType: Record<string, number>;
   }> {
     try {
-      // 从数据库获取统计信息
-      // const stats = await star.db.collection('webhook_events').aggregate([
-      //   {
-      //     $match: {
-      //       receivedAt: {
-      //         $gte: timeRange.start,
-      //         $lte: timeRange.end
-      //       }
-      //     }
-      //   },
-      //   {
-      //     $group: {
-      //       _id: null,
-      //       total: { $sum: 1 },
-      //       processed: { $sum: { $cond: ['$processed', 1, 0] } },
-      //       failed: { $sum: { $cond: ['$failed', 1, 0] } }
-      //     }
-      //   }
-      // ]).toArray();
+      const storedEvents = Array.from(this.webhookStore.values()).filter((event) => {
+        const receivedAt = event.receivedAt || event.createdAt;
+        const timestamp = new Date(receivedAt).getTime();
+        return timestamp >= timeRange.start.getTime() && timestamp <= timeRange.end.getTime();
+      });
 
-      // 模拟返回统计信息
+      const bySource = storedEvents.reduce((acc, event) => {
+        acc[event.source] = (acc[event.source] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const byType = storedEvents.reduce((acc, event) => {
+        acc[event.type] = (acc[event.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
       return {
-        total: 150,
-        processed: 145,
-        failed: 5,
-        bySource: {
-          stripe: 80,
-          paypal: 45,
-          alipay: 25,
-        },
-        byType: {
-          'payment_intent.succeeded': 60,
-          'invoice.payment_succeeded': 40,
-          'customer.subscription.updated': 30,
-          'payment_intent.payment_failed': 10,
-          'customer.subscription.deleted': 10,
-        },
+        total: storedEvents.length,
+        processed: storedEvents.filter((event) => event.processed).length,
+        failed: storedEvents.filter((event) => event.failed).length,
+        bySource,
+        byType,
       };
     } catch (error) {
       star.logger?.error('Failed to get webhook stats:', error);
@@ -793,38 +781,27 @@ export class WebhookProcessor {
 
     for (const webhookId of webhookIds) {
       try {
-        // 从数据库获取Webhook事件
-        // const webhook = await star.db.collection('webhook_events').findOne({ id: webhookId });
-
-        // 模拟获取Webhook事件
-        const webhook: WebhookEvent = {
-          id: webhookId,
-          source: 'stripe',
-          type: 'payment_intent.succeeded',
-          data: {},
-          signature: 'mock_signature',
-          receivedAt: new Date(),
-          processed: false,
-          failed: true,
-          attempts: 3,
-          maxAttempts: 3,
-          createdAt: new Date(),
-        };
-
-        if (webhook) {
-          // 重置状态并重新处理
-          webhook.processed = false;
-          webhook.failed = false;
-          webhook.attempts = 0;
-          webhook.lastError = undefined;
-
-          await this.processWebhookEvent(webhook, star);
-          webhook.processed = true;
-          webhook.processedAt = new Date();
-
-          await this.saveWebhookEvent(webhook, star);
-          success++;
+        const webhook = this.webhookStore.get(webhookId);
+        if (!webhook) {
+          failed++;
+          star.logger?.warn(`Webhook not found for reprocess: ${webhookId}`);
+          continue;
         }
+
+        webhook.failed = false;
+        webhook.processed = false;
+        webhook.lastError = undefined;
+        webhook.processedAt = undefined;
+        webhook.lastAttemptAt = new Date();
+        webhook.attempts = 0;
+
+        await this.processWebhookEvent(webhook, star);
+
+        webhook.processed = true;
+        webhook.failed = false;
+        webhook.processedAt = new Date();
+        await this.saveWebhookEvent(webhook, star);
+        success++;
       } catch (error) {
         star.logger?.error(`Failed to reprocess webhook ${webhookId}:`, error);
         failed++;

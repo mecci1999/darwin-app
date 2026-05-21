@@ -9,6 +9,8 @@ class ElasticsearchManager {
   private static instance: ElasticsearchManager;
   private esClient: ElasticsearchClient | null = null;
   private isInitialized = false;
+  private baseConfig: { node: string; username?: string; password?: string } | null = null;
+  private tenantClients = new Map<string, ElasticsearchClient>();
 
   private constructor() {}
 
@@ -29,9 +31,16 @@ class ElasticsearchManager {
     }
 
     try {
+      this.baseConfig = {
+        node: config.node,
+        username: config.username,
+        password: config.password,
+      };
+
       // 创建ES客户端实例
       this.esClient = new ElasticsearchClient({
         node: config.node,
+        username: config.username,
         password: config.password,
         index: 'logs', // 默认索引前缀
       });
@@ -52,27 +61,22 @@ class ElasticsearchManager {
    * 为特定租户创建索引配置
    */
   getClient(tenantId?: string): ElasticsearchClient {
-    if (!this.isInitialized || !this.esClient) {
+    if (!this.isInitialized || !this.esClient || !this.baseConfig) {
       throw new Error('Elasticsearch client not initialized. Call initialize() first.');
     }
 
-    if (tenantId) {
-      // 为特定租户创建客户端实例
-      const config = {
-        node: process.env.ELASTICSEARCH_URL || 'http://localhost:9200',
-        password: process.env.ELASTICSEARCH_PASSWORD,
-        index: `logs-${tenantId}`,
-      };
-      return new ElasticsearchClient(config);
-    }
+    const index = tenantId ? `logs-${tenantId}` : 'logs';
+    const cachedClient = this.tenantClients.get(index);
+    if (cachedClient) return cachedClient;
 
-    // 返回默认客户端的副本，但使用通用索引
     const config = {
-      node: process.env.ELASTICSEARCH_URL || 'http://localhost:9200',
-      password: process.env.ELASTICSEARCH_PASSWORD,
-      index: 'logs',
+      ...this.baseConfig,
+      index,
     };
-    return new ElasticsearchClient(config);
+
+    const client = new ElasticsearchClient(config);
+    this.tenantClients.set(index, client);
+    return client;
   }
 
   /**
@@ -104,6 +108,8 @@ class ElasticsearchManager {
     if (this.esClient) {
       // ElasticsearchClient没有close方法，但可以清理引用
       this.esClient = null;
+      this.baseConfig = null;
+      this.tenantClients.clear();
       this.isInitialized = false;
       console.log('Elasticsearch connection closed');
     }

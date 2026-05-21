@@ -52,64 +52,78 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       billNo: {
         type: DataTypes.STRING(50),
         allowNull: false,
         unique: true,
+        field: 'bill_no',
       },
       billingPeriodStart: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+        field: 'billing_period_start',
       },
       billingPeriodEnd: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+        field: 'billing_period_end',
       },
       subtotal: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'subtotal',
       },
       tax: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
         defaultValue: 0,
+        field: 'tax',
       },
       total: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'total',
       },
       currency: {
         type: DataTypes.STRING(3),
         allowNull: false,
         defaultValue: 'CNY',
+        field: 'currency',
       },
       status: {
         type: DataTypes.ENUM('draft', 'sent', 'paid', 'overdue', 'cancelled'),
         allowNull: false,
         defaultValue: 'draft',
+        field: 'status',
       },
       dueDate: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+        field: 'due_date',
       },
       paidAt: {
         type: DataTypes.DATE,
         allowNull: true,
+        field: 'paid_at',
       },
       invoiceUrl: {
         type: DataTypes.STRING(500),
         allowNull: true,
+        field: 'invoice_url',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -118,20 +132,20 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId'],
+          fields: ['user_id'],
         },
         {
-          fields: ['billNo'],
+          fields: ['bill_no'],
           unique: true,
         },
         {
           fields: ['status'],
         },
         {
-          fields: ['dueDate'],
+          fields: ['due_date'],
         },
         {
-          fields: ['billingPeriodStart', 'billingPeriodEnd'],
+          fields: ['billing_period_start', 'billing_period_end'],
         },
       ],
     },

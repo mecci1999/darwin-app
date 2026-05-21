@@ -42,7 +42,7 @@ export default function getUserInfo(star: Star & { db: any }) {
           }
 
           // 过滤敏感信息，只返回必要的用户信息
-          const safeUserInfo = {
+          const safeUserInfo: any = {
             userId: userInfo.userId,
             nickname: userInfo.nickname,
             avatar: userInfo.avatar,
@@ -57,6 +57,16 @@ export default function getUserInfo(star: Star & { db: any }) {
             createdAt: userInfo.createdAt,
             updatedAt: userInfo.updatedAt,
           };
+
+          /**
+           * @StarlightExclusive
+           * 仅允许 starlight 应用访问 isOnboardingCompleted 字段
+           * 通过 ctx.meta.appId 进行判断
+           */
+          const isStarlight = ctx.meta?.appId === 'starlight';
+          if (isStarlight) {
+            safeUserInfo.isOnboardingCompleted = userInfo.isOnboardingCompleted ?? false;
+          }
 
           star.logger?.debug('获取用户信息成功', { userId });
 

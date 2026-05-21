@@ -10,18 +10,20 @@ import {
   LogSearchResult,
 } from '../types';
 import { AggregationsCalendarInterval } from '@elastic/elasticsearch/lib/api/types';
+import type { MappingProperty } from '@elastic/elasticsearch/lib/api/types';
 
 export class ElasticsearchClient {
   private client: Client;
   private indexName: string;
+  private indexInitialized = false;
 
-  constructor(config: { node: string; password?: string; index: string }) {
+  constructor(config: { node: string; username?: string; password?: string; index: string }) {
     this.client = new Client({
       node: config.node,
-      auth: config.password
+      auth: config.username || config.password
         ? {
-            username: 'elastic',
-            password: config.password,
+            username: config.username || 'elastic',
+            password: config.password || '',
           }
         : undefined,
     });
@@ -48,6 +50,41 @@ export class ElasticsearchClient {
         console.warn('Checking index existence failed, assuming not exists:', error);
       }
 
+      const properties: Record<string, MappingProperty> = {
+        id: { type: 'keyword' },
+        level: { type: 'keyword' },
+        message: {
+          type: 'text',
+          analyzer: 'standard',
+          fields: {
+            keyword: { type: 'keyword', ignore_above: 256 },
+          },
+        },
+        timestamp: { type: 'date' },
+        receivedAt: { type: 'date' },
+        service: { type: 'keyword' },
+        source: { type: 'keyword' },
+        hostname: { type: 'keyword' },
+        containerId: { type: 'keyword' },
+        originType: { type: 'keyword' },
+        visibility: { type: 'keyword' },
+        nodeID: { type: 'keyword' },
+        namespace: { type: 'keyword' },
+        mod: { type: 'keyword' },
+        svc: { type: 'keyword' },
+        version: { type: 'keyword' },
+        userId: { type: 'keyword' },
+        sessionId: { type: 'keyword' },
+        traceId: { type: 'keyword' },
+        apiKeyId: { type: 'keyword' },
+        tenantId: { type: 'keyword' },
+        indexed: { type: 'boolean' },
+        metadata: {
+          type: 'object',
+          dynamic: true,
+        },
+      };
+
       if (!exists) {
         // 如果索引不存在，尝试创建
         // 如果创建失败，可能是因为索引已经存在（竞态条件），忽略该错误
@@ -60,31 +97,7 @@ export class ElasticsearchClient {
               'index.mapping.total_fields.limit': 2000,
             },
             mappings: {
-              properties: {
-                id: { type: 'keyword' },
-                level: { type: 'keyword' },
-                message: {
-                  type: 'text',
-                  analyzer: 'standard',
-                  fields: {
-                    keyword: { type: 'keyword', ignore_above: 256 },
-                  },
-                },
-                timestamp: { type: 'date' },
-                receivedAt: { type: 'date' },
-                service: { type: 'keyword' },
-                source: { type: 'keyword' },
-                userId: { type: 'keyword' },
-                sessionId: { type: 'keyword' },
-                traceId: { type: 'keyword' },
-                apiKeyId: { type: 'keyword' },
-                tenantId: { type: 'keyword' },
-                indexed: { type: 'boolean' },
-                metadata: {
-                  type: 'object',
-                  dynamic: true,
-                },
-              },
+              properties,
             },
           });
           console.log(`索引 ${this.indexName} 创建成功`);
@@ -95,16 +108,43 @@ export class ElasticsearchClient {
             throw createError;
           }
         }
+      } else {
+        const appendOnlyProperties = await this.getAppendOnlyProperties(properties);
+        if (Object.keys(appendOnlyProperties).length > 0) {
+          await this.client.indices.putMapping({
+            index: this.indexName,
+            properties: appendOnlyProperties,
+          });
+        }
       }
+      this.indexInitialized = true;
     } catch (error) {
       console.error('初始化ES索引失败:', error);
       throw error;
     }
   }
 
+  private async getAppendOnlyProperties(
+    desiredProperties: Record<string, MappingProperty>,
+  ): Promise<Record<string, MappingProperty>> {
+    const mapping = await this.client.indices.getMapping({ index: this.indexName });
+    const indexMapping = mapping[this.indexName];
+    const existingProperties = indexMapping?.mappings?.properties || {};
+
+    return Object.fromEntries(
+      Object.entries(desiredProperties).filter(([field]) => !Object.prototype.hasOwnProperty.call(existingProperties, field)),
+    );
+  }
+
+  private async ensureIndexInitialized(): Promise<void> {
+    if (this.indexInitialized) return;
+    await this.initializeIndex();
+  }
+
   // 批量存储日志
   async bulkIndex(logs: StoredLog[]): Promise<void> {
     if (logs.length === 0) return;
+    await this.ensureIndexInitialized();
 
     const body = logs.flatMap((log) => [{ index: { _index: this.indexName, _id: log.id } }, log]);
 
@@ -126,6 +166,7 @@ export class ElasticsearchClient {
 
   // 搜索日志
   async searchLogs(params: LogSearchParams): Promise<{ logs: StoredLog[]; total: number }> {
+    await this.ensureIndexInitialized();
     const query = this.buildSearchQuery(params);
     const from = ((params.page || 1) - 1) * (params.limit || 50);
     const size = params.limit || 50;
@@ -158,12 +199,48 @@ export class ElasticsearchClient {
     }
   }
 
+  private resolveAggregationField(field?: string): string {
+    const targetField = field || 'level';
+    const keywordCompatibleFields = new Set([
+      'id',
+      'level',
+      'service',
+      'source',
+      'hostname',
+      'containerId',
+      'originType',
+      'visibility',
+      'nodeID',
+      'namespace',
+      'mod',
+      'svc',
+      'version',
+      'userId',
+      'sessionId',
+      'traceId',
+      'apiKeyId',
+      'tenantId',
+      'message'
+    ]);
+
+    if (targetField.includes('.')) return targetField;
+    if (keywordCompatibleFields.has(targetField)) return `${targetField}.keyword`;
+
+    return targetField;
+  }
+
   // 获取日志统计
   async getLogStats(
     params: LogStatsParams,
     tenantId: string,
     userId?: string,
-  ): Promise<{ total: number; breakdown: Record<string, number> }> {
+  ): Promise<{
+    total: number;
+    breakdown: Record<string, number>;
+    levelBreakdown: Record<string, number>;
+    serviceBreakdown: Record<string, number>;
+  }> {
+    await this.ensureIndexInitialized();
     const query = this.buildStatsQuery(params);
     query.query.bool.must.push({ term: { tenantId: tenantId } });
     if (userId) query.query.bool.must.push({ term: { userId: userId } });
@@ -176,8 +253,20 @@ export class ElasticsearchClient {
         aggs: {
           breakdown: {
             terms: {
-              field: params.groupBy || 'level',
+              field: this.resolveAggregationField(params.groupBy || 'level'),
               size: 100,
+            },
+          },
+          levels: {
+            terms: {
+              field: this.resolveAggregationField('level'),
+              size: 20,
+            },
+          },
+          services: {
+            terms: {
+              field: this.resolveAggregationField('service'),
+              size: 10,
             },
           },
         },
@@ -195,7 +284,19 @@ export class ElasticsearchClient {
         breakdown[bucket.key] = bucket.doc_count;
       });
 
-      return { total, breakdown };
+      const levelBreakdown: Record<string, number> = {};
+      const levelBuckets = (response.aggregations?.levels as any)?.buckets || [];
+      levelBuckets.forEach((bucket: any) => {
+        levelBreakdown[bucket.key] = bucket.doc_count;
+      });
+
+      const serviceBreakdown: Record<string, number> = {};
+      const serviceBuckets = (response.aggregations?.services as any)?.buckets || [];
+      serviceBuckets.forEach((bucket: any) => {
+        serviceBreakdown[bucket.key] = bucket.doc_count;
+      });
+
+      return { total, breakdown, levelBreakdown, serviceBreakdown };
     } catch (error) {
       console.error('获取统计失败:', error);
       throw error;
@@ -204,6 +305,7 @@ export class ElasticsearchClient {
 
   // 导出日志
   async exportLogs(params: LogExportParams): Promise<StoredLog[]> {
+    await this.ensureIndexInitialized();
     const query = this.buildExportQuery(params);
     const size = Math.min(params.limit || 1000, 10000);
 
@@ -395,9 +497,10 @@ export class ElasticsearchClient {
         size: 0,
         aggs: {
           services: {
-            terms: { field: 'service', size: limit },
+            terms: { field: this.resolveAggregationField('service'), size: limit },
             aggs: {
               errors: { filter: { terms: { level: ['error', 'fatal'] } } },
+              avg_duration: { avg: { field: 'metadata.duration' } },
             },
           },
         },
@@ -412,6 +515,7 @@ export class ElasticsearchClient {
           logCount,
           errorCount,
           errorRate: logCount > 0 ? (errorCount / logCount) * 100 : 0,
+          avgResponseTime: Number(b.avg_duration?.value || 0),
         };
       });
     } catch (error) {
@@ -439,7 +543,7 @@ export class ElasticsearchClient {
         query: { bool: { must } },
         size: 0,
         aggs: {
-          levels: { terms: { field: 'level', size: 10 } },
+          levels: { terms: { field: this.resolveAggregationField('level'), size: 10 } },
         },
       });
 
@@ -477,7 +581,7 @@ export class ElasticsearchClient {
         query: { bool: { must } },
         size: 0,
         aggs: {
-          sources: { terms: { field: 'source', size: limit } },
+          sources: { terms: { field: this.resolveAggregationField('source'), size: limit } },
         },
       });
 
@@ -558,6 +662,22 @@ export class ElasticsearchClient {
     if (params.source) {
       must.push({ term: { source: params.source } });
     }
+    if (params.originType) {
+      must.push({ term: { originType: params.originType } });
+    }
+    if (params.visibility) {
+      must.push({ term: { visibility: params.visibility } });
+    }
+    if (params.hostname) {
+      must.push({ term: { hostname: params.hostname } });
+    }
+    if (params.filters) {
+      Object.entries(params.filters).forEach(([field, value]) => {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          must.push({ term: { [field]: value } });
+        }
+      });
+    }
 
     // 时间范围过滤
     if (params.startTime || params.endTime) {
@@ -577,27 +697,57 @@ export class ElasticsearchClient {
     if (params.service) {
       must.push({ term: { service: params.service } });
     }
+    if (params.query) {
+      must.push({
+        multi_match: {
+          query: params.query,
+          fields: ['message^2', 'service', 'metadata.*'],
+          type: 'best_fields',
+          fuzziness: 'AUTO',
+        },
+      });
+    }
     if (params.level) {
       must.push({ term: { level: params.level } });
     }
     if (params.source) {
       must.push({ term: { source: params.source } });
     }
+    if (params.originType) {
+      must.push({ term: { originType: params.originType } });
+    }
+    if (params.visibility) {
+      must.push({ term: { visibility: params.visibility } });
+    }
     if (params.environment) {
       must.push({ term: { environment: params.environment } });
+    }
+    if (params.hostname) {
+      must.push({ term: { hostname: params.hostname } });
+    }
+    if (params.filters) {
+      Object.entries(params.filters).forEach(([field, value]) => {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          must.push({ term: { [field]: value } });
+        }
+      });
     }
     if (params.tags && params.tags.length > 0) {
       must.push({ terms: { tags: params.tags } });
     }
 
     // 时间范围
-    const timeRange = this.parseTimeRange(params.timeRange || '24h');
+    const timeRange = params.startTime || params.endTime ? null : this.parseTimeRange(params.timeRange || '24h');
+    const timestampRange: any = {};
+    if (params.startTime) timestampRange.gte = params.startTime;
+    if (params.endTime) timestampRange.lte = params.endTime;
+    if (timeRange) {
+      timestampRange.gte = timeRange.start;
+      timestampRange.lte = timeRange.end;
+    }
     must.push({
       range: {
-        timestamp: {
-          gte: timeRange.start,
-          lte: timeRange.end,
-        },
+        timestamp: timestampRange,
       },
     });
 

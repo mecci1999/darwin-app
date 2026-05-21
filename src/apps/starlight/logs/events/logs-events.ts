@@ -3,6 +3,7 @@
  * 处理日志相关的事件，包括原始日志处理、配额管理、租户管理等
  */
 import { LogsState } from '../types';
+import { broadcastToStreams } from '../actions/stream';
 
 /**
  * 日志事件处理器类
@@ -111,6 +112,35 @@ export class LogsEventHandlers {
     }
   }
 
+  async handleLogIngested(ctx: any) {
+    try {
+      const { tenantId, log } = ctx.params;
+      if (log) {
+        broadcastToStreams(log, tenantId);
+      }
+    } catch (error) {
+      ctx.service.logger.error('Failed to handle logs.ingested event:', error);
+    }
+  }
+
+  async handleLogBatchIngested(ctx: any) {
+    try {
+      const { tenantId, logs = [] } = ctx.params;
+      logs.forEach((log: any) => broadcastToStreams(log, tenantId));
+    } catch (error) {
+      ctx.service.logger.error('Failed to handle logs.batch.ingested event:', error);
+    }
+  }
+
+  async handleLogStreamIngested(ctx: any) {
+    try {
+      const { tenantId, logs = [] } = ctx.params;
+      logs.forEach((log: any) => broadcastToStreams(log, tenantId));
+    } catch (error) {
+      ctx.service.logger.error('Failed to handle logs.stream.ingested event:', error);
+    }
+  }
+
   /**
    * 获取事件处理器映射
    */
@@ -127,6 +157,15 @@ export class LogsEventHandlers {
       },
       'logs.processed': {
         handler: this.handleLogsProcessed.bind(this),
+      },
+      'logs.ingested': {
+        handler: this.handleLogIngested.bind(this),
+      },
+      'logs.batch.ingested': {
+        handler: this.handleLogBatchIngested.bind(this),
+      },
+      'logs.stream.ingested': {
+        handler: this.handleLogStreamIngested.bind(this),
       },
     };
   }

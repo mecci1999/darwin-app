@@ -33,9 +33,10 @@ export default function (sequelize: Sequelize) {
           key: 'user_id',
         },
         onDelete: 'CASCADE',
+        field: 'user_id',
       },
-      deviceInfo: { type: DataTypes.JSON },
-      lastLoginAt: { type: DataTypes.DATE },
+      deviceInfo: { type: DataTypes.JSON, field: 'device_info' },
+      lastLoginAt: { type: DataTypes.DATE, field: 'last_login_at' },
     },
     {
       sequelize,

@@ -88,6 +88,7 @@ export function validateRateLimit(rateLimit: any): number {
 export function validateAppKeyGenerateParams(params: any) {
   return {
     name: validateAppKeyName(params.name),
+    userId: params.userId,
     description: validateAppKeyDescription(params.description),
     permissions: validatePermissions(params.permissions || ['read', 'write']),
     expiresAt: validateExpiresAt(params.expiresAt),
@@ -99,10 +100,12 @@ export function validateAppKeyGenerateParams(params: any) {
  * 通用参数验证中间件
  */
 export function createValidator(validationFn: (params: any) => any) {
-  return (ctx: Context, next: () => Promise<any>) => {
+  return async (ctx: Context, next?: () => Promise<any>) => {
     try {
       ctx.params = validationFn(ctx.params);
-      return next();
+      if (next && typeof next === 'function') {
+        return await next();
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       ctx.service?.logger?.error('Parameter validation failed:', error);

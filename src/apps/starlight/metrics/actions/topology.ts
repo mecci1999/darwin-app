@@ -1,248 +1,268 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { InfluxDBHandler } from '../utils/influxdb-handler';
+import {
+  assertSystemScopeAllowed,
+  filterServicesByScope,
+  isDarwinSystemService,
+  normalizeMetricsScope,
+} from '../utils/system-telemetry';
 
-const topology = (star: Starlight) => {
-  return {
-    // 获取服务拓扑图
-    'v1.topology': {
-      metadata: {
-        auth: true,
+const manualLayerCache = new Map<string, Record<string, number>>();
+
+const getManualLayers = async (star: Starlight, userId: string | undefined) => {
+  const key = `topology:manualLayer:${userId || 'system'}`;
+  if (star.cacher?.get) {
+    try {
+      const cached = await star.cacher.get(key);
+      if (cached) return cached as Record<string, number>;
+    } catch (e) {}
+  }
+  return manualLayerCache.get(key) || {};
+};
+
+const setManualLayers = async (
+  star: Starlight,
+  userId: string | undefined,
+  layers: Record<string, number>,
+) => {
+  const key = `topology:manualLayer:${userId || 'system'}`;
+  manualLayerCache.set(key, layers);
+  if (star.cacher?.set) {
+    try {
+      await star.cacher.set(key, layers);
+    } catch (e) {}
+  }
+};
+
+const topology = (star: Starlight) => ({
+  // 获取服务拓扑图
+  // 合并 v1.services 和 v1.instances 接口，减少 Action 数量
+  'v1.topology': {
+    metadata: {
+      auth: true,
+    },
+    params: {
+      type: {
+        type: 'string',
+        optional: true,
+        default: 'graph',
+        enum: ['graph', 'services', 'instances', 'manual'],
       },
-      params: {
-        timeRange: { type: 'string', optional: true, default: '-1h' },
-      },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
+      // graph params
+      timeRange: { type: 'string', optional: true, default: '-1h' },
+      // services params
+      page: { type: 'number', optional: true, default: 1 },
+      pageSize: { type: 'number', optional: true, default: 10 },
+      status: { type: 'string', optional: true },
+      keyword: { type: 'string', optional: true },
+      // instances params
+      serviceId: { type: 'string', optional: true },
+      // manual layer params
+      manualLayers: { type: 'object', optional: true },
+      scope: { type: 'string', optional: true, default: 'tenant' },
+    },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      try {
+        const { type } = ctx.params;
         try {
-          const { timeRange } = ctx.params;
-
-          // 从 InfluxDB 获取真实拓扑数据
-          const topologyData = await InfluxDBHandler.getTopologyData(star, timeRange);
-
-          // 如果没有数据，且环境为开发环境，返回一些默认数据以便展示
-          if (topologyData.nodes.length === 0 && process.env.NODE_ENV === 'development') {
-            // 保留部分 Mock 数据作为冷启动展示
-            const nodes = [
-              { id: 'svc-gateway', name: 'api-gateway', status: 'running', type: 'service' },
-              { id: 'svc-auth', name: 'auth-service', status: 'running', type: 'service' },
-              { id: 'svc-user', name: 'user-service', status: 'running', type: 'service' },
-              { id: 'db-mysql', name: 'MySQL', status: 'running', type: 'database' },
-            ];
-            const edges = [
-              { source: 'svc-gateway', target: 'svc-auth', value: 10 },
-              { source: 'svc-gateway', target: 'svc-user', value: 5 },
-              { source: 'svc-user', target: 'db-mysql', value: 15 },
-            ];
-            return {
-              status: 200,
-              data: {
-                code: HttpResponseCode.Success,
-                content: { nodes, edges },
-                message: '获取服务拓扑成功 (Dev Default)',
-                success: true,
-              },
-            };
-          }
-
+          assertSystemScopeAllowed(ctx);
+        } catch {
           return {
-            status: 200,
+            status: 403,
             data: {
-              code: HttpResponseCode.Success,
-              content: topologyData,
-              message: '获取服务拓扑成功',
-              success: true,
-            },
-          };
-        } catch (error) {
-          star.logger?.error('Get topology failed:', error);
-          return {
-            status: 500,
-            data: {
-              code: HttpResponseCode.ServiceActionFaild,
+              code: HttpResponseCode.NoPermissionError,
               content: null,
-              message: '获取服务拓扑失败',
+              message: 'System metrics are admin only',
               success: false,
             },
           };
         }
-      },
-    },
+        const scope = normalizeMetricsScope(ctx.params?.scope);
 
-    // 获取服务列表
-    'v1.services': {
-      metadata: {
-        auth: true,
-      },
-      params: {
-        page: { type: 'number', optional: true, default: 1 },
-        pageSize: { type: 'number', optional: true, default: 10 },
-        status: { type: 'string', optional: true },
-        keyword: { type: 'string', optional: true },
-      },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
-        try {
-          const { page, pageSize, status, keyword } = ctx.params;
+        star.logger?.info('metrics.topology.request', {
+          type,
+          timeRange: ctx.params?.timeRange,
+          serviceId: ctx.params?.serviceId,
+          userId: (ctx.meta as any)?.user?.userId,
+          isAdmin: Boolean((ctx.meta as any)?.user?.isAdmin || (ctx.meta as any)?.adminMetrics),
+          scope,
+        });
 
-          // 模拟服务数据
-          let services = [
-            {
-              id: 'svc-gateway',
-              name: 'api-gateway',
-              status: 'running',
-              version: 'v2.0.1',
-              instances: 4,
-              health: 'healthy',
-              lastUpdate: new Date().toISOString(),
-            },
-            {
-              id: 'svc-auth',
-              name: 'auth-service',
-              status: 'running',
-              version: 'v1.8.4',
-              instances: 2,
-              health: 'healthy',
-              lastUpdate: new Date(Date.now() - 60000).toISOString(),
-            },
-            {
-              id: 'svc-user',
-              name: 'user-service',
-              status: 'running',
-              version: 'v1.2.3',
-              instances: 3,
-              health: 'healthy',
-              lastUpdate: new Date(Date.now() - 300000).toISOString(),
-            },
-            {
-              id: 'svc-order',
-              name: 'order-service',
-              status: 'running',
-              version: 'v2.1.0',
-              instances: 2,
-              health: 'healthy',
-              lastUpdate: new Date(Date.now() - 480000).toISOString(),
-            },
-            {
-              id: 'svc-payment',
-              name: 'payment-service',
-              status: 'error',
-              version: 'v1.5.2',
-              instances: 1,
-              health: 'unhealthy',
-              lastUpdate: new Date(Date.now() - 720000).toISOString(),
-            },
-            {
-              id: 'svc-product',
-              name: 'product-service',
-              status: 'running',
-              version: 'v1.1.0',
-              instances: 2,
-              health: 'healthy',
-              lastUpdate: new Date(Date.now() - 900000).toISOString(),
-            },
-            {
-              id: 'svc-inventory',
-              name: 'inventory-service',
-              status: 'running',
-              version: 'v1.0.9',
-              instances: 1,
-              health: 'warning',
-              lastUpdate: new Date(Date.now() - 120000).toISOString(),
-            },
-            {
-              id: 'svc-notify',
-              name: 'notify-service',
-              status: 'stopped',
-              version: 'v1.0.0',
-              instances: 0,
-              health: 'unknown',
-              lastUpdate: new Date(Date.now() - 86400000).toISOString(),
-            },
-          ];
-
-          if (status && status !== 'all') {
-            services = services.filter((s) => s.status === status);
-          }
-
-          if (keyword) {
-            services = services.filter((s) => s.name.includes(keyword));
-          }
-
-          const total = services.length;
-          const start = (page - 1) * pageSize;
-          const list = services.slice(start, start + pageSize);
-
+        if (type === 'services') {
+          const content = await (this as any).getServicesList({ ...(ctx.params || {}), scope });
           return {
             status: 200,
             data: {
               code: HttpResponseCode.Success,
-              content: { services: list, total, page },
+              content,
               message: '获取服务列表成功',
               success: true,
             },
           };
-        } catch (error) {
-          star.logger?.error('Get services failed:', error);
-          return {
-            status: 500,
-            data: {
-              code: HttpResponseCode.ServiceActionFaild,
-              content: null,
-              message: '获取服务列表失败',
-              success: false,
-            },
-          };
         }
-      },
-    },
-
-    // 获取服务实例
-    'v1.instances': {
-      metadata: {
-        auth: true,
-      },
-      params: {
-        serviceId: { type: 'string', required: true },
-      },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
-        try {
-          const { serviceId } = ctx.params;
-
-          // 模拟实例数据
-          const count = Math.floor(Math.random() * 3) + 1;
-          const instances = Array.from({ length: count }).map((_, i) => ({
-            id: `${serviceId}-${String(i + 1).padStart(3, '0')}`,
-            serviceId,
-            node: `node-${String(i + 1).padStart(2, '0')}`,
-            status: Math.random() > 0.8 ? 'error' : 'running',
-            cpu: Math.floor(Math.random() * 90) + 5,
-            memory: Math.floor(Math.random() * 80) + 10,
-            startTime: new Date(Date.now() - Math.floor(Math.random() * 86400000)).toISOString(),
-          }));
-
+        if (type === 'instances') {
+          const content = await (this as any).getInstancesList({ ...(ctx.params || {}), scope });
           return {
             status: 200,
             data: {
               code: HttpResponseCode.Success,
-              content: instances,
-              message: '获取服务实例成功',
+              content,
+              message: '获取实例列表成功',
               success: true,
             },
           };
-        } catch (error) {
-          star.logger?.error('Get instances failed:', error);
+        }
+
+        if (type === 'manual') {
+          const manualLayers = (ctx.params?.manualLayers || {}) as Record<string, number>;
+          const userId = (ctx.meta as any)?.user?.userId;
+          await setManualLayers(star, userId, manualLayers);
           return {
-            status: 500,
+            status: 200,
             data: {
-              code: HttpResponseCode.ServiceActionFaild,
-              content: null,
-              message: '获取服务实例失败',
-              success: false,
+              code: HttpResponseCode.Success,
+              content: { manualLayers },
+              message: '更新拓扑层级成功',
+              success: true,
             },
           };
         }
-      },
+
+        // Default: graph
+        const { timeRange } = ctx.params;
+
+        // 从 InfluxDB 获取真实拓扑数据
+        const topologyData = await InfluxDBHandler.getTopologyData(star, timeRange);
+        const isAdmin = Boolean(
+          (ctx.meta as any)?.user?.isAdmin || (ctx.meta as any)?.adminMetrics,
+        );
+        const userId = (ctx.meta as any)?.user?.userId;
+        const manualLayers = await getManualLayers(star, userId);
+        const filteredNodes = (topologyData?.nodes || []).filter((node: any) => {
+          const isSystemNode = isDarwinSystemService(node?.id) || isDarwinSystemService(node?.name);
+          return scope === 'system' ? isSystemNode : !isSystemNode;
+        });
+        const allowedNodeIds = new Set(
+          filteredNodes.map((node: any) => String(node.id || node.name)),
+        );
+        const filteredEdges = (topologyData?.edges || []).filter((edge: any) => {
+          const from = String(edge?.from ?? edge?.source ?? '');
+          const to = String(edge?.to ?? edge?.target ?? '');
+          return allowedNodeIds.has(from) && allowedNodeIds.has(to);
+        });
+
+        star.logger?.info('metrics.topology.result', {
+          nodes: filteredNodes.length,
+          edges: filteredEdges.length,
+          isAdmin,
+          scope,
+          timeRange,
+        });
+
+        if (filteredNodes.length === 0) {
+          const registryNodes =
+            star.registry?.getNodeList({
+              onlyAvaiable: true,
+              withServices: true,
+            }) || [];
+          const serviceMap = new Map<string, any>();
+          registryNodes.forEach((node: any) => {
+            const services = Array.isArray(node.services)
+              ? node.services
+                  .map((s: any) => s?.name)
+                  .filter((name: string) => Boolean(name) && !String(name).startsWith('$'))
+              : [];
+            services.forEach((name: string) => {
+              const isSystemNode = isDarwinSystemService(name);
+              if ((scope === 'system' && !isSystemNode) || (scope === 'tenant' && isSystemNode)) {
+                return;
+              }
+              if (!serviceMap.has(name)) {
+                serviceMap.set(name, {
+                  id: name,
+                  name,
+                  status: 'unknown',
+                  type: undefined,
+                  layer: undefined,
+                  layerName: undefined,
+                  app: name,
+                  cluster: undefined,
+                  env: undefined,
+                  protocol: undefined,
+                  manualLayer: manualLayers?.[name],
+                });
+              }
+            });
+          });
+          const registryFallback = {
+            nodes: Array.from(serviceMap.values()),
+            edges: [],
+          };
+          if (registryFallback.nodes.length > 0) {
+            star.logger?.info('metrics.topology.registryFallback', {
+              nodes: registryFallback.nodes.length,
+              edges: 0,
+              isAdmin,
+            });
+            return {
+              status: 200,
+              data: {
+                code: HttpResponseCode.Success,
+                content: registryFallback,
+                message: '获取服务拓扑成功 (Registry Fallback)',
+                success: true,
+              },
+            };
+          }
+        }
+
+        if (filteredNodes.length === 0 && process.env.NODE_ENV === 'development' && !isAdmin) {
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: { nodes: [], edges: [] },
+              message: '当前暂无可展示的服务拓扑数据',
+              success: true,
+            },
+          };
+        }
+
+        if (manualLayers && filteredNodes.length) {
+          topologyData.nodes = filteredNodes.map((node: any) => ({
+            ...node,
+            manualLayer: manualLayers?.[node.id],
+          }));
+          topologyData.edges = filteredEdges;
+        } else {
+          topologyData.nodes = filteredNodes;
+          topologyData.edges = filteredEdges;
+        }
+
+        return {
+          status: 200,
+          data: {
+            code: HttpResponseCode.Success,
+            content: topologyData,
+            message: '获取服务拓扑成功',
+            success: true,
+          },
+        };
+      } catch (error) {
+        star.logger?.error('Get topology failed:', error);
+        return {
+          status: 500,
+          data: {
+            code: HttpResponseCode.ServiceActionFaild,
+            content: null,
+            message: '获取服务拓扑失败',
+            success: false,
+          },
+        };
+      }
     },
-  };
-};
+  },
+});
 
 export default topology;

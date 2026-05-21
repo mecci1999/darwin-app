@@ -4,6 +4,7 @@ import {
   deleteApiKey,
   findApiKeyById,
   findApiKeyByKey,
+  findApiKeyByPair,
   findApiKeysByUserId,
   getApiKeyStats,
   getApiKeyTotalStats,
@@ -35,8 +36,10 @@ const appkey = (star: Starlight) => {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const { name, description, permissions, expiresAt, rateLimit } = ctx.params;
-          const userId = (ctx.meta as any).user?.userId;
+          const userId = (ctx.meta as any).user.userId;
+          const tenantId = (ctx.meta as any).tenantId || 'default';
 
+          star.logger?.debug(`用户 ${userId} 尝试生成 AppKey`);
           if (!userId) {
             return {
               status: 401,
@@ -70,6 +73,16 @@ const appkey = (star: Starlight) => {
             };
           }
 
+          // 默认过期时间逻辑：如果是新生成的 Key 且未指定过期时间，默认为 15 天后过期（试用期）
+          // TODO: 后续应根据用户订阅计划动态设置（如 Pro 用户无过期时间）
+          let finalExpiresAt = expiresAt;
+          if (!finalExpiresAt) {
+            const trialDays = 15;
+            const expiryDate = new Date();
+            expiryDate.setDate(expiryDate.getDate() + trialDays);
+            finalExpiresAt = expiryDate;
+          }
+
           // 生成AppKey和Secret
           const appKey = `ak_${crypto.randomBytes(16).toString('hex')}`;
           const appSecret = crypto.randomBytes(32).toString('hex');
@@ -80,13 +93,14 @@ const appkey = (star: Starlight) => {
           // 保存到数据库
           const appKeyData = {
             id: keyId,
+            tenantId,
             userId,
             keyName: name,
             keyHash: crypto.createHash('sha256').update(appSecret).digest('hex'), // 存储hash
             keyPrefix: appKey.substring(0, 8), // 存储前缀用于快速查找
             permissions,
             rateLimitPerMinute: Math.ceil(rateLimit / 60), // 转换为每分钟限制
-            expiresAt: expiresAt,
+            expiresAt: finalExpiresAt,
             isActive: true,
             lastUsedAt: undefined,
           };
@@ -177,25 +191,31 @@ const appkey = (star: Starlight) => {
           const paginatedKeys = filteredKeys.slice(offset, offset + limit);
 
           // 不返回敏感信息
-          const safeAppKeys = paginatedKeys.map((key: any) => ({
-            id: key.id,
-            name: key.keyName,
-            description: '', // ApiKey模型中没有description字段
-            appKey: key.keyPrefix + '***', // 只显示前缀，隐藏完整key
-            permissions: key.permissions,
-            rateLimit: key.rateLimitPerMinute * 60, // 转换回每小时限制
-            isActive: key.isActive,
-            expiresAt: key.expiresAt,
-            createdAt: key.createdAt,
-            lastUsedAt: key.lastUsedAt,
-            usageCount: 0, // ApiKey模型中没有usageCount字段
-            status:
-              key.expiresAt && new Date(key.expiresAt) <= new Date()
-                ? 'expired'
-                : key.isActive
-                  ? 'active'
-                  : 'inactive',
-          }));
+          const safeAppKeys = await Promise.all(
+            paginatedKeys.map(async (key: any) => {
+              const usageStats = await getApiKeyTotalStats(key.id);
+
+              return {
+                id: key.id,
+                name: key.keyName,
+                description: '', // ApiKey模型中没有description字段
+                appKey: key.keyPrefix + '***', // 只显示前缀，隐藏完整key
+                permissions: key.permissions,
+                rateLimit: key.rateLimitPerMinute * 60, // 转换回每小时限制
+                isActive: key.isActive,
+                expiresAt: key.expiresAt,
+                createdAt: key.createdAt,
+                lastUsedAt: key.lastUsedAt,
+                usageCount: usageStats.totalRequests || 0,
+                status:
+                  key.expiresAt && new Date(key.expiresAt) <= new Date()
+                    ? 'expired'
+                    : key.isActive
+                      ? 'active'
+                      : 'inactive',
+              };
+            }),
+          );
 
           return {
             status: 200,
@@ -237,16 +257,17 @@ const appkey = (star: Starlight) => {
         try {
           const { appKey, appSecret } = ctx.params;
 
-          // 查找AppKey (需要先hash appSecret来查找)
+          const keyPrefix = String(appKey || '').slice(0, 8);
+
           const hashedSecret = crypto.createHash('sha256').update(appSecret).digest('hex');
-          const keyData = await findApiKeyByKey(hashedSecret);
+          const keyData = await findApiKeyByPair(hashedSecret, keyPrefix);
           if (!keyData) {
             return {
               status: 401,
               data: {
                 code: HttpResponseCode.AppKeyIsInvalid,
                 content: null,
-                message: 'AppKey不存在',
+                message: 'AppKey或AppSecret不匹配',
                 success: false,
               },
             };
@@ -339,8 +360,8 @@ const appkey = (star: Starlight) => {
                 permissions: keyData.permissions,
                 rateLimit: {
                   limit: keyData.rateLimitPerMinute * 60, // 转换为每小时限制
-                  remaining: keyData.rateLimitPerMinute * 60, // 暂时返回满额度
-                  resetTime: new Date(Date.now() + 60 * 60 * 1000), // 1小时后重置
+                  remaining: null,
+                  resetTime: null,
                 },
                 user: {
                   id: user.id,
@@ -362,104 +383,6 @@ const appkey = (star: Starlight) => {
               code: HttpResponseCode.ServiceActionFaild,
               content: null,
               message: 'AppKey验证失败',
-              success: false,
-            },
-          };
-        }
-      },
-    },
-
-    // 更新AppKey
-    'v1.appkey.update': {
-      metadata: {
-        auth: true,
-      },
-      params: {
-        keyId: { type: 'string', required: true },
-        name: { type: 'string', optional: true },
-        description: { type: 'string', optional: true },
-        permissions: { type: 'array', optional: true },
-        rateLimit: { type: 'number', optional: true },
-        isActive: { type: 'boolean', optional: true },
-      },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
-        try {
-          const { keyId, name, description, permissions, rateLimit, isActive } = ctx.params;
-          const userId = (ctx.meta as any).user?.userId;
-
-          if (!userId) {
-            return {
-              status: 401,
-              data: {
-                code: HttpResponseCode.UserNotLoginError,
-                content: null,
-                message: '用户未认证',
-                success: false,
-              },
-            };
-          }
-
-          // 检查AppKey是否属于当前用户
-          const keyData = await findApiKeyById(keyId);
-          if (!keyData || keyData.userId !== userId) {
-            return {
-              status: 404,
-              data: {
-                code: HttpResponseCode.ParamsError,
-                content: null,
-                message: 'AppKey不存在或无权限',
-                success: false,
-              },
-            };
-          }
-
-          // 构建更新数据
-          const updateData: any = {};
-
-          if (name !== undefined) updateData.keyName = name;
-          // description字段在ApiKey模型中不存在，跳过
-          if (permissions !== undefined) updateData.permissions = permissions;
-          if (rateLimit !== undefined) updateData.rateLimitPerMinute = Math.ceil(rateLimit / 60);
-          if (isActive !== undefined) updateData.isActive = isActive;
-
-          // 更新AppKey
-          await updateApiKeyStatus(
-            keyId,
-            updateData.isActive !== undefined ? updateData.isActive : keyData.isActive,
-          );
-          // 注意：当前API只支持更新状态，其他字段更新需要扩展API
-
-          // 记录操作日志 (暂时注释，需要实现日志系统)
-          // await logUserAction({
-          //   userId,
-          //   action: 'appkey.update',
-          //   details: {
-          //     keyId,
-          //     changes: updateData,
-          //   },
-          // });
-
-          return {
-            status: 200,
-            data: {
-              code: HttpResponseCode.Success,
-              content: {
-                keyId,
-                updated: Object.keys(updateData).filter((key) => key !== 'updatedAt'),
-                updatedAt: updateData.updatedAt,
-              },
-              message: 'AppKey更新成功',
-              success: true,
-            },
-          };
-        } catch (error) {
-          star.logger?.error('Update AppKey failed:', error);
-          return {
-            status: 500,
-            data: {
-              code: HttpResponseCode.ServiceActionFaild,
-              content: null,
-              message: 'AppKey更新失败',
               success: false,
             },
           };
@@ -546,18 +469,12 @@ const appkey = (star: Starlight) => {
       },
     },
 
-    // 获取AppKey使用统计
-    'v1.appkey.stats': {
+    'v1.appkey.ingestionStatus': {
       metadata: {
         auth: true,
       },
-      params: {
-        keyId: { type: 'string', optional: true },
-        timeRange: { type: 'string', optional: true, default: '7d' }, // 1h, 1d, 7d, 30d
-      },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const { keyId, timeRange } = ctx.params;
           const userId = (ctx.meta as any).user?.userId;
 
           if (!userId) {
@@ -572,99 +489,47 @@ const appkey = (star: Starlight) => {
             };
           }
 
-          // 计算时间范围
-          const now = new Date();
-          let startDate: Date;
-          let endDate: Date = now;
-
-          switch (timeRange) {
-            case '1h':
-              startDate = new Date(now.getTime() - 60 * 60 * 1000);
-              break;
-            case '1d':
-              startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-              break;
-            case '30d':
-              startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-              break;
-            case '7d':
-            default:
-              startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-              break;
-          }
-
-          let stats;
-          if (keyId) {
-            // 获取特定AppKey的统计
-            const keyData = await findApiKeyById(keyId);
-            if (!keyData || keyData.userId !== userId) {
-              return {
-                status: 404,
-                data: {
-                  code: HttpResponseCode.ParamsError,
-                  content: null,
-                  message: 'AppKey不存在或无权限',
-                  success: false,
-                },
-              };
-            }
-            stats = await getApiKeyStats(
-              keyId,
-              startDate.toISOString().split('T')[0],
-              endDate.toISOString().split('T')[0],
-            );
-          } else {
-            // 获取用户所有AppKey的统计 (暂时使用第一个keyId，需要实现用户级别统计)
-            const userKeys = await findApiKeysByUserId(userId);
-            if (userKeys.length > 0) {
-              stats = await getApiKeyTotalStats(userKeys[0].id!.toString());
-            } else {
-              stats = { totalRequests: 0, daysActive: 0 };
-            }
-          }
+          const appKeys = await findApiKeysByUserId(userId);
+          const now = Date.now();
+          const activeKeys = appKeys.filter(
+            (key) => key.isActive && (!key.expiresAt || new Date(key.expiresAt).getTime() > now),
+          );
+          const expiredKeys = appKeys.filter(
+            (key) => key.expiresAt && new Date(key.expiresAt).getTime() <= now,
+          );
+          const inactiveKeys = appKeys.filter((key) => !key.isActive);
+          const lastActivity = [...appKeys]
+            .map((key) => key.lastUsedAt || key.createdAt)
+            .filter(Boolean)
+            .sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime())[0];
 
           return {
             status: 200,
             data: {
               code: HttpResponseCode.Success,
               content: {
-                timeRange,
-                stats,
-                generatedAt: new Date(),
+                totalKeys: appKeys.length,
+                activeKeys: activeKeys.length,
+                expiredKeys: expiredKeys.length,
+                inactiveKeys: inactiveKeys.length,
+                status: activeKeys.length > 0 ? 'connected' : 'pending',
+                lastActivityAt: lastActivity || null,
               },
-              message: '获取使用统计成功',
+              message: '获取接入状态成功',
               success: true,
             },
           };
         } catch (error) {
-          star.logger?.error('Get AppKey stats failed:', error);
+          star.logger?.error('Get ingestion status failed:', error);
           return {
             status: 500,
             data: {
               code: HttpResponseCode.ServiceActionFaild,
               content: null,
-              message: '获取使用统计失败',
+              message: '获取接入状态失败',
               success: false,
             },
           };
-        }
-      },
-    },
-
-    // 内部调用：获取用户AppKey数量
-    getUserApiKeysCount: {
-      visibility: 'public',
-      params: {
-        userId: { type: 'string', required: true },
-      },
-      async handler(ctx: Context) {
-        try {
-          const { userId } = ctx.params;
-          const allAppKeys = await findApiKeysByUserId(userId);
-          return allAppKeys.length;
-        } catch (error) {
-          star.logger?.error('Get user API keys count failed:', error);
-          return 0;
         }
       },
     },

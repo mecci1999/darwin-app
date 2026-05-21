@@ -1,9 +1,11 @@
 import batchIngest from './batch-ingest';
 import ingest from './ingest';
+import readModel from './read-model';
 import search from './search';
 import stats from './stats';
 import exportLogs from './export';
 import exceptionAnalysis from './exception-analysis';
+import captureDarwin from './capture-darwin';
 // import trends from './trends';
 // import reports from './reports';
 // import exportStatus from './export-status';
@@ -29,10 +31,12 @@ import stream from './stream';
 const logsAction = (star: Starlight) => {
   const ingestAction = ingest(star);
   const batchIngestAction = batchIngest(star);
+  const readModelAction = readModel(star);
   const searchAction = search(star);
   const statsAction = stats(star);
   const exportAction = exportLogs(star);
   const exceptionAnalysisAction = exceptionAnalysis(star);
+  const captureDarwinAction = captureDarwin(star);
   // const trendsAction = trends(star);
   // const reportsAction = reports(star);
   // const exportStatusAction = exportStatus(star);
@@ -54,10 +58,12 @@ const logsAction = (star: Starlight) => {
   return {
     ...ingestAction,
     ...batchIngestAction,
+    ...readModelAction,
     ...searchAction,
     ...statsAction,
     ...exportAction,
     ...exceptionAnalysisAction,
+    ...captureDarwinAction,
     // ...trendsAction,
     // ...reportsAction,
     // ...exportStatusAction,

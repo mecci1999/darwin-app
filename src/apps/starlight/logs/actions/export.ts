@@ -4,7 +4,7 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { convertToCSV, convertToJSON } from '../utils/log-utils';
-import { validateLogStats } from '../validators';
+import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
 
 export default function exportLogs(star: Starlight) {
   return {
@@ -19,21 +19,37 @@ export default function exportLogs(star: Starlight) {
             format = 'json',
             query,
             service,
+            level,
+            source,
+            hostname,
+            containerId,
             startTime,
             endTime,
             limit = 1000,
-            tenantId,
-            apiKey,
+            originType,
           } = ctx.params;
 
-          // 验证导出参数
-          const validation = validateLogStats(ctx.params);
-          if (!validation.valid) {
+          const tenantId = resolveLogTenantId(ctx, originType);
+          const apiKey = (ctx.meta as any)?.apiKey?.id || ctx.params.apiKey;
+
+          if (isDarwinLogRequest(originType) && !isAdminContext(ctx)) {
+            return {
+              status: HttpStatusCode.FORBIDDEN,
+              data: {
+                content: null,
+                message: 'Only administrators can access Darwin logs',
+                code: HttpResponseCode.NoPermissionError,
+                success: false,
+              },
+            };
+          }
+
+          if (!tenantId) {
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
                 content: null,
-                message: validation.errors.join(', '),
+                message: 'tenantId is required',
                 code: HttpResponseCode.ParamsError,
                 success: false,
               },
@@ -50,12 +66,17 @@ export default function exportLogs(star: Starlight) {
             apiKey,
             query,
             service,
+            level,
+            source,
+            hostname,
+            containerId,
             startTime,
             endTime,
+            originType,
             limit: validatedLimit,
           });
 
-          if (!searchResult.success) {
+          if (!searchResult?.data?.success) {
             return {
               status: 400,
               data: {
@@ -126,6 +147,8 @@ export default function exportLogs(star: Starlight) {
                     searchQuery: query,
                   },
                 },
+                filename,
+                downloadUrl: `data:${contentType};charset=utf-8,${encodeURIComponent(exportData)}`,
               },
               message: '日志导出成功',
               code: HttpResponseCode.Success,

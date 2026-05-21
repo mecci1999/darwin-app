@@ -396,34 +396,19 @@ export async function getExportHistory(
       filter.userId = userId;
     }
 
-    // 简化实现 - 返回模拟历史记录
-    const mockExports = [
-      {
-        exportId: `export_${Date.now()}_mock1`,
-        status: 'completed',
-        format: 'json',
-        recordCount: 100,
-        fileSize: 1024,
-        createdAt: new Date(),
-        completedAt: new Date(),
-      },
-    ];
-
-    const total = mockExports.length;
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const paginatedExports = mockExports.slice(startIndex, endIndex);
+    const total = 0;
+    const paginatedExports: Array<{
+      exportId: string;
+      status: string;
+      format: string;
+      recordCount?: number;
+      fileSize?: number;
+      createdAt: Date;
+      completedAt?: Date;
+    }> = [];
 
     return {
-      exports: paginatedExports.map((exp) => ({
-        exportId: exp.exportId,
-        status: exp.status,
-        format: exp.format,
-        recordCount: exp.recordCount,
-        fileSize: exp.fileSize,
-        createdAt: exp.createdAt,
-        completedAt: exp.completedAt,
-      })),
+      exports: paginatedExports,
       total,
       page,
       pageSize,

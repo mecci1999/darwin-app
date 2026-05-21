@@ -37,6 +37,7 @@ export default function (sequelize: Sequelize) {
           key: 'user_id',
         },
         onDelete: 'CASCADE',
+        field: 'user_id',
       },
       email: {
         type: DataTypes.STRING(255),
@@ -45,18 +46,22 @@ export default function (sequelize: Sequelize) {
         validate: {
           isEmail: true,
         },
+        field: 'email',
       },
       passwordHash: {
         type: DataTypes.STRING(512),
         allowNull: false,
+        field: 'password_hash',
       },
       salt: {
         type: DataTypes.STRING(128),
         allowNull: false,
+        field: 'salt',
       },
       isVerified: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
+        field: 'is_verified',
       },
     },
     {

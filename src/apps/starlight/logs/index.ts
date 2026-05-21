@@ -3,16 +3,10 @@
  * SaaS化日志管理服务 - 核心数据处理服务
  * 支持多种日志格式：JSON、文本、Syslog、结构化日志
  */
-import dotenv from 'dotenv';
-import path from 'path';
-
-// 加载环境变量
-const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
-
 import { DatabaseService } from 'db/mysql';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
+import '../../../utils/loadEnv';
 import createActions from './actions';
 import {
   APP_NAME,
@@ -27,7 +21,14 @@ import {
 } from './constants';
 import { createEventHandlersManager } from './events';
 import { LogsState } from './types/index';
+import {
+  createDarwinLogCaptureMiddleware,
+  startDarwinLogCapture,
+  stopDarwinLogCapture,
+} from './utils/darwin-log-capture';
 import { elasticsearchManager } from './utils/elasticsearch-manager';
+
+// 加载环境变量
 
 // 服务状态管理
 const logsState: LogsState = {
@@ -68,7 +69,7 @@ function createLogsService() {
   // 创建Star实例
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `logs-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
       debug: true,
@@ -119,22 +120,19 @@ function createLogsService() {
       },
     },
     logger: true,
+    middlewares: [createDarwinLogCaptureMiddleware()],
     metrics: {
       enabled: true,
       reporter: {
-        type: 'Event',
-        options: {
-          eventName: 'logs.metrics.report',
-          interval: 5000,
-        },
-      },
+        type: 'Event'
+      }
     },
   }) as Starlight;
 
   // 创建日志处理服务
   const logsService = star.createService({
     name: APP_NAME,
-    version: '1',
+    // version: '1',
 
     // SaaS化配置
     settings: {
@@ -226,6 +224,7 @@ function createLogsService() {
           username: this.settings.elasticsearch.auth?.username,
         });
         logsState.elasticsearchConnected = true;
+        startDarwinLogCapture();
         this.logger.info('Elasticsearch connection initialized');
 
         // 启动处理器（示例实现）
@@ -256,6 +255,7 @@ function createLogsService() {
 
       try {
         // 停止定时任务
+        await stopDarwinLogCapture();
         if (logsState.timers.batchProcessor) {
           clearInterval(logsState.timers.batchProcessor);
         }

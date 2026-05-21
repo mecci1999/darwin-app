@@ -1,4 +1,5 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
+import { DataBaseTableNames } from 'typings';
 
 // API密钥使用统计模型接口
 interface ApiKeyStatsAttributes {
@@ -42,44 +43,52 @@ export default function (sequelize: Sequelize) {
       apiKeyId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'api_key_id',
       },
       date: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+        field: 'date',
       },
       requestCount: {
         type: DataTypes.BIGINT,
         allowNull: false,
         defaultValue: 0,
+        field: 'request_count',
       },
       errorCount: {
         type: DataTypes.BIGINT,
         allowNull: false,
         defaultValue: 0,
+        field: 'error_count',
       },
       dataVolumeBytes: {
         type: DataTypes.BIGINT,
         allowNull: false,
         defaultValue: 0,
+        field: 'data_volume_bytes',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
       sequelize,
       tableName: 'api_key_stats',
+      modelName: DataBaseTableNames.ApiKeyStats,
       timestamps: true,
       indexes: [
         {
-          fields: ['apiKeyId', 'date'],
+          fields: ['api_key_id', 'date'],
           unique: true,
         },
         {

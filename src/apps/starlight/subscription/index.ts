@@ -3,21 +3,22 @@
  * SaaS化订阅计划管理服务 - 支持多租户订阅管理
  * 功能：订阅计划管理、配额控制、计费集成、升级降级
  */
-import dotenv from 'dotenv';
-import path from 'path';
-
-// 加载环境变量
-const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
-
 import { DatabaseService } from 'db/mysql';
 import { Context, Star } from 'node-universe';
 import { Starlight } from 'typings';
+import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import '../../../utils/loadEnv';
 import createActions from './actions';
+import billingActions from './actions/billing';
 import { APP_NAME, KAFKA_CONFIG, REDIS_CONFIG } from './constants';
 import { createEvents } from './events';
 import { createMethods } from './methods';
 import { SubscriptionState } from './types';
+import { NotificationHandler } from './utils/notification-handler';
+import { PaymentHandler } from './utils/payment-handler';
+import { WebhookProcessor } from './utils/webhook-processor';
+
+// 加载环境变量
 
 // 服务状态管理
 const subscriptionState: SubscriptionState = {
@@ -70,7 +71,7 @@ function createSubscriptionService() {
   // 创建Star实例
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `subscription-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
       debug: true,
@@ -124,19 +125,16 @@ function createSubscriptionService() {
     metrics: {
       enabled: true,
       reporter: {
-        type: 'Event',
-        options: {
-          eventName: 'subscription.metrics',
-          interval: 10000,
-        },
+        type: 'Event'
       },
     },
   }) as Starlight;
+  registerDarwinLogForwarding(star);
 
   // 创建订阅管理服务
   const subscriptionService = star.createService({
     name: APP_NAME,
-    version: '1',
+    // version: '1',
 
     // SaaS化配置
     settings: {
@@ -213,8 +211,11 @@ function createSubscriptionService() {
       this.logger.info('Starting subscription service...');
 
       try {
-        // 启动处理器（示例实现）
         this.logger.info('Starting subscription processors...');
+
+        await PaymentHandler.initialize(star as any, subscriptionState);
+        await NotificationHandler.initialize(star as any, subscriptionState);
+        await WebhookProcessor.startProcessor(star as any);
 
         // 设置定时任务
         const billingInterval = setInterval(
@@ -243,6 +244,10 @@ function createSubscriptionService() {
           clearInterval(subscriptionState.timers.billingProcessor);
         }
 
+        await WebhookProcessor.stopProcessor(star as any);
+        await PaymentHandler.closeAll(star as any, subscriptionState);
+        await NotificationHandler.closeAll(star as any, subscriptionState);
+
         // 清理数据库连接
         if (star.db) {
           await star.db.cleanup();
@@ -264,14 +269,37 @@ function createSubscriptionService() {
     // SaaS化事件处理
     events: createEvents(star, subscriptionState),
 
-    // 方法（RPC接口）
-    methods: createMethods(star),
+    // 方法（仅绑定到服务实例，避免被 schema 计入数量上限）
 
     // Actions（API接口）
     actions: createActions(star),
   });
 
-  return { star, subscriptionService };
+  const subscriptionBillingService = star.createService({
+    name: 'subscription-billing',
+    settings: {
+      multiTenant: true,
+      tenantIdField: 'tenantId',
+    },
+    async created() {
+      this.logger.info('Subscription billing service created');
+      if (!star.db) {
+        const databaseService = new DatabaseService(star, 'subscription-billing');
+        star.db = databaseService;
+      }
+      const methods = createMethods(star as any);
+      Object.assign(this, methods);
+    },
+    async started() {
+      this.logger.info('Subscription billing service started successfully');
+    },
+    async stopped() {
+      this.logger.info('Subscription billing service stopped successfully');
+    },
+    actions: billingActions(star),
+  });
+
+  return { star, subscriptionService, subscriptionBillingService };
 }
 
 // 启动服务

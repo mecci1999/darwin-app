@@ -40,29 +40,35 @@ export default function (sequelize: Sequelize) {
       userId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'user_id',
       },
       reminderType: {
         type: DataTypes.ENUM('email', 'sms', 'push'),
         allowNull: false,
+        field: 'reminder_type',
       },
       daysBefore: {
         type: DataTypes.INTEGER,
         allowNull: false,
+        field: 'days_before',
       },
       isEnabled: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: true,
+        field: 'is_enabled',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -71,11 +77,11 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['userId', 'reminderType'],
+          fields: ['user_id', 'reminder_type'],
           unique: true,
         },
         {
-          fields: ['isEnabled'],
+          fields: ['is_enabled'],
         },
       ],
     },

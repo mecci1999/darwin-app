@@ -711,6 +711,8 @@ async function enhanceLogEntry(
           ? enhanced.timestamp
           : new Date(enhanced.timestamp).toISOString(),
       indexed: false,
+      originType: enhanced.originType || 'microservice',
+      visibility: enhanced.visibility || 'tenant',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       receivedAt: new Date().toISOString(),

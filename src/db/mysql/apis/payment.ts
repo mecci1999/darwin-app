@@ -42,6 +42,24 @@ export async function findPaymentOrderById(
   }
 }
 
+export async function findPaymentOrderByNumber(
+  orderNumber: string,
+): Promise<PaymentOrderAttributes | null> {
+  try {
+    const model = await mainConnection.getModel<PaymentOrderTable>(DataBaseTableNames.PaymentOrder);
+    if (!model) return null;
+
+    const order = await model.findOne({
+      where: { orderNo: orderNumber },
+    });
+
+    return order ? order.toJSON() : null;
+  } catch (error) {
+    console.log('findPaymentOrderByNumber error:', error);
+    return null;
+  }
+}
+
 /**
  * 根据用户ID查询支付订单列表
  */
@@ -75,10 +93,10 @@ export async function updatePaymentOrderStatus(
     const updateData: any = { status };
 
     if (transactionId) {
-      updateData.transactionId = transactionId;
+      updateData.providerOrderId = transactionId;
     }
 
-    if (status === 'completed') {
+    if (status === 'completed' || status === 'paid') {
       updateData.paidAt = new Date();
     }
 
@@ -87,6 +105,21 @@ export async function updatePaymentOrderStatus(
     });
   } catch (error) {
     console.log('updatePaymentOrderStatus error:', error);
+    throw error;
+  }
+}
+
+export async function updatePaymentOrder(
+  orderId: string,
+  updates: Partial<PaymentOrderAttributes>,
+): Promise<PaymentOrderAttributes | null> {
+  try {
+    const model = await mainConnection.getModel<PaymentOrderTable>(DataBaseTableNames.PaymentOrder);
+    await model.update(updates, { where: { id: orderId } });
+    const order = await model.findOne({ where: { id: orderId } });
+    return order ? order.toJSON() : null;
+  } catch (error) {
+    console.log('updatePaymentOrder error:', error);
     throw error;
   }
 }
@@ -166,7 +199,7 @@ export async function findRefundRequestsByOrderId(
     if (!model) return [];
 
     const refunds = await model.findAll({
-      where: { id: orderId },
+      where: { paymentOrderId: orderId },
       order: [['createdAt', 'DESC']],
     });
 
@@ -200,7 +233,7 @@ export async function updateRefundRequestStatus(
       updateData.processNote = processNote;
     }
 
-    if (status === 'completed') {
+    if (status === 'completed' || status === 'processed') {
       updateData.processedAt = new Date();
     }
 

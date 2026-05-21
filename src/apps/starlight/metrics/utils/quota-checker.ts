@@ -3,6 +3,8 @@
  */
 import { Star } from 'node-universe';
 import { QuotaWarningParams } from '../types';
+import { InfluxDBHandler } from './influxdb-handler';
+import { findApiKeysByUserId } from 'db/mysql/apis/apiKey';
 
 export class QuotaChecker {
   private static checkTimer: NodeJS.Timeout | null = null;
@@ -41,8 +43,17 @@ export class QuotaChecker {
    */
   private static async performQuotaCheck(star: Star): Promise<void> {
     try {
-      // 获取所有活跃用户的配额信息
-      const users = await star.call('subscription.1.getActiveUsers');
+      const starWithDb = star as Star & {
+        db?: {
+          user?: {
+            findAllUsers?: (params: { status: string }) => Promise<any[]>;
+          };
+        };
+      };
+      const users = await starWithDb.db?.user?.findAllUsers?.({ status: 'active' });
+      if (!Array.isArray(users) || users.length === 0) {
+        return;
+      }
 
       for (const user of users) {
         await this.checkUserQuotas(user, star);
@@ -57,11 +68,14 @@ export class QuotaChecker {
    */
   private static async checkUserQuotas(user: any, star: Star): Promise<void> {
     try {
-      const { userId, subscriptionPlan } = user;
+      const { userId } = user;
+
+      const subscription = await star.call('subscription.getUserSubscription', { userId });
+      const planName = subscription?.plan || 'free';
 
       // 获取用户的订阅计划限制
-      const planLimits = await star.call('subscription.1.getPlanLimits', {
-        planName: subscriptionPlan,
+      const planLimits = await star.call('subscription.v1.plans.limits', {
+        planName,
       });
 
       // 获取用户当前使用量
@@ -94,20 +108,21 @@ export class QuotaChecker {
       const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       // 获取指标使用量
-      const metricsUsage = await star.call('metrics.1.getUserMetricsCount', {
+      const metricsUsage = await InfluxDBHandler.getMetricsUsage(
         userId,
-        timeRanges: {
+        {
           hourly: '1h',
           daily: '24h',
-          monthly: '30d'
+          monthly: '30d',
         },
-      });
+        star,
+      );
 
       // 获取API密钥数量
-      const apiKeysCount = await star.call('metrics.1.getUserApiKeysCount', { userId });
+      const apiKeysCount = (await findApiKeysByUserId(userId)).length;
 
       // 获取存储使用量
-      const storageUsage = await star.call('metrics.1.getUserStorageUsage', { userId });
+      const storageUsage = await InfluxDBHandler.getStorageUsage(userId, star);
 
       return {
         metrics: metricsUsage,
@@ -222,9 +237,6 @@ export class QuotaChecker {
         timestamp: Date.now(),
       });
 
-      // 发送到订阅服务处理
-      await star.call('subscription.1.handleQuotaAlert', alertData);
-
       star.logger?.warn(
         `Quota ${severity} for user ${userId}: ${quotaType} usage ${usage}/${limit} (${Math.round((usage / limit) * 100)}%)`,
       );
@@ -250,14 +262,17 @@ export class QuotaChecker {
   }> {
     try {
       // 获取用户信息
-      const user = await star.call('user.1.getUserById', { userId });
+      const userResult = await star.call('user.v1.getUserInfo', { userId });
+      const user = userResult?.data?.content;
       if (!user) {
         throw new Error('User not found');
       }
 
       // 获取订阅计划限制
-      const planLimits = await star.call('subscription.1.getPlanLimits', {
-        planName: user.subscriptionPlan,
+      const subscription = await star.call('subscription.getUserSubscription', { userId });
+      const planName = subscription?.plan || 'free';
+      const planLimits = await star.call('subscription.v1.plans.limits', {
+        planName,
       });
 
       // 获取用户使用量

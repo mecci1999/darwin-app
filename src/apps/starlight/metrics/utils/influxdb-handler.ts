@@ -5,12 +5,17 @@ import { InfluxDB, Point } from '@influxdata/influxdb-client';
 import { Star } from 'node-universe';
 import { MAX_RETRIES } from '../constants';
 import { InfluxDBConfig, ProcessedMetricsData } from '../types';
+import { normalizeRssMemoryValue } from './memory-units';
 
 export class InfluxDBHandler {
   private static client: InfluxDB | null = null;
+
   private static writeApi: any = null;
+
   private static queryApi: any = null;
+
   private static bucket: string = '';
+
   private static org: string = '';
 
   /**
@@ -122,6 +127,10 @@ export class InfluxDBHandler {
     }
   }
 
+  static getBucketName(): string {
+    return this.bucket;
+  }
+
   /**
    * 获取用户指标使用量
    */
@@ -193,52 +202,361 @@ export class InfluxDBHandler {
     try {
       if (!this.queryApi) {
         // 如果未连接，返回空数据或之前的Mock数据作为降级
+        star.logger?.warn('InfluxDB query api not initialized for topology');
         return { nodes: [], edges: [] };
       }
 
-      // 查询服务调用关系
-      // 假设 metrics 中有 http_requests_total 指标，包含 service (source) 和 target_service 标签
+      const parseRangeSeconds = (range: string) => {
+        const value = range?.toString().trim() || '-1h';
+        const match = value.match(/-?(\d+)([smhdw])/);
+        if (!match) return 3600;
+        const amount = Number(match[1]);
+        const unit = match[2];
+        const multiplier =
+          unit === 's'
+            ? 1
+            : unit === 'm'
+              ? 60
+              : unit === 'h'
+                ? 3600
+                : unit === 'd'
+                  ? 86400
+                  : 604800;
+        return amount * multiplier;
+      };
+
+      const normalize = (value: any) => String(value || '').toLowerCase();
+
+      const inferProtocol = (row: any, source: string, target: string) => {
+        const protocol =
+          row.protocol || row['rpc.system'] || row['db.system'] || row['messaging.system'];
+        if (protocol) return String(protocol);
+        const sourceName = normalize(source);
+        const targetName = normalize(target);
+        if (
+          targetName.includes('mysql') ||
+          targetName.includes('postgres') ||
+          targetName.includes('mongo') ||
+          targetName.includes('influx')
+        ) {
+          return 'database';
+        }
+        if (
+          targetName.includes('kafka') ||
+          targetName.includes('mq') ||
+          targetName.includes('rabbit') ||
+          targetName.includes('rocket') ||
+          targetName.includes('pulsar')
+        ) {
+          return 'mq';
+        }
+        if (sourceName.includes('grpc') || targetName.includes('grpc')) return 'grpc';
+        return 'http';
+      };
+
+      const inferType = (name: string) => {
+        const lower = normalize(name);
+        if (
+          lower.includes('mysql') ||
+          lower.includes('postgres') ||
+          lower.includes('mongo') ||
+          lower.includes('influx') ||
+          lower.includes('clickhouse')
+        ) {
+          return 'database';
+        }
+        if (
+          lower.includes('kafka') ||
+          lower.includes('mq') ||
+          lower.includes('rabbit') ||
+          lower.includes('rocket') ||
+          lower.includes('pulsar') ||
+          lower.includes('redis')
+        ) {
+          return 'middleware';
+        }
+        if (lower.includes('gateway') || lower.includes('ingress') || lower.includes('edge')) {
+          return 'gateway';
+        }
+        return 'service';
+      };
+
+      const inferLayer = (name: string, type: string) => {
+        const lower = normalize(name);
+        if (
+          type === 'gateway' ||
+          lower.includes('gateway') ||
+          lower.includes('ingress') ||
+          lower.includes('edge')
+        ) {
+          return { layer: 0, layerName: 'gateway' };
+        }
+        if (
+          lower.includes('auth') ||
+          lower.includes('identity') ||
+          lower.includes('permission') ||
+          lower.includes('core')
+        ) {
+          return { layer: 1, layerName: 'core' };
+        }
+        if (type === 'middleware') {
+          return { layer: 3, layerName: 'middleware' };
+        }
+        if (type === 'database') {
+          return { layer: 4, layerName: 'storage' };
+        }
+        return { layer: 2, layerName: 'business' };
+      };
+
+      const inferApp = (name: string) => {
+        const parts = String(name || '').split('-');
+        return parts.length > 1 ? parts[0] : name;
+      };
+
+      const inferCluster = (row: any) =>
+        row.cluster || row['k8s.cluster.name'] || row['cluster.name'] || 'default';
+      const inferEnv = (row: any) =>
+        row.env || row.environment || row['deployment.environment'] || 'prod';
+
+      const groupColumns =
+        '["service", "serviceId", "source", "source_service", "target_service", "targetService", "destination_service", "target", "peer_service", "protocol", "rpc.system", "db.system", "messaging.system", "cluster", "env", "environment", "service.name", "peer.service", "service.id"]';
+      const timeRangeSeconds = parseRangeSeconds(timeRange);
+
       const fluxQuery = `
         from(bucket: "${this.bucket}")
           |> range(start: ${timeRange})
-          |> filter(fn: (r) => r["_measurement"] == "http_requests_total")
-          |> filter(fn: (r) => exists r.target_service)
-          |> group(columns: ["service", "target_service"])
+          |> filter(fn: (r) => r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+          |> filter(fn: (r) => exists r.target_service or exists r.targetService or exists r.destination_service or exists r.peer_service)
+          |> group(columns: ${groupColumns})
           |> count()
       `;
 
-      const rows = await this.queryMetrics(fluxQuery, star);
+      let rows = await this.queryMetrics(fluxQuery, star);
+      if (rows.length === 0) {
+        const fallbackQuery = `
+          from(bucket: "${this.bucket}")
+            |> range(start: ${timeRange})
+            |> filter(fn: (r) => exists r.target_service or exists r.targetService or exists r.destination_service or exists r.peer_service)
+            |> group(columns: ${groupColumns})
+            |> count()
+        `;
+        rows = await this.queryMetrics(fallbackQuery, star);
+      }
+      star.logger?.info('InfluxDB topology rows', {
+        timeRange,
+        rows: rows.length,
+      });
+
+      const errorQuery = `
+        from(bucket: "${this.bucket}")
+          |> range(start: ${timeRange})
+          |> filter(fn: (r) => r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+          |> filter(fn: (r) => (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
+          |> group(columns: ${groupColumns})
+          |> count()
+      `;
+
+      let errorRows: any[] = [];
+      try {
+        errorRows = await this.queryMetrics(errorQuery, star);
+      } catch (e) {
+        errorRows = [];
+      }
+
+      const p99Query = `
+        from(bucket: "${this.bucket}")
+          |> range(start: ${timeRange})
+          |> filter(fn: (r) => r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms")
+          |> filter(fn: (r) => r["_field"] == "duration" or r["_field"] == "value" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time")
+          |> group(columns: ${groupColumns})
+          |> quantile(q: 0.99, method: "exact_selector")
+      `;
+
+      const p50Query = `
+        from(bucket: "${this.bucket}")
+          |> range(start: ${timeRange})
+          |> filter(fn: (r) => r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms")
+          |> filter(fn: (r) => r["_field"] == "duration" or r["_field"] == "value" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time")
+          |> group(columns: ${groupColumns})
+          |> quantile(q: 0.5, method: "exact_selector")
+      `;
+
+      let p99Rows: any[] = [];
+      let p50Rows: any[] = [];
+      try {
+        p99Rows = await this.queryMetrics(p99Query, star);
+        p50Rows = await this.queryMetrics(p50Query, star);
+      } catch (e) {
+        p99Rows = [];
+        p50Rows = [];
+      }
+
+      const edgeKey = (source: string, target: string) => `${source}=>${target}`;
+
+      const errorMap = new Map<string, number>();
+      errorRows.forEach((row: any) => {
+        const sourceFallback = row.source_service || row['service.name'] || row['service.id'];
+        const targetFallback = row.target || row.peer_service || row['peer.service'];
+        const finalSource = row.service || row.serviceId || row.source || sourceFallback;
+        const finalTarget =
+          row.target_service || row.targetService || row.destination_service || targetFallback;
+        if (finalSource && finalTarget) {
+          const key = edgeKey(finalSource, finalTarget);
+          errorMap.set(key, (errorMap.get(key) || 0) + (Number(row._value) || 0));
+        }
+      });
+
+      const p99Map = new Map<string, number>();
+      p99Rows.forEach((row: any) => {
+        const sourceFallback = row.source_service || row['service.name'] || row['service.id'];
+        const targetFallback = row.target || row.peer_service || row['peer.service'];
+        const finalSource = row.service || row.serviceId || row.source || sourceFallback;
+        const finalTarget =
+          row.target_service || row.targetService || row.destination_service || targetFallback;
+        if (finalSource && finalTarget) {
+          p99Map.set(edgeKey(finalSource, finalTarget), Number(row._value) || 0);
+        }
+      });
+
+      const p50Map = new Map<string, number>();
+      p50Rows.forEach((row: any) => {
+        const sourceFallback = row.source_service || row['service.name'] || row['service.id'];
+        const targetFallback = row.target || row.peer_service || row['peer.service'];
+        const finalSource = row.service || row.serviceId || row.source || sourceFallback;
+        const finalTarget =
+          row.target_service || row.targetService || row.destination_service || targetFallback;
+        if (finalSource && finalTarget) {
+          p50Map.set(edgeKey(finalSource, finalTarget), Number(row._value) || 0);
+        }
+      });
 
       const nodesMap = new Map<string, any>();
-      const edges: any[] = [];
+      const edgesMap = new Map<string, any>();
 
       rows.forEach((row: any) => {
-        const source = row.service;
-        const target = row.target_service;
+        const sourceFallback = row.source_service || row['service.name'] || row['service.id'];
+        const targetFallback = row.target || row.peer_service || row['peer.service'];
+        const finalSource = row.service || row.serviceId || row.source || sourceFallback;
+        const finalTarget =
+          row.target_service || row.targetService || row.destination_service || targetFallback;
 
-        if (source && target) {
-          edges.push({ source, target, value: row._value || 1 });
+        if (finalSource && finalTarget) {
+          const key = edgeKey(finalSource, finalTarget);
+          const protocol = inferProtocol(row, finalSource, finalTarget);
+          const callType =
+            protocol === 'mq'
+              ? 'mq'
+              : protocol === 'database'
+                ? 'sync'
+                : row['messaging.system']
+                  ? 'async'
+                  : 'sync';
+          const count = (edgesMap.get(key)?.count || 0) + (Number(row._value) || 0);
 
-          if (!nodesMap.has(source)) {
-            nodesMap.set(source, { id: source, name: source, status: 'running', type: 'service' });
+          edgesMap.set(key, {
+            from: finalSource,
+            to: finalTarget,
+            protocol,
+            callType,
+            count,
+            app: inferApp(finalSource),
+            cluster: inferCluster(row),
+            env: inferEnv(row),
+          });
+
+          if (!nodesMap.has(finalSource)) {
+            const type = inferType(finalSource);
+            const layerInfo = inferLayer(finalSource, type);
+            nodesMap.set(finalSource, {
+              id: finalSource,
+              name: finalSource,
+              status: 'unknown',
+              type,
+              layer: layerInfo.layer,
+              layerName: layerInfo.layerName,
+              app: inferApp(finalSource),
+              cluster: inferCluster(row),
+              env: inferEnv(row),
+              protocol: inferProtocol(row, finalSource, finalTarget),
+            });
           }
-          if (!nodesMap.has(target)) {
-            // 尝试推断目标类型
-            let type = 'service';
-            if (target.includes('mysql') || target.includes('mongo') || target.includes('redis')) {
-              type = 'database';
-            } else if (target.includes('kafka') || target.includes('mq')) {
-              type = 'middleware';
-            }
-            nodesMap.set(target, { id: target, name: target, status: 'running', type });
+          if (!nodesMap.has(finalTarget)) {
+            const type = inferType(finalTarget);
+            const layerInfo = inferLayer(finalTarget, type);
+            nodesMap.set(finalTarget, {
+              id: finalTarget,
+              name: finalTarget,
+              status: 'unknown',
+              type,
+              layer: layerInfo.layer,
+              layerName: layerInfo.layerName,
+              app: inferApp(finalTarget),
+              cluster: inferCluster(row),
+              env: inferEnv(row),
+              protocol: inferProtocol(row, finalSource, finalTarget),
+            });
           }
         }
       });
 
-      return {
-        nodes: Array.from(nodesMap.values()),
+      const edges = Array.from(edgesMap.values()).map((edge) => {
+        const key = edgeKey(edge.from, edge.to);
+        const errorCount = errorMap.get(key) || 0;
+        const qps = timeRangeSeconds > 0 ? edge.count / timeRangeSeconds : edge.count;
+        const successRate = edge.count > 0 ? (edge.count - errorCount) / edge.count : 0;
+        const p99 = p99Map.get(key) || 0;
+        const p50 = p50Map.get(key) || 0;
+        const errorRate = edge.count > 0 ? errorCount / edge.count : 0;
+        let status = 'healthy';
+        if (edge.count <= 0) {
+          status = 'idle';
+        } else if (successRate < 0.95 || p99 > 1000) {
+          status = 'critical';
+        } else if (successRate < 0.99 || p99 > 500) {
+          status = 'warning';
+        }
+        return {
+          ...edge,
+          qps,
+          successRate,
+          errorRate,
+          p50,
+          p99,
+          status,
+          errorCodes: [],
+        };
+      });
+
+      const nodeStatus = new Map<string, string>();
+      edges.forEach((edge) => {
+        const current = nodeStatus.get(edge.from) || 'healthy';
+        const next =
+          edge.status === 'critical' ? 'critical' : edge.status === 'warning' ? 'warning' : current;
+        nodeStatus.set(edge.from, next);
+        const currentTo = nodeStatus.get(edge.to) || 'healthy';
+        const nextTo =
+          edge.status === 'critical'
+            ? 'critical'
+            : edge.status === 'warning'
+              ? 'warning'
+              : currentTo;
+        nodeStatus.set(edge.to, nextTo);
+      });
+
+      const nodes = Array.from(nodesMap.values()).map((node) => ({
+        ...node,
+        status: nodeStatus.get(node.id) || node.status || 'healthy',
+      }));
+
+      const result = {
+        nodes,
         edges,
       };
+      star.logger?.info('InfluxDB topology result', {
+        nodes: result.nodes.length,
+        edges: result.edges.length,
+      });
+      return result;
     } catch (error) {
       star.logger?.error('Failed to get topology data:', error);
       return { nodes: [], edges: [] };
@@ -255,7 +573,7 @@ export class InfluxDBHandler {
       }
 
       // 执行简单的健康检查查询
-      const fluxQuery = `buckets() |> limit(n: 1)`;
+      const fluxQuery = 'buckets() |> limit(n: 1)';
       await this.queryMetrics(fluxQuery, star);
 
       return true;
@@ -273,49 +591,96 @@ export class InfluxDBHandler {
       if (!this.queryApi) {
         return null;
       }
-
-      // 实际场景中，这里需要根据具体的指标名称构建 Flux 查询
-      // 这里假设使用标准的系统指标名称
-      const filter = serviceId ? `|> filter(fn: (r) => r["service"] == "${serviceId}")` : '';
-
-      // 示例查询：获取最近5分钟的平均CPU和内存使用率
-      // 注意：这取决于实际写入的 measurement 和 field 名称
-      const fluxQuery = `
+      const normalizedServiceId = serviceId?.startsWith('system:')
+        ? serviceId.slice('system:'.length)
+        : serviceId;
+      const filter = normalizedServiceId
+        ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
+        : '';
+      const cpuMemoryQuery = `
         from(bucket: "${this.bucket}")
           |> range(start: -5m)
-          |> filter(fn: (r) => r["_measurement"] == "system_metrics")
+          |> filter(fn: (r) => r["_measurement"] == "os.cpu.utilization" or r["_measurement"] == "process.memory.rss")
           ${filter}
-          |> filter(fn: (r) => r["_field"] == "cpu_usage" or r["_field"] == "memory_usage")
+          |> filter(fn: (r) => r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "value")
           |> last()
       `;
+      const cpuMemoryRows = await this.queryMetrics(cpuMemoryQuery, star);
+      const cpuRow = cpuMemoryRows.find(
+        (row: any) => row._measurement === 'os.cpu.utilization' || row._field === 'cpu_usage',
+      );
+      const memoryRow = cpuMemoryRows.find(
+        (row: any) => row._measurement === 'process.memory.rss' || row._field === 'memory_usage',
+      );
+      const cpu = Number(cpuRow?._value || 0);
+      const memory = normalizeRssMemoryValue(memoryRow?._value, 2);
 
-      // 由于可能没有真实数据，为了保证系统"可用"（看到图表），
-      // 如果查询结果为空，我们在开发环境下仍然返回一些模拟数据的生成逻辑
-      // 但在生产环境应返回真实值 (0)
+      const durationQuery = `
+        from(bucket: "${this.bucket}")
+          |> range(start: -5m)
+          |> filter(fn: (r) => r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms")
+          ${filter}
+          |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time")
+          |> mean()
+      `;
+      const durationRows = await this.queryMetrics(durationQuery, star);
+      const responseTime = Number(durationRows[0]?._value || 0);
 
-      // const rows = await this.queryMetrics(fluxQuery, star);
-      // ... 解析 rows ...
+      const totalRequestQuery = `
+        from(bucket: "${this.bucket}")
+          |> range(start: -1m)
+          |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+          ${filter}
+          |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+          |> sum()
+      `;
+      const totalRows = await this.queryMetrics(totalRequestQuery, star);
+      const totalRequests = Number(totalRows[0]?._value || 0);
+      const qps = totalRequests > 0 ? totalRequests / 60 : 0;
 
-      // 临时：为了满足"初步可以使用"的要求，且当前没有数据摄入，
-      // 我们先保留一个模拟生成器，但将其封装在 Handler 中，
-      // 后续一旦有真实数据，只需替换这里的逻辑即可。
+      const errorRequestQuery = `
+        from(bucket: "${this.bucket}")
+          |> range(start: -5m)
+          |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+          ${filter}
+          |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
+          |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+          |> sum()
+      `;
+      const errorRows = await this.queryMetrics(errorRequestQuery, star);
+      const errorRequests = Number(errorRows[0]?._value || 0);
+      const errorRate = totalRequests > 0 ? errorRequests / totalRequests : 0;
 
-      const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const activeRequestQuery = `
+        from(bucket: "${this.bucket}")
+          |> range(start: -1m)
+          |> filter(fn: (r) => r["_measurement"] == "universe.request.active")
+          ${filter}
+          |> filter(fn: (r) => r["_field"] == "value")
+          |> mean()
+      `;
+      const activeRows = await this.queryMetrics(activeRequestQuery, star).catch(() => []);
+      const activeConnections = Number(activeRows[0]?._value || 0);
+
+      const nodes = star.registry?.getNodeList({ onlyAvaiable: true, withServices: true }) || [];
+      const activeInstances = normalizedServiceId
+        ? nodes.filter((node: any) =>
+            Array.isArray(node.services)
+              ? node.services.some((item: any) => item?.name === normalizedServiceId)
+              : false,
+          ).length
+        : 0;
 
       return {
-        cpu: rand(10, 60),
-        memory: rand(20, 70),
-        qps: rand(100, 1000),
-        responseTime: rand(20, 100),
-        errorRate: Math.random(),
-        activeConnections: rand(50, 200),
-        systemLoad: rand(50, 200) / 100,
-        activeInstances: serviceId ? 1 : rand(5, 10),
-        healthDistribution: [
-          { name: 'Healthy', value: 80 },
-          { name: 'Warning', value: 15 },
-          { name: 'Critical', value: 5 },
-        ],
+        cpu,
+        memory,
+        qps,
+        responseTime,
+        errorRate,
+        activeConnections,
+        systemLoad: cpu,
+        activeInstances,
+        healthDistribution: [],
         trafficDistribution: [],
       };
     } catch (error) {
@@ -336,7 +701,7 @@ export class InfluxDBHandler {
       // 使用 InfluxDB 的 delete API
       // 注意：JavaScript 客户端可能没有直接暴露 delete API，需要手动调用或检查文档
       // 这里假设通过 HTTP API 调用，或者使用 client 的 API
-      
+
       // 模拟实现：实际应调用 /api/v2/delete
       // const deleteApi = new DeleteApi(this.client);
       // await deleteApi.postDelete({

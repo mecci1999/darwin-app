@@ -11,6 +11,7 @@ import { ApiKeyManager } from '../utils/api-key-manager';
 import { QuotaChecker } from '../utils/quota-checker';
 import { LogUtils } from '../utils/log-utils';
 import { STATS_CACHE_TTL, DEFAULT_STATS_INTERVAL } from '../constants';
+import { SYSTEM_LOG_TENANT_ID } from '../utils/access-control';
 
 /**
  * 获取日志统计
@@ -26,27 +27,35 @@ export async function getLogStats(
 ): Promise<LogStatsResult> {
   try {
     const { apiKey, statsParams, tenantId, userId } = params;
+    const isSystemDarwinStats = tenantId === SYSTEM_LOG_TENANT_ID && statsParams.originType === 'darwin-app';
 
-    // 验证API密钥
-    const apiKeyManager = ApiKeyManager.getInstance();
-    const validatedKey = await apiKeyManager.validateApiKey(apiKey);
-    if (!validatedKey) {
-      throw new Error('无效的API密钥');
-    }
-    if (validatedKey.tenantId !== tenantId) {
-      throw new Error('API密钥与租户不匹配');
-    }
-
-    // 检查权限
-    if (!apiKeyManager.hasPermission(validatedKey, ApiPermission.STATS)) {
-      throw new Error('Insufficient permissions for log statistics');
-    }
-
-    // 检查配额
     const quotaChecker = QuotaChecker.getInstance();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
-    if (!quotaCheck.allowed) {
-      throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
+    if (!isSystemDarwinStats && apiKey) {
+      // 验证API密钥
+      const apiKeyManager = ApiKeyManager.getInstance();
+      const validatedKey = await apiKeyManager.validateApiKey(apiKey);
+      if (!validatedKey) {
+        throw new Error('无效的API密钥');
+      }
+      if (validatedKey.tenantId !== tenantId) {
+        throw new Error('API密钥与租户不匹配');
+      }
+
+      // 检查权限
+      if (!apiKeyManager.hasPermission(validatedKey, ApiPermission.STATS)) {
+        throw new Error('Insufficient permissions for log statistics');
+      }
+
+      // 检查配额
+      const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      if (!quotaCheck.allowed) {
+        throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
+      }
+    } else if (!isSystemDarwinStats) {
+      const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      if (!quotaCheck.allowed) {
+        throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
+      }
     }
 
     // 标准化统计参数
@@ -66,6 +75,7 @@ export async function getLogStats(
     const stats = await esClient.getLogStats(normalizedParams, tenantId, userId);
 
     // 构建 LogStatsResult
+    const errorCount = (stats.levelBreakdown.error || 0) + (stats.levelBreakdown.fatal || 0);
     const statsResult: LogStatsResult = {
       total: stats.total,
       timeRange: normalizedParams.timeRange,
@@ -81,8 +91,13 @@ export async function getLogStats(
         change: 0,
         changePercent: 0,
       },
-      topServices: [], // 需要额外查询
-      errorRate: 0, // 需要额外查询
+      topServices: Object.entries(stats.serviceBreakdown).map(([service, count]) => ({
+        service,
+        count,
+        errorRate: 0,
+      })),
+      errorRate: stats.total > 0 ? (errorCount / stats.total) * 100 : 0,
+      avgResponseTime: 0,
     };
 
     // 缓存结果
@@ -638,6 +653,16 @@ function generateStatsCacheKey(params: LogStatsParams, tenantId: string, userId?
     'log_stats',
     tenantId,
     userId || 'all',
+    params.originType || 'all',
+    params.visibility || 'all',
+    params.service || 'all',
+    params.level || 'all',
+    params.source || 'all',
+    params.query || 'all',
+    params.hostname || 'all',
+    params.groupBy || 'all',
+    params.startTime || 'all',
+    params.endTime || 'all',
     params.timeRange || 'default',
     params.interval || DEFAULT_STATS_INTERVAL,
     JSON.stringify((params as any).filters || {}),

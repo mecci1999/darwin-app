@@ -4,16 +4,18 @@
  */
 
 import { Context } from 'node-universe';
-import { LogStreamParams, LogStreamConnection, LogEntry } from '../types';
+import {
+  LogStreamParams,
+  LogStreamConnection,
+  LogEntry,
+  ApiPermission,
+  LogStreamEvent,
+} from '../types';
 import { ApiKeyManager } from '../utils/api-key-manager';
 import { QuotaChecker } from '../utils/quota-checker';
 import { StreamManager } from '../utils/stream-manager';
 import { LogUtils } from '../utils/log-utils';
-import { 
-  STREAM_HEARTBEAT_INTERVAL, 
-  STREAM_MAX_CONNECTIONS_PER_TENANT,
-  STREAM_CONNECTION_TIMEOUT 
-} from '../constants';
+import { STREAM_CONFIG } from '../constants';
 
 /**
  * 创建日志流连接
@@ -26,7 +28,7 @@ export async function createLogStream(
     tenantId: string;
     userId?: string;
     response: any; // HTTP Response对象
-  }
+  },
 ): Promise<{
   success: boolean;
   connectionId?: string;
@@ -36,52 +38,44 @@ export async function createLogStream(
     const { apiKey, streamParams, tenantId, userId, response } = params;
 
     // 验证API密钥
-    const apiKeyManager = new ApiKeyManager();
-    const keyValidation = await apiKeyManager.validateApiKey(apiKey, tenantId);
-    if (!keyValidation.isValid) {
-      throw new Error(`Invalid API key: ${keyValidation.error}`);
+    const apiKeyManager = ApiKeyManager.getInstance();
+    const validatedKey = await apiKeyManager.validateApiKey(apiKey);
+    if (!validatedKey || validatedKey.tenantId !== tenantId) {
+      throw new Error('Invalid API key');
     }
 
     // 检查权限
-    const hasPermission = await apiKeyManager.checkPermission(
-      apiKey,
-      'logs:stream',
-      tenantId
-    );
+    const hasPermission = apiKeyManager.hasPermission(validatedKey, ApiPermission.READ);
     if (!hasPermission) {
       throw new Error('Insufficient permissions for log streaming');
     }
 
     // 检查流配额
     const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkStreamQuota(tenantId, userId);
+    const quotaCheck = await quotaChecker.checkStreamQuota(tenantId);
     if (!quotaCheck.allowed) {
       throw new Error(`Stream quota exceeded: ${quotaCheck.reason}`);
     }
 
     // 验证流参数
     const validationResult = LogUtils.validateSearchParams(streamParams);
-    if (!validationResult.isValid) {
+    if (!validationResult.valid) {
       throw new Error(`Invalid stream parameters: ${validationResult.errors.join(', ')}`);
     }
 
     // 检查租户连接数限制
     const streamManager = StreamManager.getInstance();
     const tenantConnections = streamManager.getTenantConnectionCount(tenantId);
-    if (tenantConnections >= STREAM_MAX_CONNECTIONS_PER_TENANT) {
+    const maxConnectionsPerTenant = Math.floor(STREAM_CONFIG.MAX_CONNECTIONS / 10);
+    if (tenantConnections >= maxConnectionsPerTenant) {
       throw new Error('Maximum concurrent connections exceeded for tenant');
     }
 
     // 创建流连接
-    const connectionId = await streamManager.createConnection(
-      response,
-      tenantId,
-      userId,
-      streamParams
-    );
+    const connectionId = streamManager.createConnection(tenantId, response, streamParams, userId);
 
     // 更新流配额使用量
-    await quotaChecker.updateStreamUsage(tenantId, userId);
+    await quotaChecker.updateStreamUsage(tenantId, 1);
 
     // 记录流创建事件
     await ctx.emit('logs.stream.created', {
@@ -92,14 +86,14 @@ export async function createLogStream(
       timestamp: Date.now(),
     });
 
-    ctx.service.logger.debug(`Log stream created: ${connectionId}`);
+    ctx.service?.logger?.debug(`Log stream created: ${connectionId}`);
 
     return {
       success: true,
       connectionId,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to create log stream:', error);
+    ctx.service?.logger?.error('Failed to create log stream:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -116,13 +110,13 @@ export async function closeLogStream(
     connectionId: string;
     tenantId: string;
     userId?: string;
-  }
+  },
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { connectionId, tenantId, userId } = params;
 
     const streamManager = StreamManager.getInstance();
-    const success = await streamManager.closeConnection(connectionId);
+    const success = streamManager.closeConnection(connectionId);
 
     if (success) {
       // 记录流关闭事件
@@ -133,12 +127,12 @@ export async function closeLogStream(
         timestamp: Date.now(),
       });
 
-      ctx.service.logger.debug(`Log stream closed: ${connectionId}`);
+      ctx.service?.logger?.debug(`Log stream closed: ${connectionId}`);
     }
 
     return { success };
   } catch (error) {
-    ctx.service.logger.error('Failed to close log stream:', error);
+    ctx.service?.logger?.error('Failed to close log stream:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -154,17 +148,17 @@ export async function broadcastLogToStreams(
   params: {
     log: LogEntry;
     tenantId: string;
-  }
+  },
 ): Promise<{ success: boolean; broadcastCount: number }> {
   try {
     const { log, tenantId } = params;
 
     const streamManager = StreamManager.getInstance();
-    const broadcastCount = await streamManager.broadcastLog(log, tenantId);
+    const broadcastCount = streamManager.broadcastLog(log as any);
 
     if (broadcastCount > 0) {
-      ctx.service.logger.debug(
-        `Log broadcasted to ${broadcastCount} streams for tenant ${tenantId}`
+      ctx.service?.logger?.debug(
+        `Log broadcasted to ${broadcastCount} streams for tenant ${tenantId}`,
       );
     }
 
@@ -173,7 +167,7 @@ export async function broadcastLogToStreams(
       broadcastCount,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to broadcast log to streams:', error);
+    ctx.service?.logger?.error('Failed to broadcast log to streams:', error);
     return {
       success: false,
       broadcastCount: 0,
@@ -189,7 +183,7 @@ export async function getStreamStats(
   params: {
     tenantId: string;
     userId?: string;
-  }
+  },
 ): Promise<{
   totalConnections: number;
   activeConnections: number;
@@ -209,17 +203,18 @@ export async function getStreamStats(
     const streamManager = StreamManager.getInstance();
     const stats = streamManager.getConnectionStats();
     const tenantConnections = streamManager.getTenantConnectionCount(tenantId);
-    const userConnections = userId 
+    const userConnections = userId
       ? streamManager.getUserConnectionCount(tenantId, userId)
       : undefined;
 
-    const connectionDetails = streamManager.getTenantConnections(tenantId)
-      .filter(conn => !userId || conn.userId === userId)
-      .map(conn => ({
-        connectionId: conn.connectionId,
+    const connectionDetails = streamManager
+      .getTenantConnections(tenantId)
+      .filter((conn) => !userId || conn.userId === userId)
+      .map((conn) => ({
+        connectionId: conn.id,
         userId: conn.userId,
-        createdAt: conn.createdAt,
-        lastActivity: conn.lastActivity,
+        createdAt: new Date(conn.createdAt),
+        lastActivity: new Date(conn.lastActivity),
         filters: conn.filters,
       }));
 
@@ -231,7 +226,7 @@ export async function getStreamStats(
       connectionDetails,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get stream stats:', error);
+    ctx.service?.logger?.error('Failed to get stream stats:', error);
     throw error;
   }
 }
@@ -243,17 +238,17 @@ export async function sendHeartbeatToStreams(
   ctx: Context,
   params: {
     tenantId?: string;
-  } = {}
+  } = {},
 ): Promise<{ success: boolean; heartbeatCount: number }> {
   try {
     const { tenantId } = params;
 
     const streamManager = StreamManager.getInstance();
-    const heartbeatCount = await streamManager.sendHeartbeat(tenantId);
+    const heartbeatCount = streamManager.sendHeartbeat(tenantId);
 
     if (heartbeatCount > 0) {
-      ctx.service.logger.debug(
-        `Heartbeat sent to ${heartbeatCount} streams${tenantId ? ` for tenant ${tenantId}` : ''}`
+      ctx.service?.logger?.debug(
+        `Heartbeat sent to ${heartbeatCount} streams${tenantId ? ` for tenant ${tenantId}` : ''}`,
       );
     }
 
@@ -262,7 +257,7 @@ export async function sendHeartbeatToStreams(
       heartbeatCount,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to send heartbeat to streams:', error);
+    ctx.service?.logger?.error('Failed to send heartbeat to streams:', error);
     return {
       success: false,
       heartbeatCount: 0,
@@ -277,16 +272,16 @@ export async function cleanupInactiveStreams(
   ctx: Context,
   params: {
     maxInactiveTime?: number; // 最大非活跃时间（毫秒），默认30分钟
-  } = {}
+  } = {},
 ): Promise<{ success: boolean; cleanedCount: number }> {
   try {
     const { maxInactiveTime = 30 * 60 * 1000 } = params; // 30分钟
 
     const streamManager = StreamManager.getInstance();
-    const cleanedCount = await streamManager.cleanupInactiveConnections(maxInactiveTime);
+    const cleanedCount = streamManager.cleanupInactiveConnections(maxInactiveTime);
 
     if (cleanedCount > 0) {
-      ctx.service.logger.info(`Cleaned up ${cleanedCount} inactive stream connections`);
+      ctx.service?.logger?.info(`Cleaned up ${cleanedCount} inactive stream connections`);
     }
 
     return {
@@ -294,7 +289,7 @@ export async function cleanupInactiveStreams(
       cleanedCount,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to cleanup inactive streams:', error);
+    ctx.service?.logger?.error('Failed to cleanup inactive streams:', error);
     return {
       success: false,
       cleanedCount: 0,
@@ -312,7 +307,7 @@ export async function updateStreamFilters(
     filters: any;
     tenantId: string;
     userId?: string;
-  }
+  },
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { connectionId, filters, tenantId, userId } = params;
@@ -325,14 +320,13 @@ export async function updateStreamFilters(
     }
 
     // 验证权限
-    if (connection.tenantId !== tenantId || 
-        (userId && connection.userId !== userId)) {
+    if (connection.tenantId !== tenantId || (userId && connection.userId !== userId)) {
       throw new Error('Insufficient permissions to update stream filters');
     }
 
     // 验证过滤器
-    const validationResult = LogUtils.validateSearchParams({ filters });
-    if (!validationResult.isValid) {
+    const validationResult = LogUtils.validateSearchParams({ tenantId, filters });
+    if (!validationResult.valid) {
       throw new Error(`Invalid filters: ${validationResult.errors.join(', ')}`);
     }
 
@@ -349,12 +343,12 @@ export async function updateStreamFilters(
         timestamp: Date.now(),
       });
 
-      ctx.service.logger.debug(`Stream filters updated: ${connectionId}`);
+      ctx.service?.logger?.debug(`Stream filters updated: ${connectionId}`);
     }
 
     return { success };
   } catch (error) {
-    ctx.service.logger.error('Failed to update stream filters:', error);
+    ctx.service?.logger?.error('Failed to update stream filters:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -370,10 +364,10 @@ export async function sendMessageToStream(
   params: {
     connectionId: string;
     message: any;
-    eventType?: string;
+    eventType?: LogStreamEvent['type'];
     tenantId: string;
     userId?: string;
-  }
+  },
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { connectionId, message, eventType = 'message', tenantId, userId } = params;
@@ -386,27 +380,20 @@ export async function sendMessageToStream(
     }
 
     // 验证权限
-    if (connection.tenantId !== tenantId || 
-        (userId && connection.userId !== userId)) {
+    if (connection.tenantId !== tenantId || (userId && connection.userId !== userId)) {
       throw new Error('Insufficient permissions to send message to stream');
     }
 
     // 发送消息
-    const success = streamManager.sendMessageToConnection(
-      connectionId,
-      message,
-      eventType
-    );
+    const success = streamManager.sendMessageToConnection(connectionId, message, eventType);
 
     if (success) {
-      ctx.service.logger.debug(
-        `Message sent to stream ${connectionId}: ${eventType}`
-      );
+      ctx.service?.logger?.debug(`Message sent to stream ${connectionId}: ${eventType}`);
     }
 
     return { success };
   } catch (error) {
-    ctx.service.logger.error('Failed to send message to stream:', error);
+    ctx.service?.logger?.error('Failed to send message to stream:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -422,32 +409,29 @@ export async function broadcastMessageToTenant(
   params: {
     tenantId: string;
     message: any;
-    eventType?: string;
+    eventType?: LogStreamEvent['type'];
     userId?: string; // 可选：只发送给特定用户的流
-  }
+  },
 ): Promise<{ success: boolean; broadcastCount: number }> {
   try {
     const { tenantId, message, eventType = 'broadcast', userId } = params;
 
     const streamManager = StreamManager.getInstance();
-    const connections = streamManager.getTenantConnections(tenantId)
-      .filter(conn => !userId || conn.userId === userId);
+    const connections = streamManager
+      .getTenantConnections(tenantId)
+      .filter((conn) => !userId || conn.userId === userId);
 
     let broadcastCount = 0;
     for (const connection of connections) {
-      const success = streamManager.sendMessageToConnection(
-        connection.connectionId,
-        message,
-        eventType
-      );
+      const success = streamManager.sendMessageToConnection(connection.id, message, eventType);
       if (success) {
         broadcastCount++;
       }
     }
 
     if (broadcastCount > 0) {
-      ctx.service.logger.debug(
-        `Message broadcasted to ${broadcastCount} streams for tenant ${tenantId}`
+      ctx.service?.logger?.debug(
+        `Message broadcasted to ${broadcastCount} streams for tenant ${tenantId}`,
       );
     }
 
@@ -456,7 +440,7 @@ export async function broadcastMessageToTenant(
       broadcastCount,
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to broadcast message to tenant:', error);
+    ctx.service?.logger?.error('Failed to broadcast message to tenant:', error);
     return {
       success: false,
       broadcastCount: 0,
@@ -473,7 +457,7 @@ export async function getStreamConnectionDetails(
     connectionId: string;
     tenantId: string;
     userId?: string;
-  }
+  },
 ): Promise<{
   connection?: {
     connectionId: string;
@@ -498,25 +482,24 @@ export async function getStreamConnectionDetails(
     }
 
     // 验证权限
-    if (connection.tenantId !== tenantId || 
-        (userId && connection.userId !== userId)) {
+    if (connection.tenantId !== tenantId || (userId && connection.userId !== userId)) {
       return { error: 'Insufficient permissions to view connection details' };
     }
 
     return {
       connection: {
-        connectionId: connection.connectionId,
+        connectionId: connection.id,
         tenantId: connection.tenantId,
         userId: connection.userId,
-        createdAt: connection.createdAt,
-        lastActivity: connection.lastActivity,
+        createdAt: new Date(connection.createdAt),
+        lastActivity: new Date(connection.lastActivity),
         filters: connection.filters,
         isActive: connection.isActive,
         messageCount: connection.messageCount || 0,
       },
     };
   } catch (error) {
-    ctx.service.logger.error('Failed to get stream connection details:', error);
+    ctx.service?.logger?.error('Failed to get stream connection details:', error);
     return {
       error: error instanceof Error ? error.message : 'Unknown error',
     };
@@ -527,17 +510,17 @@ export async function getStreamConnectionDetails(
  * 启动流管理器
  */
 export async function startStreamManager(
-  ctx: Context
+  ctx: Context,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const streamManager = StreamManager.getInstance();
-    await streamManager.start();
+    streamManager.start();
 
-    ctx.service.logger.info('Stream manager started successfully');
+    ctx.service?.logger?.info('Stream manager started successfully');
 
     return { success: true };
   } catch (error) {
-    ctx.service.logger.error('Failed to start stream manager:', error);
+    ctx.service?.logger?.error('Failed to start stream manager:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -549,17 +532,17 @@ export async function startStreamManager(
  * 停止流管理器
  */
 export async function stopStreamManager(
-  ctx: Context
+  ctx: Context,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const streamManager = StreamManager.getInstance();
-    await streamManager.stop();
+    streamManager.stop();
 
-    ctx.service.logger.info('Stream manager stopped successfully');
+    ctx.service?.logger?.info('Stream manager stopped successfully');
 
     return { success: true };
   } catch (error) {
-    ctx.service.logger.error('Failed to stop stream manager:', error);
+    ctx.service?.logger?.error('Failed to stop stream manager:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

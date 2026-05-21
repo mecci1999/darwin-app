@@ -45,38 +45,46 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.STRING(50),
         allowNull: false,
         unique: true,
+        field: 'provider_name',
       },
       displayName: {
         type: DataTypes.STRING(100),
         allowNull: false,
+        field: 'display_name',
       },
       isEnabled: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: true,
+        field: 'is_enabled',
       },
       supportedMethods: {
         type: DataTypes.JSON,
         allowNull: false,
+        field: 'supported_methods',
       },
       config: {
         type: DataTypes.JSON,
         allowNull: false,
+        field: 'config',
       },
       sortOrder: {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0,
+        field: 'sort_order',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -85,14 +93,14 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['providerName'],
+          fields: ['provider_name'],
           unique: true,
         },
         {
-          fields: ['isEnabled'],
+          fields: ['is_enabled'],
         },
         {
-          fields: ['sortOrder'],
+          fields: ['sort_order'],
         },
       ],
     },

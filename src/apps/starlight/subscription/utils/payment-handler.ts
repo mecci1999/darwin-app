@@ -1,6 +1,7 @@
 /**
  * Subscription微服务支付处理器
  */
+import crypto from 'crypto';
 import { Star } from 'node-universe';
 import { SubscriptionState, PaymentRecord, PaymentQueueItem, PaymentGatewayConfig } from '../types';
 import { PAYMENT_GATEWAYS, MONITORING_CONFIG } from '../constants';
@@ -9,6 +10,30 @@ export class PaymentHandler {
   private static stripeClient: any = null;
   private static paypalClient: any = null;
   private static alipayClient: any = null;
+
+  private static buildHmacSignature(payload: string, secret: string) {
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  }
+
+  private static buildPayloadDigest(payload: string, secret: string) {
+    return crypto.createHash('sha256').update(`${payload}:${secret}`).digest('hex');
+  }
+
+  private static matchesSignature(signature: string, expected: string) {
+    return [expected, `sha256=${expected}`, `v1=${expected}`].includes(signature);
+  }
+
+  private static buildManualGatewayResponse(provider: string, paymentData: any) {
+    return {
+      provider,
+      mode: 'unsupported',
+      supported: false,
+      transactionCreated: false,
+      amount: paymentData.amount,
+      currency: paymentData.currency,
+      reason: `${provider}_sdk_not_configured`,
+    };
+  }
 
   /**
    * 初始化支付网关
@@ -102,21 +127,16 @@ export class PaymentHandler {
       //   metadata: paymentData.metadata,
       // });
 
-      // 模拟Stripe响应
-      const mockStripeResponse = {
-        id: `pi_${Math.random().toString(36).substring(2)}`,
-        status: 'succeeded',
-        amount: paymentData.amount,
-        currency: paymentData.currency,
-      };
-
-      paymentRecord.transactionId = mockStripeResponse.id;
-      paymentRecord.status = mockStripeResponse.status === 'succeeded' ? 'completed' : 'failed';
-      paymentRecord.gatewayResponse = mockStripeResponse;
+      paymentRecord.transactionId = undefined;
+      paymentRecord.status = 'failed';
+      paymentRecord.gatewayResponse = this.buildManualGatewayResponse('stripe', paymentData);
       paymentRecord.processedAt = new Date();
       paymentRecord.updatedAt = new Date();
 
-      star.logger?.info(`Stripe payment processed: ${paymentRecord.id}`);
+      paymentRecord.failureReason = 'stripe_sdk_not_configured';
+      star.logger?.warn(
+        `Stripe payment is unsupported in current environment: ${paymentRecord.id}`,
+      );
       return paymentRecord;
     } catch (error: any) {
       paymentRecord.status = 'failed';
@@ -136,24 +156,16 @@ export class PaymentHandler {
     star: any,
   ): Promise<PaymentRecord> {
     try {
-      // 这里应该调用实际的PayPal API
-      // 模拟PayPal响应
-      const mockPayPalResponse = {
-        id: `PAYID-${Math.random().toString(36).substring(2).toUpperCase()}`,
-        status: 'COMPLETED',
-        amount: {
-          value: (paymentData.amount / 100).toString(),
-          currency_code: paymentData.currency,
-        },
-      };
-
-      paymentRecord.transactionId = mockPayPalResponse.id;
-      paymentRecord.status = mockPayPalResponse.status === 'COMPLETED' ? 'completed' : 'failed';
-      paymentRecord.gatewayResponse = mockPayPalResponse;
+      paymentRecord.transactionId = undefined;
+      paymentRecord.status = 'failed';
+      paymentRecord.gatewayResponse = this.buildManualGatewayResponse('paypal', paymentData);
       paymentRecord.processedAt = new Date();
       paymentRecord.updatedAt = new Date();
 
-      star.logger?.info(`PayPal payment processed: ${paymentRecord.id}`);
+      paymentRecord.failureReason = 'paypal_sdk_not_configured';
+      star.logger?.warn(
+        `PayPal payment is unsupported in current environment: ${paymentRecord.id}`,
+      );
       return paymentRecord;
     } catch (error: any) {
       paymentRecord.status = 'failed';
@@ -173,22 +185,16 @@ export class PaymentHandler {
     star: any,
   ): Promise<PaymentRecord> {
     try {
-      // 这里应该调用实际的支付宝API
-      // 模拟支付宝响应
-      const mockAlipayResponse = {
-        trade_no: `2024${Date.now()}${Math.random().toString().substring(2, 8)}`,
-        trade_status: 'TRADE_SUCCESS',
-        total_amount: (paymentData.amount / 100).toString(),
-      };
-
-      paymentRecord.transactionId = mockAlipayResponse.trade_no;
-      paymentRecord.status =
-        mockAlipayResponse.trade_status === 'TRADE_SUCCESS' ? 'completed' : 'failed';
-      paymentRecord.gatewayResponse = mockAlipayResponse;
+      paymentRecord.transactionId = undefined;
+      paymentRecord.status = 'failed';
+      paymentRecord.gatewayResponse = this.buildManualGatewayResponse('alipay', paymentData);
       paymentRecord.processedAt = new Date();
       paymentRecord.updatedAt = new Date();
 
-      star.logger?.info(`Alipay payment processed: ${paymentRecord.id}`);
+      paymentRecord.failureReason = 'alipay_sdk_not_configured';
+      star.logger?.warn(
+        `Alipay payment is unsupported in current environment: ${paymentRecord.id}`,
+      );
       return paymentRecord;
     } catch (error: any) {
       paymentRecord.status = 'failed';
@@ -209,18 +215,19 @@ export class PaymentHandler {
     star: any,
   ): Promise<any> {
     try {
-      // 这里应该根据原支付方式调用相应的退款API
       const refundRecord = {
         id: this.generateRefundId(),
         paymentId,
         amount,
         reason,
-        status: 'completed',
-        processedAt: new Date(),
+        status: 'failed',
+        supported: false,
+        transactionCreated: false,
+        processedAt: undefined,
         createdAt: new Date(),
       };
 
-      star.logger?.info(`Refund processed: ${refundRecord.id}`);
+      star.logger?.warn(`Refund is unsupported in current environment: ${refundRecord.id}`);
       return refundRecord;
     } catch (error) {
       star.logger?.error('Refund processing failed:', error);
@@ -272,17 +279,36 @@ export class PaymentHandler {
     signature: string,
   ): boolean {
     try {
-      // 这里应该实现实际的签名验证逻辑
+      const normalizedPayload =
+        typeof eventData === 'string' ? eventData : JSON.stringify(eventData);
+
       switch (source) {
         case 'stripe':
-          // return stripe.webhooks.constructEvent(eventData, signature, PAYMENT_GATEWAYS.STRIPE.WEBHOOK_SECRET);
-          return true; // 模拟验证通过
+          if (!signature || !PAYMENT_GATEWAYS.STRIPE.WEBHOOK_SECRET) return false;
+          return this.matchesSignature(
+            signature,
+            this.buildHmacSignature(normalizedPayload, PAYMENT_GATEWAYS.STRIPE.WEBHOOK_SECRET),
+          );
         case 'paypal':
-          // PayPal webhook验证逻辑
-          return true;
+          if (
+            !signature ||
+            !PAYMENT_GATEWAYS.PAYPAL.CLIENT_SECRET ||
+            !PAYMENT_GATEWAYS.PAYPAL.WEBHOOK_ID
+          )
+            return false;
+          return this.matchesSignature(
+            signature,
+            this.buildHmacSignature(
+              `${normalizedPayload}:${PAYMENT_GATEWAYS.PAYPAL.WEBHOOK_ID}`,
+              PAYMENT_GATEWAYS.PAYPAL.CLIENT_SECRET,
+            ),
+          );
         case 'alipay':
-          // 支付宝webhook验证逻辑
-          return true;
+          if (!signature || !PAYMENT_GATEWAYS.ALIPAY.PUBLIC_KEY) return false;
+          return this.matchesSignature(
+            signature,
+            this.buildPayloadDigest(normalizedPayload, PAYMENT_GATEWAYS.ALIPAY.PUBLIC_KEY),
+          );
         default:
           return false;
       }

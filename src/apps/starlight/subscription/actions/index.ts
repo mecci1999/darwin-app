@@ -1,5 +1,4 @@
 import { Starlight } from 'typings';
-import billing from './billing';
 import payment from './payment';
 import plans from './plans';
 import quota from './quota';
@@ -13,14 +12,12 @@ const subscriptionActions = (star: Starlight) => {
   const subscriptionAction = subscription(star);
   const quotaAction = quota(star);
   const paymentAction = payment(star);
-  // const billingAction = billing(star);
 
   return {
     ...plansAction,
     ...subscriptionAction,
     ...quotaAction,
     ...paymentAction,
-    // ...billingAction,
   };
 };
 

@@ -1,7 +1,7 @@
 /**
  * 用户注册接口
  */
-import { PASSWORD_SECRET_KEY } from 'config';
+import { ADMIN_EMAILS, PASSWORD_SECRET_KEY } from 'config';
 import crypto from 'crypto';
 // 移除直接数据库API导入，使用star.db接口
 import { RequestParamInvalidError } from 'error';
@@ -84,14 +84,21 @@ export default function register(star: Starlight) {
           // 生成用户ID
           const userId = generateUserId();
 
+          const adminEmailList = (ADMIN_EMAILS || '')
+            .split(',')
+            .map((email) => email.trim().toLowerCase())
+            .filter(Boolean);
+          const isAdminEmail = adminEmailList.includes(ctx.params.email.toLowerCase());
+
           // 调用user服务，新增用户动作
           const createUser = await ctx.call(
             'user.v1.create',
             {
               userId,
               source: 'email',
+              ...(isAdminEmail ? { power: 999 } : {}),
             },
-            { timeout: 60000 },
+            { timeout: 60000, meta: { ...(ctx.meta as any), internal: true } },
           );
 
           if (createUser.status !== 201) {

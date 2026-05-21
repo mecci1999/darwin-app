@@ -3,6 +3,8 @@ import { Star } from 'node-universe';
 import { MAX_RETRIES } from '../constants';
 import { MetricsState, QuotaWarningParams, RawMetricsData } from '../types';
 import { DataProcessor, InfluxDBHandler, KafkaHandler, MetricsUtils, QuotaChecker } from '../utils';
+import { buildSystemServiceId, normalizeMetricsScope } from '../utils/system-telemetry';
+import { buildServiceCatalogSnapshot } from '../utils/service-catalog';
 
 /**
  * 指标数据微服务的方法
@@ -49,17 +51,19 @@ const metricsMethod = (star: Star, state: MetricsState) => {
 
         // 获取用户订阅计划限制
         // 尝试从订阅服务获取限制，如果失败则使用默认值
-        let limit = 10000; 
+        let limit = 10000;
         try {
-           const subscription = await star.call('subscription.1.getUserSubscription', { userId });
-           if (subscription && subscription.plan) {
-             const planLimits = await star.call('subscription.1.getPlanLimits', { planName: subscription.plan });
-             if (planLimits && planLimits.metrics && planLimits.metrics.hourly) {
-               limit = planLimits.metrics.hourly;
-             }
-           }
+          const subscription = await star.call('subscription.1.getUserSubscription', { userId });
+          if (subscription && subscription.plan) {
+            const planLimits = await star.call('subscription.1.getPlanLimits', {
+              planName: subscription.plan,
+            });
+            if (planLimits && planLimits.metrics && planLimits.metrics.hourly) {
+              limit = planLimits.metrics.hourly;
+            }
+          }
         } catch (e) {
-           star.logger?.warn('Failed to fetch plan limits, using default:', e);
+          star.logger?.warn('Failed to fetch plan limits, using default:', e);
         }
 
         if (current + count > limit) {
@@ -249,12 +253,74 @@ const metricsMethod = (star: Star, state: MetricsState) => {
     },
 
     /**
+     * 获取服务目录列表（按 scope 过滤）
+     */
+    async getServicesList(params: {
+      page?: number;
+      pageSize?: number;
+      status?: string[] | string;
+      keyword?: string;
+      scope?: 'tenant' | 'system';
+    }) {
+      return await buildServiceCatalogSnapshot(
+        {
+          page: Number(params?.page || 1),
+          pageSize: Number(params?.pageSize || 10),
+          status: params?.status,
+          keyword: params?.keyword,
+          scope: normalizeMetricsScope(params?.scope),
+        },
+        star,
+      );
+    },
+
+    /**
+     * 获取服务实例列表（按 scope 处理 system:serviceId）
+     */
+    async getInstancesList(params: { serviceId: string; scope?: 'tenant' | 'system' }) {
+      const rawServiceId = String(params?.serviceId || '').trim();
+      const scope = normalizeMetricsScope(params?.scope);
+      const serviceId = rawServiceId.startsWith('system:')
+        ? rawServiceId.slice('system:'.length)
+        : rawServiceId;
+      if (!serviceId || serviceId.startsWith('$')) {
+        return [];
+      }
+
+      const nodes = star.registry?.getNodeList({ onlyAvaiable: true, withServices: true }) || [];
+      const instances: any[] = [];
+      nodes.forEach((node: any) => {
+        const services = Array.isArray(node.services)
+          ? node.services
+              .map((item: any) => item?.name)
+              .filter((name: string) => Boolean(name) && !String(name).startsWith('$'))
+          : [];
+        if (services.includes(serviceId)) {
+          instances.push({
+            id: `${node.id}-${serviceId}`,
+            serviceId: scope === 'system' ? buildSystemServiceId(serviceId) : serviceId,
+            node: node.hostname || node.id,
+            status: node.available ? 'running' : 'error',
+            cpu: typeof node.cpu === 'number' ? Math.min(100, Math.max(0, Number(node.cpu))) : 0,
+            memory: null,
+            startTime: null,
+          });
+        }
+      });
+      return instances;
+    },
+
+    /**
      * 获取服务健康状态
      */
     async getHealthStatus(service: any) {
       try {
+        const healthy =
+          Boolean(state.influxdbConnected) &&
+          state.kafkaConsumers.length > 0 &&
+          state.processingQueue.length < 1000;
         return {
-          status: 'healthy',
+          status: healthy ? 'healthy' : 'unknown',
           timestamp: new Date().toISOString(),
           influxdb: state.influxdbConnected,
           kafka: state.kafkaConsumers.length > 0,

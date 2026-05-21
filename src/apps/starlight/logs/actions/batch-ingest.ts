@@ -5,8 +5,10 @@
 
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
-import { generateBatchId, generateLogId } from '../utils/log-utils';
+import { generateBatchId } from '../utils/log-utils';
 import { validateLogBatchIngest } from '../validators';
+import { ingestLogBatch } from '../methods/log-ingestion';
+import { LogFormat } from '../types';
 
 export default function batchIngest(star: Starlight) {
   return {
@@ -35,33 +37,41 @@ export default function batchIngest(star: Starlight) {
             };
           }
 
-          // 构建日志条目
-          const logEntries = logs.map((log: any, index: number) => ({
-            id: generateLogId(),
+          const resolvedBatchId = batchId || generateBatchId();
+          const result = await ingestLogBatch(ctx, {
+            apiKey,
             tenantId,
             userId,
-            apiKeyId: (ctx.meta as any)?.apiKeyId,
-            batchId: batchId || generateBatchId(),
-            index,
-            timestamp: log.timestamp || new Date().toISOString(),
-            level: log.level || 'info',
-            message: log.message,
-            service: log.service,
-            source: log.source || 'api',
-            metadata: log.metadata || {},
-            tags: log.tags || [],
-            receivedAt: new Date().toISOString(),
-          }));
-
-          // 模拟批量摄取处理
-          const result = {
-            batchId: batchId || generateBatchId(),
-            processed: logEntries.length,
-            failed: 0,
-            errors: [],
-          };
+            batch: {
+              logs,
+              batchId: resolvedBatchId,
+              tenantId,
+              timestamp: Date.now(),
+              source: 'api',
+              format: (format || 'json') as LogFormat,
+            },
+          });
 
           const processingTime = Date.now() - startTime;
+
+          if (!result.success) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: {
+                  batchId: result.batchId || resolvedBatchId,
+                  processed: result.processed,
+                  failed: result.failed,
+                  errors: result.errors || [],
+                  processingTime,
+                  timestamp: new Date().toISOString(),
+                },
+                message: '批量日志摄取失败',
+                code: HttpResponseCode.ServiceActionFaild,
+                success: false,
+              },
+            };
+          }
 
           // 记录日志
           star.logger?.info('Batch log ingest completed', {
@@ -77,7 +87,7 @@ export default function batchIngest(star: Starlight) {
             status: HttpStatusCode.OK,
             data: {
               content: {
-                batchId: result.batchId,
+                batchId: result.batchId || resolvedBatchId,
                 processed: result.processed,
                 failed: result.failed,
                 errors: result.errors,

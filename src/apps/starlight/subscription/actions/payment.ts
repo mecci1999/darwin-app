@@ -80,8 +80,8 @@ const payment = (star: Starlight) => {
             billingCycle,
             paymentMethod,
             pricing,
-            returnUrl: returnUrl || `${process.env.FRONTEND_URL}/subscription/success`,
-            notifyUrl: notifyUrl || `${process.env.API_URL}/subscription/payment/notify`,
+            returnUrl,
+            notifyUrl: notifyUrl || `${process.env.API_URL}/api/subscription/v1/payment/notify`,
           });
 
           // 生成支付链接
@@ -195,7 +195,7 @@ const payment = (star: Starlight) => {
                   transactionId: order.transactionId,
                 },
                 statusDescription: (this as any).getOrderStatusDescription(order.status),
-                nextAction: (this as any).getOrderNextAction(order),
+                nextAction: await (this as any).getOrderNextAction(order),
               },
               message: '查询支付订单成功',
               success: true,
@@ -370,7 +370,7 @@ const payment = (star: Starlight) => {
             });
 
             // 发送支付成功事件
-            await star.emit('payment.success', {
+            await star.emit('payment.succeeded', {
               userId: order.userId,
               orderId: order.id,
               planName: order.planName,
@@ -511,6 +511,25 @@ const payment = (star: Starlight) => {
           // 如果符合自动退款条件，直接处理
           if (refundPolicy.autoApprove) {
             const refundResult = await (this as any).processRefund(refund.id);
+            const refundStatus = refundResult?.status === 'failed' ? 'failed' : 'approved';
+
+            if (refundStatus === 'failed') {
+              return {
+                status: 409,
+                data: {
+                  code: HttpResponseCode.ServiceActionFaild,
+                  content: {
+                    refundId: refund.id,
+                    status: refundStatus,
+                    amount: refundAmount,
+                    currency: order.currency,
+                    refundResult,
+                  },
+                  message: '退款申请已记录，但当前环境不支持自动退款处理',
+                  success: false,
+                },
+              };
+            }
 
             return {
               status: 200,
@@ -518,7 +537,7 @@ const payment = (star: Starlight) => {
                 code: HttpResponseCode.Success,
                 content: {
                   refundId: refund.id,
-                  status: 'approved',
+                  status: refundStatus,
                   amount: refundAmount,
                   currency: order.currency,
                   processTime: '3-5个工作日',

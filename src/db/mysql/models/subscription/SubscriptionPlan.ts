@@ -57,6 +57,7 @@ export default function (sequelize: Sequelize) {
       displayName: {
         type: DataTypes.STRING(100),
         allowNull: false,
+        field: 'display_name',
       },
       description: {
         type: DataTypes.TEXT,
@@ -65,33 +66,40 @@ export default function (sequelize: Sequelize) {
       price: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'price',
       },
       currency: {
         type: DataTypes.STRING(3),
         allowNull: false,
         defaultValue: 'USD',
+        field: 'currency',
       },
       billingCycle: {
         type: DataTypes.ENUM('monthly', 'yearly'),
         allowNull: false,
+        field: 'billing_cycle',
       },
       features: {
         type: DataTypes.JSON,
         allowNull: false,
+        field: 'features',
       },
       limits: {
         type: DataTypes.JSON,
         allowNull: false,
+        field: 'limits',
       },
       isActive: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: true,
+        field: 'is_active',
       },
       sortOrder: {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0,
+        field: 'sort_order',
       },
       createdAt: {
         type: DataTypes.DATE,
@@ -114,10 +122,10 @@ export default function (sequelize: Sequelize) {
           unique: true,
         },
         {
-          fields: ['isActive'],
+          fields: ['is_active'],
         },
         {
-          fields: ['sortOrder'],
+          fields: ['sort_order'],
         },
       ],
     },

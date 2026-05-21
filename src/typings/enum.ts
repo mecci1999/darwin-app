@@ -57,6 +57,7 @@ export enum HttpResponseCode {
   UserQuotaExceeded = 20014, // 用户额度已超
   AppKeyIsInactive = 20015, // appKey未激活
   AppKeyIsExpired = 20016, // appKey已过期
+  UserNotFoundError = 20017, // 用户未找到
   IPNotAccess = 30001, // ip被封禁
   NotLogin = 30002, // 用户未登录
   NoPermissionError = 30003, // 没有权限

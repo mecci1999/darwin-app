@@ -13,6 +13,7 @@ dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 import { DatabaseService } from 'db/mysql';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
+import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import createActions from './actions';
 import {
   APP_NAME,
@@ -28,7 +29,7 @@ import {
   REDIS_PASSWORD,
   REDIS_PORT,
 } from './constants';
-import events from './events';
+import { coreEvents, lifecycleEvents } from './events';
 import createMethods from './methods';
 import { MetricsState } from './types';
 import { AlertEngine } from './utils/alert-engine';
@@ -45,6 +46,7 @@ const metricsState: MetricsState = {
     dataProcessor: null,
     quotaChecker: null,
     batchProcessor: null,
+    topologySnapshot: null,
   },
   cache: {
     metrics: new Map(),
@@ -141,18 +143,14 @@ function createMetricsService() {
       enabled: true,
       reporter: {
         type: 'Event',
-        options: {
-          eventName: 'metrics.report',
-          interval: 5000,
-        },
       },
     },
   }) as Starlight;
+  registerDarwinLogForwarding(star);
 
   // 创建指标数据处理服务
   const metricsService = star.createService({
     name: APP_NAME,
-    version: '1',
 
     // SaaS化配置
     settings: {
@@ -255,6 +253,7 @@ function createMetricsService() {
           dataProcessor: null,
           quotaChecker: null,
           batchProcessor: batchInterval,
+          topologySnapshot: null,
         };
 
         this.logger.info('Metrics service started successfully');
@@ -294,8 +293,8 @@ function createMetricsService() {
       }
     },
 
-    // 事件处理器（从events目录导入）
-    events: events,
+    // 事件处理器（核心摄取 / quota / system metrics）
+    events: coreEvents,
 
     methods: {},
 
@@ -303,7 +302,30 @@ function createMetricsService() {
     actions: createActions(star),
   });
 
-  return { star, metricsService };
+  const metricsLifecycleService = star.createService({
+    name: `${APP_NAME}-lifecycle`,
+
+    settings: {
+      multiTenant: true,
+    },
+
+    async created() {
+      this.logger.info('Metrics lifecycle service created');
+      (this as any).metricsState = metricsState;
+    },
+
+    async started() {
+      this.logger.info('Metrics lifecycle service started successfully');
+    },
+
+    async stopped() {
+      this.logger.info('Metrics lifecycle service stopped');
+    },
+
+    events: lifecycleEvents,
+  });
+
+  return { star, metricsService, metricsLifecycleService };
 }
 
 // 启动服务

@@ -22,6 +22,13 @@ export interface IUserTableAttributes {
   tenantId?: string; // 租户ID，支持多租户架构
   applicationIds?: string; // 用户可访问的应用ID列表，JSON字符串
 
+  /**
+   * @StarlightExclusive
+   * 是否已完成接入向导
+   * 仅 starlight 应用内生效
+   */
+  isOnboardingCompleted?: boolean;
+
   createdAt?: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -44,6 +51,11 @@ export class UserTable extends Model<IUserTableAttributes> implements IUserTable
   // 多应用支持字段
   public tenantId!: string | undefined;
   public applicationIds!: string | undefined;
+
+  /**
+   * @StarlightExclusive
+   */
+  public isOnboardingCompleted!: boolean | undefined;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -183,7 +195,17 @@ export default function (sequelize: Sequelize) {
           },
         },
       },
-
+      /**
+       * @StarlightExclusive
+       * 仅 starlight 应用使用
+       */
+      isOnboardingCompleted: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_onboarding_completed',
+        allowNull: true,
+        defaultValue: false,
+        comment: '是否已完成接入向导 (Starlight Exclusive)',
+      },
     },
     {
       sequelize,

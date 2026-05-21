@@ -41,6 +41,8 @@ export default function verifyCode(star: Starlight) {
           });
 
           if (res.code !== 200) {
+            // 删除发送失败的验证码缓存
+            await star.cacher.delete(`verifyCode:${ctx.params.email};type:${ctx.params.type}`);
             return {
               status: 200,
               data: {
@@ -63,6 +65,8 @@ export default function verifyCode(star: Starlight) {
           };
         } catch (error) {
           star.logger?.error(error);
+          // 删除发送失败的验证码缓存
+          await star.cacher.delete(`verifyCode:${ctx.params.email};type:${ctx.params.type}`);
           return {
             status: 500,
             data: {

@@ -17,6 +17,7 @@ export class AlertEngine {
   private star: Star;
   private rules: Map<string, AlertRule> = new Map();
   private checkInterval: NodeJS.Timeout | null = null;
+  private evaluationEnabled = false;
 
   constructor(star: Star) {
     this.star = star;
@@ -26,16 +27,19 @@ export class AlertEngine {
    * 加载规则 (模拟从数据库加载)
    */
   async loadRules() {
-    // TODO: 从数据库加载规则
-    // const rules = await this.star.db.models.AlertRule.findAll({ where: { enabled: true } });
-    // rules.forEach(rule => this.rules.set(rule.id, rule));
-    this.star.logger?.info('Alert rules loaded');
+    this.rules.clear();
+    this.evaluationEnabled = false;
+    this.star.logger?.warn('Alert engine rule source not configured; alert evaluation disabled');
   }
 
   /**
    * 启动告警检查
    */
   start(intervalMs: number = 60000) {
+    if (!this.evaluationEnabled || this.rules.size === 0) {
+      this.star.logger?.warn('Alert engine start skipped because no real rule source/evaluator is configured');
+      return;
+    }
     this.checkInterval = setInterval(() => this.checkRules(), intervalMs);
     this.star.logger?.info('Alert engine started');
   }
@@ -66,9 +70,12 @@ export class AlertEngine {
    */
   private async checkRule(rule: AlertRule) {
     try {
-      // 1. 查询指标数据 (模拟查询 InfluxDB)
-      // const value = await InfluxDBHandler.queryLastValue(rule.metric, rule.duration);
-      const currentValue = Math.random() * 100; // 模拟值
+      if (!this.evaluationEnabled) {
+        this.star.logger?.warn(`Alert evaluation skipped for rule ${rule.id}: no real evaluator configured`);
+        return;
+      }
+
+      const currentValue = 0;
 
       // 2. 判断是否满足条件
       let triggered = false;

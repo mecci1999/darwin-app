@@ -44,36 +44,44 @@ export default function (sequelize: Sequelize) {
       billId: {
         type: DataTypes.STRING(36),
         allowNull: false,
+        field: 'bill_id',
       },
       description: {
         type: DataTypes.STRING(500),
         allowNull: false,
+        field: 'description',
       },
       quantity: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'quantity',
       },
       unitPrice: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'unit_price',
       },
       amount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
+        field: 'amount',
       },
       metadata: {
         type: DataTypes.JSON,
         allowNull: true,
+        field: 'metadata',
       },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'created_at',
       },
       updatedAt: {
         type: DataTypes.DATE,
         allowNull: false,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -82,7 +90,7 @@ export default function (sequelize: Sequelize) {
       timestamps: true,
       indexes: [
         {
-          fields: ['billId'],
+          fields: ['bill_id'],
         },
       ],
     },

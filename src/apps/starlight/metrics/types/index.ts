@@ -5,6 +5,38 @@ import { DatabaseState } from 'db/mysql';
 import { AlertEngine } from '../utils/alert-engine';
 
 /**
+ * Metric Protocol Enum
+ */
+export enum MetricProtocol {
+  STANDARD = 'standard',
+  PROMETHEUS = 'prometheus',
+  DATADOG = 'datadog',
+}
+
+/**
+ * Metric Type Definition
+ */
+export enum MetricType {
+  GAUGE = 'gauge',
+  COUNTER = 'counter',
+  HISTOGRAM = 'histogram',
+  SUMMARY = 'summary',
+}
+
+/**
+ * Standard Metric Item Interface
+ * Defined in docs/METRICS_STANDARD.md
+ */
+export interface MetricItem {
+  metric: string;
+  timestamp: number;
+  value: number;
+  type: MetricType | string;
+  tags: Record<string, string>;
+  unit?: string;
+}
+
+/**
  * 指标数据微服务全局状态接口
  * 继承通用数据库状态接口
  */
@@ -20,11 +52,16 @@ export interface MetricsState extends DatabaseState {
     dataProcessor: NodeJS.Timeout | null;
     quotaChecker: NodeJS.Timeout | null;
     batchProcessor: NodeJS.Timeout | null;
+    topologySnapshot: NodeJS.Timeout | null;
   };
   cache: {
     metrics: Map<string, any>;
     quotas: Map<string, any>;
     aggregations: Map<string, any>;
+    topology?: {
+      snapshot?: any;
+      updatedAt?: number;
+    };
     lastCacheUpdate?: number;
   };
   stats: {

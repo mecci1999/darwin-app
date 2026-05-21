@@ -8,6 +8,7 @@ import * as Sequelize from 'sequelize';
 import { DataBaseTableNames } from 'typings';
 import { DatabaseInitializer } from './initializer';
 import databaseConnectionManager from './manager';
+import { mainConnection } from './index';
 
 // 导入所有API模块
 import * as authApi from './apis/auth';
@@ -83,9 +84,19 @@ export class DatabaseService {
             DataBaseTableNames.PaymentOrder,
             DataBaseTableNames.RefundRequest,
             DataBaseTableNames.PaymentProvider,
+            DataBaseTableNames.Bill,
+            DataBaseTableNames.BillItem,
+            DataBaseTableNames.UserBillingAddress,
+            DataBaseTableNames.BillingReminderSetting,
           ],
         },
       );
+
+      // Hack: 确保全局 mainConnection 也有引用，因为遗留的 API 代码依赖它
+      // 如果全局连接未设置，则使用当前服务的连接
+      if (!mainConnection.connection) {
+        mainConnection.connection = this.connection;
+      }
 
       // 如果需要完整初始化（包括IP黑名单等）
       if (config.enableIpBlacklist || config.enableIpSyncTimer) {
@@ -119,16 +130,47 @@ export class DatabaseService {
 
     try {
       // 创建独立的数据库连接
-      this.connection = databaseConnectionManager.getConnection({
-        benchmark: true,
-        logging: (sql: string, timing?: number) => {
-          if (timing && timing > 1000) {
-            this.star.logger?.warn(
-              `[${this.serviceName}] Slow query detected: ${sql}, timing: ${timing}ms`,
-            );
-          }
+      this.connection = databaseConnectionManager.getConnection(
+        {
+          benchmark: true,
+          logging: (sql: string, timing?: number) => {
+            if (timing && timing > 1000) {
+              this.star.logger?.warn(
+                `[${this.serviceName}] Slow query detected: ${sql}, timing: ${timing}ms`,
+              );
+            }
+          },
         },
-      });
+        {
+          models: [
+            DataBaseTableNames.User,
+            DataBaseTableNames.Config,
+            DataBaseTableNames.IPBlackList,
+            DataBaseTableNames.EmailAuth,
+            DataBaseTableNames.WechatAuth,
+            DataBaseTableNames.ScanAuth,
+            DataBaseTableNames.SubscriptionPlan,
+            DataBaseTableNames.UserSubscription,
+            DataBaseTableNames.UserQuota,
+            DataBaseTableNames.QuotaUsageHistory,
+            DataBaseTableNames.ApiKey,
+            DataBaseTableNames.ApiKeyStats,
+            DataBaseTableNames.PaymentOrder,
+            DataBaseTableNames.RefundRequest,
+            DataBaseTableNames.PaymentProvider,
+            DataBaseTableNames.Bill,
+            DataBaseTableNames.BillItem,
+            DataBaseTableNames.UserBillingAddress,
+            DataBaseTableNames.BillingReminderSetting,
+          ],
+        },
+      );
+
+      // Hack: 确保全局 mainConnection 也有引用，因为遗留的 API 代码依赖它
+      // 如果全局连接未设置，则使用当前服务的连接
+      if (!mainConnection.connection) {
+        mainConnection.connection = this.connection;
+      }
 
       this.isInitialized = true;
       this.star.logger?.info(`Database connection [${this.serviceName}] established`);

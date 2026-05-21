@@ -18,6 +18,7 @@ import { elasticsearchManager } from '../utils/elasticsearch-manager';
 import { ApiKeyManager } from '../utils/api-key-manager';
 import { QuotaChecker } from '../utils/quota-checker';
 import { LogUtils } from '../utils/log-utils';
+import { SYSTEM_LOG_TENANT_ID } from '../utils/access-control';
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -41,31 +42,40 @@ export async function searchLogs(
   try {
     const { apiKey, searchParams, tenantId, userId } = params;
 
-    // 验证API密钥
-    const validatedKey = await ApiKeyManager.getInstance().validateApiKey(apiKey);
-    if (!validatedKey) {
-      throw new Error('Invalid API key');
-    }
-
-    // 检查租户匹配
-    if (validatedKey.tenantId !== tenantId) {
-      throw new Error('API key does not belong to the specified tenant');
-    }
-
-    // 检查权限
-    const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(
-      validatedKey,
-      ApiPermission.SEARCH,
-    );
-    if (!hasSearchPermission) {
-      throw new Error('Insufficient permissions for log search');
-    }
-
-    // 检查搜索配额
+    const isSystemDarwinSearch = tenantId === SYSTEM_LOG_TENANT_ID && searchParams.originType === 'darwin-app';
     const quotaChecker = new QuotaChecker();
-    const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
-    if (!quotaCheck.allowed) {
-      throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
+
+    if (!isSystemDarwinSearch && apiKey) {
+      // 验证API密钥
+      const validatedKey = await ApiKeyManager.getInstance().validateApiKey(apiKey);
+      if (!validatedKey) {
+        throw new Error('Invalid API key');
+      }
+
+      // 检查租户匹配
+      if (validatedKey.tenantId !== tenantId) {
+        throw new Error('API key does not belong to the specified tenant');
+      }
+
+      // 检查权限
+      const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(
+        validatedKey,
+        ApiPermission.SEARCH,
+      );
+      if (!hasSearchPermission) {
+        throw new Error('Insufficient permissions for log search');
+      }
+
+      // 检查搜索配额
+      const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      if (!quotaCheck.allowed) {
+        throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
+      }
+    } else if (!isSystemDarwinSearch) {
+      const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      if (!quotaCheck.allowed) {
+        throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
+      }
     }
 
     // 验证搜索参数
@@ -82,7 +92,9 @@ export async function searchLogs(
     const searchResult = await esClient.searchLogs(normalizedParams);
 
     // 更新搜索配额使用量
-    await quotaChecker.updateSearchUsage(tenantId);
+    if (!isSystemDarwinSearch) {
+      await quotaChecker.updateSearchUsage(tenantId);
+    }
 
     // 记录搜索事件
     await ctx.emit('logs.searched', {
@@ -104,7 +116,15 @@ export async function searchLogs(
           message: log.message,
           timestamp: log.timestamp,
           service: log.service,
+          hostname: log.hostname,
+          containerId: log.containerId,
           source: log.source || LogSource.SERVER,
+          originType: log.originType,
+          visibility: log.visibility,
+          nodeID: log.nodeID,
+          namespace: log.namespace,
+          mod: log.mod,
+          svc: log.svc,
           metadata: log.metadata,
           tenantId: log.tenantId,
           userId: log.userId,

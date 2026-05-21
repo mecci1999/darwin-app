@@ -257,12 +257,12 @@ function validateLogStats(data: any): ValidationResult {
     errors.push('apiKey是必需的且必须是字符串');
   }
 
-  if (data.interval && !['minute', 'hour', 'day', 'week', 'month'].includes(data.interval)) {
-    errors.push('interval必须是minute、hour、day、week或month之一');
+  if (data.interval && !['minute', 'hour', 'day', 'week', 'month', '1m', '5m', '15m', '30m', '1h', '6h', '12h', '24h'].includes(data.interval)) {
+    errors.push('interval必须是minute、hour、day、week、month或有效时间窗口之一');
   }
 
-  if (data.groupBy && !Array.isArray(data.groupBy)) {
-    errors.push('groupBy必须是数组');
+  if (data.groupBy && !Array.isArray(data.groupBy) && typeof data.groupBy !== 'string') {
+    errors.push('groupBy必须是字符串或数组');
   }
 
   return {
@@ -282,10 +282,6 @@ function validateLogStream(data: any): ValidationResult {
 
   if (!data.tenantId || typeof data.tenantId !== 'string') {
     errors.push('tenantId是必需的且必须是字符串');
-  }
-
-  if (!data.apiKey || typeof data.apiKey !== 'string') {
-    errors.push('apiKey是必需的且必须是字符串');
   }
 
   if (data.format && !['json', 'text'].includes(data.format)) {

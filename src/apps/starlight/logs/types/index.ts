@@ -22,6 +22,9 @@ export enum LogSource {
   SYSTEM = 'system',
 }
 
+export type LogOriginType = 'darwin-app' | 'microservice';
+export type LogVisibility = 'admin' | 'tenant';
+
 // 基础日志接口
 export interface BaseLog {
   message: string;
@@ -29,8 +32,17 @@ export interface BaseLog {
   timestamp?: string | number | Date;
   metadata?: Record<string, any>;
   source?: LogSource;
+  originType?: LogOriginType;
+  visibility?: LogVisibility;
   tags?: string[];
   service?: string;
+  hostname?: string;
+  containerId?: string;
+  nodeID?: string;
+  namespace?: string;
+  mod?: string;
+  svc?: string;
+  version?: string;
   userId?: string;
   sessionId?: string;
   traceId?: string;
@@ -48,6 +60,8 @@ export interface StoredLog extends BaseLog {
   updatedAt: string;
   receivedAt: string;
   service?: string;
+  originType: LogOriginType;
+  visibility: LogVisibility;
 }
 
 // 日志摄取请求
@@ -168,6 +182,12 @@ export interface LogEntry {
   timestamp: string | number;
   service?: string;
   source: LogSource;
+  originType?: LogOriginType;
+  visibility?: LogVisibility;
+  nodeID?: string;
+  namespace?: string;
+  mod?: string;
+  svc?: string;
   metadata?: Record<string, any>;
   tenantId: string;
   userId?: string;
@@ -178,6 +198,7 @@ export interface LogEntry {
   environment?: string;
   version?: string;
   hostname?: string;
+  containerId?: string;
   ip?: string;
   userAgent?: string;
   requestId?: string;
@@ -222,6 +243,8 @@ export interface LogSearchParams {
   levels?: LogLevel[];
   source?: LogSource | LogSource[];
   sources?: LogSource[];
+  originType?: LogOriginType;
+  visibility?: LogVisibility;
   startTime?: string | number;
   endTime?: string | number;
   timeRange?: string;
@@ -273,6 +296,10 @@ export interface LogStatsParams {
   service?: string;
   level?: LogLevel;
   source?: LogSource;
+  query?: string;
+  hostname?: string;
+  startTime?: string | number;
+  endTime?: string | number;
   timeRange: string; // '1h', '24h', '7d', '30d'
   groupBy: 'level' | 'service' | 'source' | 'hour' | 'day';
   tenantId: string;
@@ -280,6 +307,9 @@ export interface LogStatsParams {
   environment?: string;
   tags?: string[];
   interval?: string;
+  originType?: LogOriginType;
+  visibility?: LogVisibility;
+  filters?: Record<string, any>;
 }
 
 // 日志统计结果
@@ -322,12 +352,15 @@ export interface LogExportParams {
   limit?: number;
   fields?: string[];
   compression?: boolean;
+  originType?: LogOriginType;
+  visibility?: LogVisibility;
 }
 
 // 日志流参数
 export interface LogStreamParams {
   service?: string;
   level?: LogLevel | LogLevel[];
+  keywords?: string;
   source?: LogSource;
   tenantId: string;
   userId?: string;
@@ -620,7 +653,7 @@ export interface ESQueryBuilder {
 
 // 日志流事件
 export interface LogStreamEvent {
-  type: 'log' | 'error' | 'connected' | 'disconnected' | 'heartbeat';
+  type: 'log' | 'error' | 'connected' | 'disconnected' | 'heartbeat' | 'message' | 'broadcast';
   data?: LogEntry | string;
   timestamp: string;
 }

@@ -13,9 +13,11 @@ export interface StreamConnection {
   userId?: string;
   params: LogStreamParams;
   response: any; // HTTP Response对象
+  createdAt: number;
   lastActivity: number;
   isActive: boolean;
   filters: StreamFilter[];
+  messageCount: number;
 }
 
 export interface StreamFilter {
@@ -34,6 +36,7 @@ export interface StreamStats {
 }
 
 export class StreamManager extends EventEmitter {
+  private static instance: StreamManager;
   private connections: Map<string, StreamConnection> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -46,10 +49,17 @@ export class StreamManager extends EventEmitter {
     lastActivity: Date.now(),
   };
 
-  constructor(private logger?: any) {
+  private constructor(private logger?: any) {
     super();
     this.startHeartbeat();
     this.startCleanup();
+  }
+
+  static getInstance(): StreamManager {
+    if (!StreamManager.instance) {
+      StreamManager.instance = new StreamManager();
+    }
+    return StreamManager.instance;
   }
 
   /**
@@ -82,9 +92,11 @@ export class StreamManager extends EventEmitter {
         userId,
         params,
         response,
+        createdAt: Date.now(),
         lastActivity: Date.now(),
         isActive: true,
         filters: this.parseFilters(params),
+        messageCount: 0,
       };
 
       this.connections.set(connectionId, connection);
@@ -133,11 +145,11 @@ export class StreamManager extends EventEmitter {
   /**
    * 关闭连接
    */
-  closeConnection(connectionId: string): void {
+  closeConnection(connectionId: string): boolean {
     try {
       const connection = this.connections.get(connectionId);
       if (!connection) {
-        return;
+        return false;
       }
 
       connection.isActive = false;
@@ -168,15 +180,17 @@ export class StreamManager extends EventEmitter {
         tenantId: connection.tenantId,
         activeConnections: this.stats.activeConnections,
       });
+      return true;
     } catch (error: any) {
       this.logger?.error('关闭流连接失败', { error: error.message, connectionId });
+      return false;
     }
   }
 
   /**
    * 广播日志到所有匹配的连接
    */
-  broadcastLog(log: StoredLog): void {
+  broadcastLog(log: StoredLog): number {
     try {
       const event: LogStreamEvent = {
         type: 'log',
@@ -221,8 +235,10 @@ export class StreamManager extends EventEmitter {
           totalActiveConnections: this.stats.activeConnections,
         });
       }
+      return sentCount;
     } catch (error: any) {
       this.logger?.error('广播日志失败', { error: error.message, logId: log.id });
+      return 0;
     }
   }
 
@@ -238,6 +254,8 @@ export class StreamManager extends EventEmitter {
 
       const data = `data: ${JSON.stringify(event)}\n\n`;
       connection.response.write(data);
+
+      connection.messageCount++;
 
       // 更新字节传输统计
       this.stats.bytesTransferred += Buffer.byteLength(data, 'utf8');
@@ -257,18 +275,28 @@ export class StreamManager extends EventEmitter {
   /**
    * 发送心跳到所有连接
    */
-  private sendHeartbeat(): void {
+  sendHeartbeat(tenantId?: string): number {
     const heartbeatEvent: LogStreamEvent = {
       type: 'heartbeat',
       data: `心跳 - 活跃连接数: ${this.stats.activeConnections}`,
       timestamp: new Date().toISOString(),
     };
 
+    let sentCount = 0;
+
     for (const [connectionId, connection] of this.connections.entries()) {
-      if (connection.isActive) {
-        this.sendToConnection(connectionId, heartbeatEvent);
+      if (!connection.isActive) {
+        continue;
+      }
+      if (tenantId && connection.tenantId !== tenantId) {
+        continue;
+      }
+      if (this.sendToConnection(connectionId, heartbeatEvent)) {
+        sentCount++;
       }
     }
+
+    return sentCount;
   }
 
   /**
@@ -360,8 +388,13 @@ export class StreamManager extends EventEmitter {
       });
     }
 
-    // keyword属性在LogStreamParams中不存在，移除此过滤器
-    // 如果需要关键字搜索，应该使用query参数或其他方式
+    if (params.keywords) {
+      filters.push({
+        type: 'keyword',
+        value: params.keywords,
+        operator: 'contains',
+      });
+    }
 
     return filters;
   }
@@ -391,7 +424,7 @@ export class StreamManager extends EventEmitter {
   /**
    * 获取租户连接数
    */
-  private getTenantConnectionCount(tenantId: string): number {
+  getTenantConnectionCount(tenantId: string): number {
     return this.stats.connectionsByTenant[tenantId] || 0;
   }
 
@@ -416,9 +449,9 @@ export class StreamManager extends EventEmitter {
   /**
    * 清理非活跃连接
    */
-  private cleanupInactiveConnections(): void {
+  cleanupInactiveConnections(maxInactiveTime?: number): number {
     const now = Date.now();
-    const timeout = STREAM_CONFIG.CONNECTION_TIMEOUT;
+    const timeout = maxInactiveTime ?? STREAM_CONFIG.CONNECTION_TIMEOUT;
     const toRemove: string[] = [];
 
     for (const [connectionId, connection] of this.connections.entries()) {
@@ -445,6 +478,8 @@ export class StreamManager extends EventEmitter {
         activeConnections: this.stats.activeConnections,
       });
     }
+
+    return toRemove.length;
   }
 
   /**
@@ -452,6 +487,10 @@ export class StreamManager extends EventEmitter {
    */
   getStats(): StreamStats {
     return { ...this.stats };
+  }
+
+  getConnectionStats(): StreamStats {
+    return this.getStats();
   }
 
   /**
@@ -470,6 +509,10 @@ export class StreamManager extends EventEmitter {
     );
   }
 
+  getUserConnectionCount(tenantId: string, userId: string): number {
+    return this.getTenantConnections(tenantId).filter((conn) => conn.userId === userId).length;
+  }
+
   /**
    * 向租户的所有连接发送消息
    */
@@ -485,6 +528,44 @@ export class StreamManager extends EventEmitter {
       connectionCount: tenantConnections.length,
       eventType: event.type,
     });
+  }
+
+  updateConnectionFilters(connectionId: string, filters: StreamFilter[] | any): boolean {
+    const connection = this.connections.get(connectionId);
+    if (!connection) {
+      return false;
+    }
+
+    connection.filters = Array.isArray(filters) ? filters : (filters as StreamFilter[]);
+    connection.params = {
+      ...connection.params,
+      filters,
+    };
+    connection.lastActivity = Date.now();
+    return true;
+  }
+
+  sendMessageToConnection(
+    connectionId: string,
+    message: any,
+    eventType: LogStreamEvent['type'] = 'log',
+  ): boolean {
+    const event: LogStreamEvent = {
+      type: eventType,
+      data: message,
+      timestamp: new Date().toISOString(),
+    };
+
+    return this.sendToConnection(connectionId, event);
+  }
+
+  start(): void {
+    if (!this.heartbeatInterval) {
+      this.startHeartbeat();
+    }
+    if (!this.cleanupInterval) {
+      this.startCleanup();
+    }
   }
 
   /**
@@ -517,4 +598,4 @@ export class StreamManager extends EventEmitter {
 }
 
 // 导出单例实例
-export const streamManager = new StreamManager();
+export const streamManager = StreamManager.getInstance();

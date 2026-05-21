@@ -70,15 +70,6 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
             updatedAt: new Date(),
           });
 
-          // 处理计划变更
-          await ctx.call('subscription.1.handlePlanChange', {
-            tenantId,
-            userId,
-            planId,
-            oldPlanId,
-            subscriptionId,
-          });
-
           // 发送配额更新事件
           await ctx.emit('quota.updated', {
             tenantId,
@@ -101,7 +92,7 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
     'subscription.cancelled': {
       async handler(ctx: Context) {
         try {
-          const { tenantId, userId, subscriptionId, reason } = ctx.params;
+          const { tenantId, userId, reason, subscriptionId } = ctx.params;
 
           // 更新订阅状态
           const subscriptionKey = `subscription:${tenantId}:${userId}`;
@@ -114,11 +105,13 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
           }
 
           // 处理取消逻辑
-          await ctx.call('subscription.1.handleCancellation', {
-            tenantId,
-            userId,
-            subscriptionId,
-            reason,
+          await (ctx.service as any)?.handleCancellation?.({
+            params: {
+              tenantId,
+              userId,
+              subscriptionId,
+              reason,
+            },
           });
 
           // 发送配额更新事件
@@ -141,20 +134,10 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
     'payment.succeeded': {
       async handler(ctx: Context) {
         try {
-          const { tenantId, userId, subscriptionId, amount, currency } = ctx.params;
+          const { tenantId, amount, currency } = ctx.params;
 
           // 更新收入统计
           subscriptionState.stats.totalRevenue += amount;
-
-          // 处理支付成功逻辑
-          await ctx.call('subscription.1.handlePaymentSuccess', {
-            tenantId,
-            userId,
-            subscriptionId,
-            amount,
-            currency,
-            timestamp: Date.now(),
-          });
 
           ctx.service?.logger?.info(
             `Payment succeeded for tenant: ${tenantId}, amount: ${amount} ${currency}`,
@@ -170,15 +153,6 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
       async handler(ctx: Context) {
         try {
           const { tenantId, userId, subscriptionId, reason } = ctx.params;
-
-          // 处理支付失败逻辑
-          await ctx.call('subscription.1.handlePaymentFailure', {
-            tenantId,
-            userId,
-            subscriptionId,
-            reason,
-            timestamp: Date.now(),
-          });
 
           // 发送警告通知
           await ctx.emit('notification.send', {
@@ -203,11 +177,12 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
           const { tenantId, userId, planId, trialEndDate } = ctx.params;
 
           // 设置试用期配额
-          await ctx.call('subscription.1.setupTrialQuota', {
+          await ctx.emit('quota.updated', {
             tenantId,
             userId,
             planId,
             trialEndDate,
+            action: 'trial_start',
           });
 
           ctx.service.logger.info(`Trial started for tenant: ${tenantId}, user: ${userId}`);
@@ -225,9 +200,10 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
 
           if (!converted) {
             // 试用期结束但未转换为付费用户
-            await ctx.call('subscription.1.handleTrialExpiry', {
+            await ctx.emit('quota.updated', {
               tenantId,
               userId,
+              action: 'trial_end',
             });
 
             // 发送转换提醒
@@ -235,8 +211,7 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
               tenantId,
               userId,
               type: 'trial_expired',
-              message:
-                'Your trial period has ended. Please upgrade to continue using our service.',
+              message: 'Your trial period has ended. Please upgrade to continue using our service.',
               severity: 'info',
             });
           }
@@ -257,7 +232,7 @@ export function createEvents(star: Starlight, subscriptionState: SubscriptionSta
           const { tenantId } = ctx.params;
 
           // 清理租户相关订阅数据
-          await ctx.call('subscription.1.cleanupTenantSubscriptions', { tenantId });
+          await (ctx.service as any)?.cleanupTenantSubscriptions?.({ params: { tenantId } });
 
           // 清理缓存
           for (const [key] of subscriptionState.cache.subscriptions) {

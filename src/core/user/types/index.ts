@@ -35,6 +35,11 @@ export interface UserInfo {
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt?: Date;
+  /**
+   * @StarlightExclusive
+   * 是否已完成接入向导
+   */
+  isOnboardingCompleted?: boolean;
 }
 
 // 用户资料

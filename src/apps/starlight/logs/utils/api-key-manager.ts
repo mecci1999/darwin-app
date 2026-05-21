@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { findApiKeyByKey, updateApiKeyLastUsed, updateApiKeyStats } from 'db/mysql/apis/apiKey';
 import { ApiKey, ApiPermission, CreateApiKeyRequest } from '../types';
 
 // 简单的内存存储，生产环境应使用数据库
@@ -46,16 +47,41 @@ export class ApiKeyManager {
 
   // 验证API密钥
   async validateApiKey(key: string): Promise<ApiKey | null> {
-    const apiKey = apiKeys.get(key);
-    
-    if (!apiKey || !apiKey.isActive) {
-      return null;
+    const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+    const dbKey = await findApiKeyByKey(keyHash);
+
+    if (dbKey?.isActive) {
+      await updateApiKeyLastUsed(dbKey.id);
+      await updateApiKeyStats(dbKey.id, 1);
+
+      const tenantId = (dbKey as any).tenantId || 'default';
+
+      return {
+        id: dbKey.id,
+        name: dbKey.keyName,
+        description: '',
+        key,
+        tenantId,
+        userId: dbKey.userId,
+        permissions: dbKey.permissions
+          ? (Object.keys(dbKey.permissions) as ApiPermission[])
+          : [ApiPermission.INGEST, ApiPermission.SEARCH],
+        isActive: dbKey.isActive,
+        lastUsedAt: Date.now(),
+        createdAt: dbKey.createdAt ? new Date(dbKey.createdAt).getTime() : Date.now(),
+        updatedAt: dbKey.updatedAt ? new Date(dbKey.updatedAt).getTime() : Date.now(),
+        expiresAt: dbKey.expiresAt ? new Date(dbKey.expiresAt).getTime() : undefined,
+      };
     }
 
-    // 更新最后使用时间
-    apiKey.lastUsedAt = Date.now();
-    
-    return apiKey;
+    const memoryKey = apiKeys.get(key);
+
+    if (memoryKey?.isActive) {
+      memoryKey.lastUsedAt = Date.now();
+      return memoryKey;
+    }
+
+    return null;
   }
 
   // 检查权限
