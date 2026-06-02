@@ -1,6 +1,6 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
-import { enqueueDarwinLogRecord } from '../utils/darwin-log-capture';
+import { enqueueDarwinLogRecord, enqueueDarwinLogRecords } from '../utils/darwin-log-capture';
 
 export default function captureDarwin(star: Starlight) {
   return {
@@ -11,12 +11,16 @@ export default function captureDarwin(star: Starlight) {
 
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const accepted = enqueueDarwinLogRecord(ctx.params);
+          const payload = ctx.params as any;
+          const records = Array.isArray(payload?.records) ? payload.records : undefined;
+          const accepted = records
+            ? enqueueDarwinLogRecords(records)
+            : (enqueueDarwinLogRecord(payload) ? 1 : 0);
           return {
             status: HttpStatusCode.OK,
             data: {
               content: { accepted },
-              message: accepted ? 'Darwin log captured' : 'Darwin log ignored',
+              message: accepted > 0 ? 'Darwin log captured' : 'Darwin log ignored',
               code: HttpResponseCode.Success,
               success: true,
             },

@@ -11,6 +11,7 @@ const envFile = process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
 import { DatabaseService } from 'db/mysql';
+import { isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
@@ -52,6 +53,7 @@ const metricsState: MetricsState = {
     metrics: new Map(),
     quotas: new Map(),
     aggregations: new Map(),
+    topologyObservedEdges: new Map(),
     lastCacheUpdate: 0,
   },
   stats: {
@@ -88,10 +90,10 @@ function createMetricsService() {
   // 创建Star实例
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `metrics-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: {

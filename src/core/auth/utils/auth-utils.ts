@@ -6,6 +6,30 @@ import { AuthState } from '../types';
  * 认证工具类
  */
 export class AuthUtils {
+  static async getRSAKeys(state?: AuthState, logger?: any): Promise<{ publicKey: string; privateKey: string } | null> {
+    if (state?.rsaKeys?.publicKey && state?.rsaKeys?.privateKey) {
+      return state.rsaKeys;
+    }
+
+    const result = (await queryConfigs(['rsa'])) || [];
+    if (result.length === 0) {
+      logger?.error('获取rsa密钥对失败');
+      return null;
+    }
+
+    const rsa = JSON.parse(result[0].value);
+    if (!rsa?.publicKey || !rsa?.privateKey) {
+      return null;
+    }
+
+    if (state) {
+      state.rsaKeys = rsa;
+      state.rsaLoadedAt = Date.now();
+    }
+
+    return rsa;
+  }
+
   /**¨
    * 生成RSA密钥对
    */
@@ -34,6 +58,8 @@ export class AuthUtils {
       if (result.length > 0) {
         const rsaData = JSON.parse(result[0].value);
         if (rsaData.publicKey && rsaData.privateKey) {
+          state.rsaKeys = rsaData;
+          state.rsaLoadedAt = Date.now();
           logger?.info('RSA密钥对已存在，跳过生成', rsaData.privateKey);
           return;
         }
@@ -43,6 +69,8 @@ export class AuthUtils {
       const keyPair = AuthUtils.generateRSAKeyPair();
 
       await saveOrUpdateConfigs([{ key: 'rsa', value: JSON.stringify(keyPair) }]);
+      state.rsaKeys = keyPair;
+      state.rsaLoadedAt = Date.now();
       logger?.info('RSA密钥对生成并保存成功');
     } catch (error) {
       logger?.error('检查或生成RSA密钥对时发生错误:', error);

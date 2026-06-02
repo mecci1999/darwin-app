@@ -81,8 +81,8 @@ importers:
         specifier: ^3.0.3
         version: 3.0.3
       node-universe:
-        specifier: ^1.6.7
-        version: 1.6.7(encoding@0.1.13)
+        specifier: file:../node-universe
+        version: file:../node-universe(encoding@0.1.13)
       node-universe-gateway:
         specifier: ^1.0.7
         version: 1.0.7(encoding@0.1.13)
@@ -3782,8 +3782,8 @@ packages:
     resolution: {integrity: sha512-jRniCdCLPiZnfSn+/ytilTi3znMBZBunafp56ZDApi4ft0zV9bnmYnHwhdRL6K3J74GFcdAZ5g3774U1JNeIqA==}
     engines: {node: '>= 18.x.x'}
 
-  node-universe@1.6.7:
-    resolution: {integrity: sha512-BU7D11ToHDCfppLXjtPj4gsn1l8uulQXL8kFGbJPFjkcqlrwpxX34sjF8sR5s1ewR8/LbvRG4gmTkmpTBB9AJw==}
+  node-universe@file:../node-universe:
+    resolution: {directory: ../node-universe, type: directory}
     peerDependencies:
       amqplib: '*'
       avsc: '*'
@@ -9326,7 +9326,7 @@ snapshots:
       isstream: 0.1.2
       kleur: 4.1.5
       lodash: 4.18.1
-      node-universe: 1.6.7(encoding@0.1.13)
+      node-universe: file:../node-universe(encoding@0.1.13)
       path-to-regexp: 6.3.0
       qs: 6.15.1
       serve-static: 1.16.3
@@ -9348,7 +9348,7 @@ snapshots:
       - utf-8-validate
       - winston
 
-  node-universe@1.6.7(encoding@0.1.13):
+  node-universe@file:../node-universe(encoding@0.1.13):
     dependencies:
       cbor-x: 1.6.4
       crypto: 1.0.1

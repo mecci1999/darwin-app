@@ -141,9 +141,23 @@ export class ElasticsearchClient {
     await this.initializeIndex();
   }
 
+  private isIndexNotFoundError(error: any): boolean {
+    return error?.meta?.body?.error?.type === 'index_not_found_exception' || error?.meta?.statusCode === 404;
+  }
+
   // 批量存储日志
-  async bulkIndex(logs: StoredLog[]): Promise<void> {
-    if (logs.length === 0) return;
+  async bulkIndex(logs: StoredLog[]): Promise<{
+    succeededLogs: StoredLog[];
+    failedLogs: StoredLog[];
+    errorItems: Array<Record<string, any>>;
+  }> {
+    if (logs.length === 0) {
+      return {
+        succeededLogs: [],
+        failedLogs: [],
+        errorItems: [],
+      };
+    }
     await this.ensureIndexInitialized();
 
     const body = logs.flatMap((log) => [{ index: { _index: this.indexName, _id: log.id } }, log]);
@@ -154,10 +168,41 @@ export class ElasticsearchClient {
         body,
       });
 
+      const failedLogIds = new Set<string>();
+      const errorItems = (response.items || [])
+        .map((item: any, index: number) => {
+          const error = item?.index?.error;
+          const log = logs[index];
+
+          if (!error || !log) return null;
+          failedLogIds.add(log.id);
+
+          return {
+            id: log.id,
+            status: item.index?.status,
+            errorType: error.type,
+            reason: error.reason,
+            causedBy: error.caused_by,
+            service: log.service,
+            level: log.level,
+            timestamp: log.timestamp,
+            message: log.message,
+          };
+        })
+        .filter(Boolean) as Array<Record<string, any>>;
+
+      const failedLogs = logs.filter((log) => failedLogIds.has(log.id));
+      const succeededLogs = logs.filter((log) => !failedLogIds.has(log.id));
+
       if (response.errors) {
-        const errorItems = response.items?.filter((item: any) => item.index?.error);
         console.error('批量索引部分失败:', errorItems);
       }
+
+      return {
+        succeededLogs,
+        failedLogs,
+        errorItems,
+      };
     } catch (error) {
       console.error('批量索引失败:', error);
       throw error;
@@ -229,6 +274,30 @@ export class ElasticsearchClient {
     return targetField;
   }
 
+  private resolveExactMatchField(field: string): string {
+    const keywordCompatibleFields = new Set([
+      'id',
+      'level',
+      'service',
+      'source',
+      'hostname',
+      'containerId',
+      'originType',
+      'visibility',
+      'nodeID',
+      'namespace',
+      'mod',
+      'svc',
+      'tenantId',
+      'message',
+    ]);
+
+    if (field.includes('.')) return field;
+    if (keywordCompatibleFields.has(field)) return `${field}.keyword`;
+
+    return field;
+  }
+
   // 获取日志统计
   async getLogStats(
     params: LogStatsParams,
@@ -242,8 +311,8 @@ export class ElasticsearchClient {
   }> {
     await this.ensureIndexInitialized();
     const query = this.buildStatsQuery(params);
-    query.query.bool.must.push({ term: { tenantId: tenantId } });
-    if (userId) query.query.bool.must.push({ term: { userId: userId } });
+    query.query.bool.must.push({ term: { [this.resolveExactMatchField('tenantId')]: tenantId } });
+    if (userId) query.query.bool.must.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     try {
       const response = await this.client.search({
@@ -251,12 +320,6 @@ export class ElasticsearchClient {
         query: query.query,
         size: 0,
         aggs: {
-          breakdown: {
-            terms: {
-              field: this.resolveAggregationField(params.groupBy || 'level'),
-              size: 100,
-            },
-          },
           levels: {
             terms: {
               field: this.resolveAggregationField('level'),
@@ -267,6 +330,12 @@ export class ElasticsearchClient {
             terms: {
               field: this.resolveAggregationField('service'),
               size: 10,
+            },
+          },
+          breakdown: {
+            terms: {
+              field: this.resolveAggregationField(params.groupBy || 'level'),
+              size: 100,
             },
           },
         },
@@ -334,10 +403,10 @@ export class ElasticsearchClient {
   ): Promise<Array<{ timestamp: number; count: number; groups?: Record<string, number> }>> {
     const { start, end } = this.parseTimeRange(timeRange);
     const must: any[] = [
-      { term: { tenantId } },
+      { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
       { range: { timestamp: { gte: start, lte: end } } },
     ];
-    if (userId) must.push({ term: { userId } });
+    if (userId) must.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     const query = { bool: { must } };
 
@@ -391,10 +460,10 @@ export class ElasticsearchClient {
   }> {
     const { start, end } = this.parseTimeRange(timeRange);
     const baseMust: any[] = [
-      { term: { tenantId } },
+      { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
       { range: { timestamp: { gte: start, lte: end } } },
     ];
-    if (userId) baseMust.push({ term: { userId } });
+    if (userId) baseMust.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     try {
       const response = await this.client.search({
@@ -404,7 +473,7 @@ export class ElasticsearchClient {
         aggs: {
           total_count: { value_count: { field: '_index' } },
           error_filter: {
-            filter: { terms: { level: ['error', 'fatal'] } },
+            filter: { terms: { [this.resolveExactMatchField('level')]: ['error', 'fatal'] } },
             aggs: {
               error_trends: {
                 date_histogram: {
@@ -485,10 +554,10 @@ export class ElasticsearchClient {
   > {
     const { start, end } = this.parseTimeRange(timeRange);
     const must: any[] = [
-      { term: { tenantId } },
+      { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
       { range: { timestamp: { gte: start, lte: end } } },
     ];
-    if (userId) must.push({ term: { userId } });
+    if (userId) must.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     try {
       const response = await this.client.search({
@@ -499,7 +568,7 @@ export class ElasticsearchClient {
           services: {
             terms: { field: this.resolveAggregationField('service'), size: limit },
             aggs: {
-              errors: { filter: { terms: { level: ['error', 'fatal'] } } },
+              errors: { filter: { terms: { [this.resolveExactMatchField('level')]: ['error', 'fatal'] } } },
               avg_duration: { avg: { field: 'metadata.duration' } },
             },
           },
@@ -532,10 +601,10 @@ export class ElasticsearchClient {
   ): Promise<Array<{ level: LogLevel; count: number; percentage: number }>> {
     const { start, end } = this.parseTimeRange(timeRange);
     const must: any[] = [
-      { term: { tenantId } },
+      { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
       { range: { timestamp: { gte: start, lte: end } } },
     ];
-    if (userId) must.push({ term: { userId } });
+    if (userId) must.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     try {
       const response = await this.client.search({
@@ -570,10 +639,10 @@ export class ElasticsearchClient {
   ): Promise<Array<{ source: LogSource; count: number; percentage: number }>> {
     const { start, end } = this.parseTimeRange(timeRange);
     const must: any[] = [
-      { term: { tenantId } },
+      { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
       { range: { timestamp: { gte: start, lte: end } } },
     ];
-    if (userId) must.push({ term: { userId } });
+    if (userId) must.push({ term: { [this.resolveExactMatchField('userId')]: userId } });
 
     try {
       const response = await this.client.search({
@@ -654,27 +723,27 @@ export class ElasticsearchClient {
 
     // 精确匹配过滤
     if (params.service) {
-      must.push({ term: { service: params.service } });
+      must.push({ term: { [this.resolveExactMatchField('service')]: params.service } });
     }
     if (params.level) {
-      must.push({ term: { level: params.level } });
+      must.push({ term: { [this.resolveExactMatchField('level')]: params.level } });
     }
     if (params.source) {
-      must.push({ term: { source: params.source } });
+      must.push({ term: { [this.resolveExactMatchField('source')]: params.source } });
     }
     if (params.originType) {
-      must.push({ term: { originType: params.originType } });
+      must.push({ term: { [this.resolveExactMatchField('originType')]: params.originType } });
     }
     if (params.visibility) {
-      must.push({ term: { visibility: params.visibility } });
+      must.push({ term: { [this.resolveExactMatchField('visibility')]: params.visibility } });
     }
     if (params.hostname) {
-      must.push({ term: { hostname: params.hostname } });
+      must.push({ term: { [this.resolveExactMatchField('hostname')]: params.hostname } });
     }
     if (params.filters) {
       Object.entries(params.filters).forEach(([field, value]) => {
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          must.push({ term: { [field]: value } });
+          must.push({ term: { [this.resolveExactMatchField(field)]: value } });
         }
       });
     }
@@ -695,7 +764,7 @@ export class ElasticsearchClient {
     const must: any[] = [];
 
     if (params.service) {
-      must.push({ term: { service: params.service } });
+      must.push({ term: { [this.resolveExactMatchField('service')]: params.service } });
     }
     if (params.query) {
       must.push({
@@ -708,27 +777,27 @@ export class ElasticsearchClient {
       });
     }
     if (params.level) {
-      must.push({ term: { level: params.level } });
+      must.push({ term: { [this.resolveExactMatchField('level')]: params.level } });
     }
     if (params.source) {
-      must.push({ term: { source: params.source } });
+      must.push({ term: { [this.resolveExactMatchField('source')]: params.source } });
     }
     if (params.originType) {
-      must.push({ term: { originType: params.originType } });
+      must.push({ term: { [this.resolveExactMatchField('originType')]: params.originType } });
     }
     if (params.visibility) {
-      must.push({ term: { visibility: params.visibility } });
+      must.push({ term: { [this.resolveExactMatchField('visibility')]: params.visibility } });
     }
     if (params.environment) {
       must.push({ term: { environment: params.environment } });
     }
     if (params.hostname) {
-      must.push({ term: { hostname: params.hostname } });
+      must.push({ term: { [this.resolveExactMatchField('hostname')]: params.hostname } });
     }
     if (params.filters) {
       Object.entries(params.filters).forEach(([field, value]) => {
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          must.push({ term: { [field]: value } });
+          must.push({ term: { [this.resolveExactMatchField(field)]: value } });
         }
       });
     }
@@ -767,6 +836,7 @@ export class ElasticsearchClient {
     confidence: number;
     topErrors: any[];
   }> {
+    await this.ensureIndexInitialized();
     const { start, end } = this.parseTimeRange(timeRange);
 
     try {
@@ -777,7 +847,8 @@ export class ElasticsearchClient {
           bool: {
             must: [
               { term: { tenantId: tenantId } },
-              { terms: { level: ['error', 'fatal'] } },
+              { term: { [this.resolveExactMatchField('tenantId')]: tenantId } },
+              { terms: { [this.resolveExactMatchField('level')]: ['error', 'fatal'] } },
               { range: { timestamp: { gte: start, lte: end } } },
             ],
           },
@@ -827,6 +898,15 @@ export class ElasticsearchClient {
         topErrors: buckets.map((b: any) => ({ message: b.key, count: b.doc_count })),
       };
     } catch (error) {
+      if (this.isIndexNotFoundError(error)) {
+        return {
+          summary: '未检测到明显异常',
+          possibleCauses: [],
+          recommendations: [],
+          confidence: 1.0,
+          topErrors: [],
+        };
+      }
       console.error('异常分析失败:', error);
       throw error;
     }

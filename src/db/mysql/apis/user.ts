@@ -75,6 +75,27 @@ export async function queryAllUsers() {
   }
 }
 
+export async function findUsersByUserIds(userIds: string[]): Promise<IUserTableAttributes[]> {
+  try {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+
+    const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
+    if (!model) return [];
+
+    const users = await model.findAll({
+      where: { userId: userIds },
+      attributes: {
+        exclude: ['deletedAt'],
+      },
+    });
+
+    return users.map((user) => user.toJSON());
+  } catch (error) {
+    console.log('findUsersByUserIds error:', error);
+    return [];
+  }
+}
+
 /**
  * 根据userId查询用户详细信息
  */

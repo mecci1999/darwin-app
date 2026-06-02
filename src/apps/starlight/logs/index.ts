@@ -4,6 +4,7 @@
  * 支持多种日志格式：JSON、文本、Syslog、结构化日志
  */
 import { DatabaseService } from 'db/mysql';
+import { DEFAULT_LOG_CATEGORY_ENABLED, isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import '../../../utils/loadEnv';
@@ -23,6 +24,7 @@ import { createEventHandlersManager } from './events';
 import { LogsState } from './types/index';
 import {
   createDarwinLogCaptureMiddleware,
+  publishDarwinLogToGateway,
   startDarwinLogCapture,
   stopDarwinLogCapture,
 } from './utils/darwin-log-capture';
@@ -72,7 +74,7 @@ function createLogsService() {
     nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: {
@@ -119,7 +121,13 @@ function createLogsService() {
         ttl: 3600, // 1小时缓存
       },
     },
-    logger: true,
+    logger: {
+      type: 'Console',
+      options: {
+        level: 'info',
+        categories: DEFAULT_LOG_CATEGORY_ENABLED,
+      },
+    },
     middlewares: [createDarwinLogCaptureMiddleware()],
     metrics: {
       enabled: true,
@@ -224,7 +232,11 @@ function createLogsService() {
           username: this.settings.elasticsearch.auth?.username,
         });
         logsState.elasticsearchConnected = true;
-        startDarwinLogCapture();
+        startDarwinLogCapture({
+          onBroadcast: (log) => {
+            void publishDarwinLogToGateway(star, log)
+          },
+        });
         this.logger.info('Elasticsearch connection initialized');
 
         // 启动处理器（示例实现）

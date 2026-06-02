@@ -4,6 +4,9 @@ import { searchLogs } from '../methods/log-search';
 import { getLogStats } from '../methods/log-stats';
 import { elasticsearchManager } from '../utils/elasticsearch-manager';
 import { validateLogSearch, validateLogStats } from '../validators';
+import {
+  flushDarwinLogCaptureNow,
+} from '../utils/darwin-log-capture';
 import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
 
 const toTraceSpan = (log: any) => ({
@@ -62,6 +65,9 @@ export default function readModel(star: Starlight) {
                 success: false,
               },
             };
+          }
+          if (isDarwinLogRequest(originType)) {
+            await flushDarwinLogCaptureNow();
           }
           const searchParams = {
             ...ctx.params,
@@ -246,16 +252,45 @@ export default function readModel(star: Starlight) {
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const tenantId = (ctx.params as any)?.tenantId || (ctx.meta as any)?.tenantId;
+          const originType = (ctx.params as any)?.originType;
+          const tenantId = resolveLogTenantId(ctx, originType);
           const timeRange = (ctx.params as any)?.timeRange || '24h';
+          const service = String((ctx.params as any)?.service || 'unknown-service');
+          if (!tenantId) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: 'tenantId is required',
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
           const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
           const analysis = await esClient.analyzeExceptions(tenantId, timeRange);
+          const startTime = normalizeDateParam((ctx.params as any)?.startTime) || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const endTime = normalizeDateParam((ctx.params as any)?.endTime) || new Date().toISOString();
+          const items = (analysis?.topErrors || []).map((item: any, index: number) => ({
+            id: `exception-${index}`,
+            message: item.message,
+            type: 'Error',
+            service,
+            count: Number(item.count || 0),
+            affectedUsers: 0,
+            trend: 0,
+            firstOccurrence: startTime,
+            lastOccurrence: endTime,
+            stackTrace: '',
+            sampleLogs: [],
+            hourlyTrend: [],
+          }));
 
           return {
             status: HttpStatusCode.OK,
             data: {
               content: {
-                items: analysis?.topErrors || [],
+                items,
                 analysis,
               },
               message: '获取异常列表成功',

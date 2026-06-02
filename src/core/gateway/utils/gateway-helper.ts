@@ -92,10 +92,10 @@ export class GatewayHelper {
    * 设置认证cookie
    */
   static setAuthCookies(res: GatewayResponse, token: string, refreshToken: string) {
-    res.setHeader(
-      'Set-Cookie',
-      `ACCESS_TOKEN=${token}; REFRESH_TOKEN=${refreshToken}; HttpOnly; Path=/; SameSite=Strict;`,
-    );
+    res.setHeader('Set-Cookie', [
+      `ACCESS_TOKEN=${token}; HttpOnly; Path=/; SameSite=Strict`,
+      `REFRESH_TOKEN=${refreshToken}; HttpOnly; Path=/; SameSite=Strict`,
+    ]);
   }
 
   /**

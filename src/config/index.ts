@@ -25,6 +25,21 @@ export const {
   ADMIN_EMAILS,
 } = process.env;
 
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+export const DEFAULT_LOG_CATEGORY_ENABLED = {
+  TRANSIT: false,
+};
+
+/**
+ * Transporter debug output is noisy and should be opt-in.
+ * Enable it explicitly with DARWIN_TRANSPORT_DEBUG=true or KAFKA_DEBUG=true.
+ */
+export function isTransportDebugEnabled(): boolean {
+  const value = process.env.DARWIN_TRANSPORT_DEBUG || process.env.KAFKA_DEBUG || '';
+  return TRUE_VALUES.has(value.trim().toLowerCase());
+}
+
 /**
  * pino日志配置
  */

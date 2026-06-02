@@ -444,12 +444,16 @@ const quota = (star: Starlight) => {
       params: {
         quotaType: { type: 'string', optional: true },
         timeRange: { type: 'string', optional: true, default: '7d' }, // 1h, 1d, 7d, 30d
-        limit: { type: 'number', optional: true, default: 100 },
-        offset: { type: 'number', optional: true, default: 0 },
+        limit: { type: 'any', optional: true, default: 100 },
+        offset: { type: 'any', optional: true, default: 0 },
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const { quotaType, timeRange, limit, offset } = ctx.params;
+          const { quotaType, timeRange } = ctx.params;
+          const rawLimit = Number((ctx.params as any).limit ?? 100);
+          const rawOffset = Number((ctx.params as any).offset ?? 0);
+          const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 100;
+          const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
           const userId = (ctx.meta as any).user?.userId;
 
           if (!userId) {

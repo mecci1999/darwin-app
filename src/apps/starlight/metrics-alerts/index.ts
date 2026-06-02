@@ -1,4 +1,5 @@
 import { Star } from 'node-universe';
+import { isTransportDebugEnabled } from 'config';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import alerts from '../metrics/actions/alerts';
@@ -22,7 +23,7 @@ function createMetricsAlertsService() {
     nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: {

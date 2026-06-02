@@ -10,6 +10,8 @@ import WebSocket from 'ws';
 let wss: WebSocket.Server | null = null;
 const wsClients = new Map<string, WebSocketClient>();
 const eventListeners: Map<string, (data: any) => void> = new Map();
+const AUTH_CACHE_TTL_MS = 30 * 1000;
+const authCache = new Map<string, { expiresAt: number; user: any }>();
 
 // WebSocket 客户端类型定义
 // WebSocket 客户端接口
@@ -375,8 +377,40 @@ const gatewayMethods: any = (star: Star) => ({
       return Promise.reject(new UserNotLoginError());
     }
 
+    const authorizeStartedAt = Date.now();
     try {
+      const cachedAuth = authCache.get(token);
+      if (cachedAuth && cachedAuth.expiresAt > Date.now()) {
+        const authorizedUser = {
+          ...cachedAuth.user,
+          isAdmin: Boolean(cachedAuth.user?.isAdmin),
+        };
+        (ctx.meta as any).user = authorizedUser;
+        const tenantId =
+          (authorizedUser as any).tenantId ||
+          (authorizedUser as any).tenantID ||
+          (authorizedUser as any).tenant_id ||
+          (authorizedUser as any).userId;
+        if (tenantId) (ctx.meta as any).tenantId = String(tenantId);
+
+        star.logger?.info('Gateway authorize timing', {
+          userId: (authorizedUser as any).userId,
+          tenantId: tenantId ? String(tenantId) : undefined,
+          isAdmin: Boolean((authorizedUser as any).isAdmin),
+          cacheHit: true,
+          resolveTokenDurationMs: 0,
+          userLookupDurationMs: 0,
+          totalDurationMs: Date.now() - authorizeStartedAt,
+        });
+        return;
+      }
+      if (cachedAuth) {
+        authCache.delete(token);
+      }
+
+      const resolveTokenStartedAt = Date.now();
       const user = await ctx.call('auth.resolveToken', { token });
+      const resolveTokenDurationMs = Date.now() - resolveTokenStartedAt;
       if (!user) {
         return Promise.reject(new UnAuthorizedError());
       }
@@ -390,15 +424,18 @@ const gatewayMethods: any = (star: Star) => ({
         return Promise.reject(new TokenExpiredError());
       }
 
-      let isAdmin = false;
-      try {
-        const userInfo = await (star as any).db?.user?.findUserByUserId?.(user.userId);
-        isAdmin = userInfo?.power === 999;
-      } catch (error) {
-        isAdmin = false;
-      }
+      authCache.set(token, {
+        user,
+        expiresAt: Math.min(
+          Date.now() + AUTH_CACHE_TTL_MS,
+          Number((user as any).expirationTime || Date.now() + AUTH_CACHE_TTL_MS),
+        ),
+      });
 
-      const authorizedUser = { ...user, isAdmin };
+      const authorizedUser = {
+        ...user,
+        isAdmin: Boolean((user as any).isAdmin),
+      };
       (ctx.meta as any).user = authorizedUser;
       const tenantId =
         (authorizedUser as any).tenantId ||
@@ -406,6 +443,16 @@ const gatewayMethods: any = (star: Star) => ({
         (authorizedUser as any).tenant_id ||
         (authorizedUser as any).userId;
       if (tenantId) (ctx.meta as any).tenantId = String(tenantId);
+
+      star.logger?.info('Gateway authorize timing', {
+        userId: (authorizedUser as any).userId,
+        tenantId: tenantId ? String(tenantId) : undefined,
+        isAdmin: Boolean((authorizedUser as any).isAdmin),
+        cacheHit: false,
+        resolveTokenDurationMs,
+        userLookupDurationMs: 0,
+        totalDurationMs: Date.now() - authorizeStartedAt,
+      });
     } catch (err: any) {
       if (err?.code === HttpResponseCode.REFRESH_TOKEN) {
         return Promise.reject(new TokenExpiredError());
@@ -413,6 +460,24 @@ const gatewayMethods: any = (star: Star) => ({
       star.logger?.error('gateway_app authorize error~', 'error:', err);
       return Promise.reject(new UnAuthorizedError());
     }
+  },
+
+  async broadcastToChannel(channel: string, data: any) {
+    const normalized = String(channel || '').trim();
+    if (!normalized) {
+      return { ok: false, channel: '' };
+    }
+
+    const message = {
+      type: normalized,
+      data: {
+        ...data,
+        timestamp: Date.now(),
+      },
+    };
+
+    const sent = (this as any).broadcastToChannel?.(normalized, message) ?? 0;
+    return { ok: true, channel: normalized, sent };
   },
 
   async triggerWebSocketEvent(eventName: string, data: any) {

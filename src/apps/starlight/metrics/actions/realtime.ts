@@ -55,6 +55,19 @@ const createSystemScopeForbidden = (): HttpResponseItem => ({
   },
 });
 
+const normalizeServiceId = (serviceId?: string) =>
+  serviceId?.startsWith('system:') ? serviceId.slice('system:'.length) : serviceId;
+
+const escapeFluxRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildServiceFilter = (serviceId?: string) => {
+  const normalized = normalizeServiceId(serviceId);
+  if (!normalized) return '';
+  const systemId = `system:${normalized}`;
+  const nodePrefix = escapeFluxRegex(normalized);
+  return `|> filter(fn: (r) => (exists r.service and r.service == "${normalized}") or (exists r.serviceId and (r.serviceId == "${normalized}" or r.serviceId == "${systemId}")) or (exists r["service.name"] and r["service.name"] == "${normalized}") or (exists r["service.id"] and (r["service.id"] == "${normalized}" or r["service.id"] == "${systemId}")) or (exists r.nodeID and string(v: r.nodeID) =~ /^${nodePrefix}/) or (exists r.nodeId and string(v: r.nodeId) =~ /^${nodePrefix}/))`;
+};
+
 const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2)) =>
   rows
     .filter((row) => row?._time && row?._value !== undefined && row?._value !== null)
@@ -65,11 +78,16 @@ const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number
     .sort((a, b) => a.timestamp - b.timestamp);
 
 const getSeriesAverage = (series: Array<{ value: number }>) => {
-  if (!series.length) return 0;
+  if (!series.length) return null;
   return toFixed(
     series.reduce((sum, point) => sum + Number(point.value || 0), 0) / series.length,
     2,
   );
+};
+
+const numberOrNull = (value: unknown, digits = 2) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return toFixed(value, digits);
 };
 
 const buildSystemSeries = async (
@@ -82,12 +100,7 @@ const buildSystemSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const normalizedServiceId = serviceId?.startsWith('system:')
-    ? serviceId.slice('system:'.length)
-    : serviceId;
-  const filter = normalizedServiceId
-    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
-    : '';
+  const filter = buildServiceFilter(serviceId);
   const measurementFilter =
     field === 'cpu_usage'
       ? 'r["_measurement"] == "os.cpu.utilization"'
@@ -114,12 +127,7 @@ const buildDurationSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const normalizedServiceId = serviceId?.startsWith('system:')
-    ? serviceId.slice('system:'.length)
-    : serviceId;
-  const filter = normalizedServiceId
-    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
-    : '';
+  const filter = buildServiceFilter(serviceId);
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
@@ -140,12 +148,7 @@ const buildRequestCountSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const normalizedServiceId = serviceId?.startsWith('system:')
-    ? serviceId.slice('system:'.length)
-    : serviceId;
-  const filter = normalizedServiceId
-    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
-    : '';
+  const filter = buildServiceFilter(serviceId);
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
@@ -166,12 +169,7 @@ const buildErrorCountSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const normalizedServiceId = serviceId?.startsWith('system:')
-    ? serviceId.slice('system:'.length)
-    : serviceId;
-  const filter = normalizedServiceId
-    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
-    : '';
+  const filter = buildServiceFilter(serviceId);
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
@@ -193,7 +191,7 @@ const buildQpsSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const filter = serviceId ? `|> filter(fn: (r) => r["service"] == "${serviceId}")` : '';
+  const filter = buildServiceFilter(serviceId);
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
@@ -221,12 +219,7 @@ const buildActiveRequestSeries = async (
 ) => {
   const bucket = InfluxDBHandler.getBucketName();
   if (!bucket) return [];
-  const normalizedServiceId = serviceId?.startsWith('system:')
-    ? serviceId.slice('system:'.length)
-    : serviceId;
-  const filter = normalizedServiceId
-    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
-    : '';
+  const filter = buildServiceFilter(serviceId);
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
@@ -460,6 +453,12 @@ const buildServiceDetailContent = async (
     return null;
   }
 
+  const cpuAverage = getSeriesAverage(cpuSeries as any);
+  const memoryAverage = getSeriesAverage(memorySeries as any);
+  const qpsAverage = getSeriesAverage(qpsSeries as any);
+  const durationAverage = getSeriesAverage(durationSeries as any);
+  const activeAverage = getSeriesAverage(activeRequestSeries as any);
+
   return {
     identity: {
       id: service.id,
@@ -473,14 +472,14 @@ const buildServiceDetailContent = async (
     },
     summary: {
       instances: Array.isArray(instances) ? instances.length : Number(service.instances || 0),
-      qps: Math.round(Number(getSeriesAverage(qpsSeries as any) || service.qps || 0)),
+      qps: qpsAverage ?? numberOrNull(service.qps, 4) ?? 0,
       responseTime: Math.round(
-        Number(getSeriesAverage(durationSeries as any) || service.latency || 0),
+        Number(durationAverage ?? service.latency ?? 0),
       ),
       errorRate: toFixed(Number(service.errorRate || 0), 2),
-      cpu: toFixed(Number(getSeriesAverage(cpuSeries as any) || 0), 1),
-      memory: toFixed(Number(getSeriesAverage(memorySeries as any) || 0), 1),
-      activeConnections: Math.round(Number(getSeriesAverage(activeRequestSeries as any) || 0)),
+      cpu: cpuAverage,
+      memory: memoryAverage,
+      activeConnections: activeAverage === null ? null : Math.round(Number(activeAverage)),
       version: service.version || '',
     },
   };

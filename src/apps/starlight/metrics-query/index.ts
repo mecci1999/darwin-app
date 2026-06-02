@@ -1,4 +1,5 @@
 import '../../../utils/loadEnv';
+import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
@@ -19,9 +20,11 @@ import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
 import { calculateMemoryUsagePercent, MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
-import { buildSupportedMetricSchema, parseRangeSeconds, resolveInterval, validateQuerySpec } from './utils/query-contract';
+import { buildSupportedMetricSchema, isRawSystemMetricRef, parseRangeSeconds, resolveInterval, validateQuerySpec } from './utils/query-contract';
 
 const APP_NAME = 'metrics-query';
+const QUERY_CACHE_TTL_MS = 30 * 1000;
+const queryMemoryCache = new Map<string, { expiresAt: number; value: any }>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
@@ -79,6 +82,39 @@ const queryTimeseries = async (params: {
   return normalizeSeries(rows, params.normalizeValue);
 };
 
+const normalizeUtilizationValue = (value: unknown) => toFixed(Number(value || 0) * 100, 2);
+
+const rawSystemMetricUnit = (metricRef: string) => {
+  if (metricRef.includes('utilization')) return '%';
+  if (metricRef.includes('duration') || metricRef.includes('time')) return 'ms';
+  if (metricRef.includes('memory')) return MEMORY_USAGE_UNIT;
+  if (metricRef.includes('cpu')) return '%';
+  return metricRef.includes('total') || metricRef.includes('requests') ? 'count' : '';
+};
+
+const queryRawSystemMetricSeries = async (params: {
+  metricRef: string;
+  aggregation?: string;
+  timeRange: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
+  const aggregateFn = params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : params.aggregation === 'sum' ? 'sum' : 'mean';
+  return queryTimeseries({
+    measurementFilter: `r["_measurement"] == "${params.metricRef}"`,
+    fieldFilter: 'r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "time" or r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "memory_total"',
+    aggregateFn,
+    timeRange: params.timeRange,
+    serviceId: params.serviceId,
+    star: params.star,
+    normalizeValue: params.metricRef === 'process.memory.rss'
+      ? normalizeRssMemoryValue
+      : params.metricRef.includes('utilization')
+        ? normalizeUtilizationValue
+        : undefined,
+  });
+};
+
 const queryMemoryUsagePercentSeries = async (params: { timeRange: string; serviceId?: string; star: Starlight; aggregateFn: 'mean' | 'max' | 'last' }) => {
   const every = resolveInterval(params.timeRange);
   const bucket = getBucketNameOrThrow();
@@ -111,13 +147,25 @@ const queryMemoryUsagePercentSeries = async (params: { timeRange: string; servic
   ]);
   const rssSeries = normalizeSeries(rssRows);
   const totalSeries = normalizeSeries(totalRows);
+
+  if (!rssSeries.length || !totalSeries.length) {
+    return [];
+  }
+
+  const latestTotalValue = Number(totalSeries[totalSeries.length - 1]?.value || 0);
+  const totalMap = new Map(totalSeries.map((point) => [point.timestamp, Number(point.value || 0)]));
+
   return rssSeries
-    .map((point, index) => ({
-      timestamp: point.timestamp,
-      value: calculateMemoryUsagePercent(point.value, totalSeries[index]?.value, 2),
-    }))
-    .filter((point) => point.value > 0);
+    .map((point) => {
+      const denominator = Number(totalMap.get(point.timestamp) || latestTotalValue || 0);
+      return {
+        timestamp: point.timestamp,
+        value: calculateMemoryUsagePercent(point.value, denominator, 2),
+      };
+    })
+    .filter((point) => Number.isFinite(point.value));
 };
+
 
 const buildMetricSeriesForCalculation = async (params: {
   metricRef: string;
@@ -363,16 +411,48 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
     };
   }
 
+  if (isRawSystemMetricRef(metricRef)) {
+    const series = await queryRawSystemMetricSeries({
+      metricRef,
+      aggregation: query?.aggregation,
+      timeRange,
+      serviceId,
+      star,
+    });
+    const unit = rawSystemMetricUnit(metricRef);
+    if (isSingleValueVisualization) {
+      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit };
+    }
+    return { kind: 'timeseries', unit, series: [{ name: metricRef, points: series }] };
+  }
+
   return null;
+};
+
+const getCachedQueryResult = (key: string) => {
+  const cached = queryMemoryCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    queryMemoryCache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setCachedQueryResult = (key: string, value: any) => {
+  queryMemoryCache.set(key, {
+    value,
+    expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
+  });
 };
 
 function createMetricsQueryService() {
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}-${Date.now()}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: { 'linger.ms': 0, 'batch.size': 0, acks: 1 },
@@ -509,8 +589,13 @@ function createMetricsQueryService() {
               ? (ctx.params?.sourceKind as 'auto' | 'sdk' | 'darwin-event' | 'mixed')
               : undefined;
             const serviceId = String(ctx.params?.serviceId || '').trim() || undefined;
+            const cacheKey = `metrics-query:schema:${JSON.stringify({ scope, sourceKind, serviceId })}`;
+            const cached = getCachedQueryResult(cacheKey);
+            if (cached) {
+              return cached;
+            }
 
-            return {
+            const response = {
               status: 200,
               data: {
                 code: HttpResponseCode.Success,
@@ -521,6 +606,8 @@ function createMetricsQueryService() {
                 success: true,
               },
             };
+            setCachedQueryResult(cacheKey, response);
+            return response;
           } catch (error) {
             star.logger?.error('Get metrics schema failed:', error);
             return {
@@ -561,6 +648,12 @@ function createMetricsQueryService() {
 
             const scope = normalizeMetricsScope(ctx.params?.context?.scope || ctx.params?.scope);
             const cards = Array.isArray(ctx.params?.cards) ? ctx.params.cards : [];
+            const cacheKey = `metrics-query:cards:${JSON.stringify({ scope, cards, refreshGenerationId: String(ctx.params.refreshGenerationId) })}`;
+            const cached = getCachedQueryResult(cacheKey);
+            if (cached) {
+              return cached;
+            }
+
             const items = await Promise.all(
               cards.map(async (card: any) => {
                 const cardStartedAt = Date.now();
@@ -608,7 +701,7 @@ function createMetricsQueryService() {
               }),
             );
 
-            return {
+            const response = {
               status: 200,
               data: {
                 code: HttpResponseCode.Success,
@@ -622,6 +715,8 @@ function createMetricsQueryService() {
                 success: true,
               },
             };
+            setCachedQueryResult(cacheKey, response);
+            return response;
           } catch (error) {
             star.logger?.error('Query metric cards failed:', error);
             return {
@@ -649,8 +744,13 @@ function createMetricsQueryService() {
               { ...(ctx.params?.query || {}), scope: ctx.params?.query?.scope || ctx.params?.scope },
               normalizeMetricsScope
             );
+            const cacheKey = `metrics-query:preview:${JSON.stringify({ scope: ctx.params?.scope, query: validation.normalizedQuery, valid: validation.valid, issues: validation.issues })}`;
+            const cached = getCachedQueryResult(cacheKey);
+            if (cached) {
+              return cached;
+            }
             if (!validation.valid) {
-              return {
+              const response = {
                 status: 200,
                 data: {
                   code: HttpResponseCode.Success,
@@ -659,9 +759,11 @@ function createMetricsQueryService() {
                   success: true,
                 },
               };
+              setCachedQueryResult(cacheKey, response);
+              return response;
             }
             const data = await buildCardDataFromQuery(validation.normalizedQuery, star, this as any);
-            return {
+            const response = {
               status: 200,
               data: {
                 code: HttpResponseCode.Success,
@@ -670,6 +772,8 @@ function createMetricsQueryService() {
                 success: true,
               },
             };
+            setCachedQueryResult(cacheKey, response);
+            return response;
           } catch (error) {
             return {
               status: 200,

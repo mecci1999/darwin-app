@@ -36,21 +36,6 @@ export default function login(star: Starlight) {
             };
           }
 
-          // 查询数据库判断邮箱是否已注册
-          const isExist = await star.db.auth.findEmailIsExist(ctx.params.email);
-
-          if (!isExist) {
-            return {
-              status: 200,
-              data: {
-                content: null,
-                message: '邮箱错误或未注册',
-                code: HttpResponseCode.UserEmailError,
-                success: false,
-              },
-            };
-          }
-
           // 验证邮箱验证码是否正确
           const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:login`);
 
@@ -83,8 +68,8 @@ export default function login(star: Starlight) {
               status: 200,
               data: {
                 content: null,
-                message: '服务端错误，登录失败',
-                code: HttpResponseCode.ServiceActionFaild,
+                message: '邮箱错误或未注册',
+                code: HttpResponseCode.UserEmailError,
                 success: false,
               },
             };
@@ -112,72 +97,43 @@ export default function login(star: Starlight) {
           const tokenResult = await Promise.all([
             (this as any).generateToken({ userId: data.userId }),
             (this as any).generateRefreshToken({ userId: data.userId }),
+            ctx.call(
+              'user.v1.getUserInfo',
+              {
+                userId: data.userId,
+              },
+              {
+                meta: {
+                  ...ctx.meta,
+                  appId: ctx.meta?.appId || 'starlight',
+                },
+              },
+            ).catch((userInfoError) => ({
+              data: null,
+              error: userInfoError,
+            })),
           ]);
 
-          const [accessToken, refreshToken] = tokenResult;
+          const [accessToken, refreshToken, userInfoResult] = tokenResult;
 
           if (accessToken) {
             // 设置cookies
             ctx.meta.token = accessToken;
             ctx.meta.refreshToken = refreshToken;
 
-            try {
-              // 获取用户详细信息
-              const userInfoResult = await ctx.call(
-                'user.v1.getUserInfo',
-                {
-                  userId: data.userId,
-                },
-                {
-                  meta: {
-                    ...ctx.meta,
-                    // 标记应用身份，用于获取 @StarlightExclusive 字段
-                    appId: ctx.meta?.appId || 'starlight',
-                  },
-                },
-              );
-
-              // 如果获取用户信息成功，返回完整的用户信息
-              if (
-                userInfoResult &&
-                userInfoResult.data &&
-                userInfoResult.data.code === HttpResponseCode.Success
-              ) {
-                return {
-                  status: 200,
-                  data: {
-                    content: {
-                      userId: data.userId,
-                      userInfo: userInfoResult.data.content,
-                    },
-                    message: '登录成功',
-                    code: HttpResponseCode.Success,
-                    success: true,
-                  },
-                };
-              } else {
-                // 如果获取用户信息失败，仍然返回登录成功，但只包含基本信息
-                star.logger?.warn('Failed to get user info after login', { userId: data.userId });
-                return {
-                  status: 200,
-                  data: {
-                    content: {
-                      userId: data.userId,
-                    },
-                    message: '登录成功',
-                    code: HttpResponseCode.Success,
-                    success: true,
-                  },
-                };
-              }
-            } catch (userInfoError) {
-              // 获取用户信息出错，记录日志但不影响登录流程
-              star.logger?.error('Error getting user info after login', userInfoError);
+            if (
+              userInfoResult &&
+              (userInfoResult as any).data &&
+              (userInfoResult as any).data.code === HttpResponseCode.Success
+            ) {
               return {
                 status: 200,
                 data: {
                   content: {
                     userId: data.userId,
+                    userInfo: (userInfoResult as any).data.content,
+                    accessToken,
+                    refreshToken,
                   },
                   message: '登录成功',
                   code: HttpResponseCode.Success,
@@ -185,6 +141,26 @@ export default function login(star: Starlight) {
                 },
               };
             }
+
+            if ((userInfoResult as any)?.error) {
+              star.logger?.error('Error getting user info after login', (userInfoResult as any).error);
+            } else {
+              star.logger?.warn('Failed to get user info after login', { userId: data.userId });
+            }
+
+            return {
+              status: 200,
+              data: {
+                content: {
+                  userId: data.userId,
+                  accessToken,
+                  refreshToken,
+                },
+                message: '登录成功',
+                code: HttpResponseCode.Success,
+                success: true,
+              },
+            };
           }
 
           return {

@@ -26,7 +26,22 @@ export default function getUserInfo(star: Star & { db: any }) {
             };
           }
 
-          // 查询用户信息
+          const cacheKey = `user:profile:${userId}:${ctx.meta?.appId === 'starlight' ? 'starlight' : 'default'}`;
+          if (star.cacher?.get) {
+            const cached = await star.cacher.get(cacheKey);
+            if (cached) {
+              return {
+                status: 200,
+                data: {
+                  content: cached,
+                  message: '获取用户信息成功',
+                  code: HttpResponseCode.Success,
+                  success: true,
+                },
+              };
+            }
+          }
+
           const userInfo = await star.db.user.findUserByUserId(userId);
 
           if (!userInfo) {
@@ -41,7 +56,6 @@ export default function getUserInfo(star: Star & { db: any }) {
             };
           }
 
-          // 过滤敏感信息，只返回必要的用户信息
           const safeUserInfo: any = {
             userId: userInfo.userId,
             nickname: userInfo.nickname,
@@ -58,14 +72,13 @@ export default function getUserInfo(star: Star & { db: any }) {
             updatedAt: userInfo.updatedAt,
           };
 
-          /**
-           * @StarlightExclusive
-           * 仅允许 starlight 应用访问 isOnboardingCompleted 字段
-           * 通过 ctx.meta.appId 进行判断
-           */
           const isStarlight = ctx.meta?.appId === 'starlight';
           if (isStarlight) {
             safeUserInfo.isOnboardingCompleted = userInfo.isOnboardingCompleted ?? false;
+          }
+
+          if (star.cacher?.set) {
+            await star.cacher.set(cacheKey, safeUserInfo, 60);
           }
 
           star.logger?.debug('获取用户信息成功', { userId });

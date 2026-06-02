@@ -40,14 +40,18 @@ export default function batchGetUsers(star: Starlight) {
         }
 
         try {
+          const userIds: string[] = Array.from(
+            new Set(params.userIds.map((userId: unknown) => String(userId))),
+          );
+          const userRecords = await star.db.user.findUsersByUserIds(userIds);
+          const userMap = new Map(userRecords.map((user: any) => [user.userId, user]));
+
           const users: any[] = [];
           const notFoundUsers: string[] = [];
 
-          // 批量查询用户信息
-          for (const userId of params.userIds) {
-            const userInfo = await star.db.user.findUserByUserId(userId);
+          for (const userId of userIds) {
+            const userInfo = userMap.get(userId);
             if (userInfo) {
-              // 过滤敏感信息
               const safeUserInfo = {
                 userId: userInfo.userId,
                 nickname: userInfo.nickname,
@@ -69,10 +73,11 @@ export default function batchGetUsers(star: Starlight) {
             }
           }
 
-          star.logger?.debug('批量获取用户信息成功', { 
-            requestedCount: params.userIds.length,
+          star.logger?.info('批量获取用户信息成功', {
+            requestedCount: userIds.length,
             foundCount: users.length,
-            notFoundCount: notFoundUsers.length
+            notFoundCount: notFoundUsers.length,
+            queryMode: 'batch',
           });
 
           return {

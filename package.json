@@ -20,7 +20,8 @@
     "stop:infra": "cd docker && docker-compose down",
     "migrate": "node ./scripts/migrate.js",
     "seed": "node ./scripts/seed.js",
-    "build:fengyuServer": "rm -rf ./dist && rollup -c ./rollup.config.js"
+    "build": "npm run build:gateway",
+    "build:gateway": "rm -rf ./dist && rollup -c ./rollup.config.js"
   },
   "license": "MIT",
   "dependencies": {
@@ -48,7 +49,7 @@
     "mysql2": "^3.9.2",
     "nanoid": "^5.0.8",
     "node-cron": "^3.0.3",
-    "node-universe": "^1.6.7",
+    "node-universe": "1.7.0",
     "node-universe-gateway": "^1.0.7",
     "nodemailer": "^6.9.15",
     "pdf-lib": "^1.17.1",

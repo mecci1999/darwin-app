@@ -191,4 +191,15 @@ describe('metrics-query query contract helpers', () => {
     expect(items.find((item) => item.name === 'service.qps')?.allowedAggregations).toEqual(['latest', 'sum']);
     expect(items.find((item) => item.name === 'service.request.stats')?.recommendedVisualizations).toEqual(['bar', 'donut']);
   });
+
+  it('exposes Chinese descriptions for system metric catalog items', () => {
+    const items = buildSupportedMetricSchema({ scope: 'system', sourceKind: 'darwin-event' });
+
+    expect(items.map((item) => item.name)).toContain('process.memory.heap.utilization');
+    expect(items.map((item) => item.name)).toContain('os.memory.utilization');
+    expect(items.find((item) => item.name === 'os.cpu.utilization')?.description).toBe('Node-Universe 采集的系统 CPU 平均使用率');
+    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.description).toBe('Node-Universe 采集的进程堆内存使用率');
+    expect(items.find((item) => item.name === 'os.memory.utilization')?.description).toBe('Node-Universe 采集的系统内存使用率');
+    expect(items.some((item) => /Darwin raw|Service CPU usage|request count/.test(item.description))).toBe(false);
+  });
 });

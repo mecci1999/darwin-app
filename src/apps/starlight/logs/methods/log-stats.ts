@@ -13,6 +13,8 @@ import { LogUtils } from '../utils/log-utils';
 import { STATS_CACHE_TTL, DEFAULT_STATS_INTERVAL } from '../constants';
 import { SYSTEM_LOG_TENANT_ID } from '../utils/access-control';
 
+const statsMemoryCache = new Map<string, { expiresAt: number; value: LogStatsResult }>();
+
 /**
  * 获取日志统计
  */
@@ -25,15 +27,24 @@ export async function getLogStats(
     userId?: string;
   },
 ): Promise<LogStatsResult> {
+  const totalStartedAt = Date.now();
   try {
     const { apiKey, statsParams, tenantId, userId } = params;
     const isSystemDarwinStats = tenantId === SYSTEM_LOG_TENANT_ID && statsParams.originType === 'darwin-app';
 
     const quotaChecker = QuotaChecker.getInstance();
+    let validateApiKeyDurationMs = 0;
+    let checkQuotaDurationMs = 0;
+    let cacheReadDurationMs = 0;
+    let esStatsDurationMs = 0;
+    let cacheWriteDurationMs = 0;
+    let emitDurationMs = 0;
+
     if (!isSystemDarwinStats && apiKey) {
-      // 验证API密钥
       const apiKeyManager = ApiKeyManager.getInstance();
+      const validateApiKeyStartedAt = Date.now();
       const validatedKey = await apiKeyManager.validateApiKey(apiKey);
+      validateApiKeyDurationMs = Date.now() - validateApiKeyStartedAt;
       if (!validatedKey) {
         throw new Error('无效的API密钥');
       }
@@ -41,40 +52,60 @@ export async function getLogStats(
         throw new Error('API密钥与租户不匹配');
       }
 
-      // 检查权限
       if (!apiKeyManager.hasPermission(validatedKey, ApiPermission.STATS)) {
         throw new Error('Insufficient permissions for log statistics');
       }
 
-      // 检查配额
+      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
       }
     } else if (!isSystemDarwinStats) {
+      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Stats quota exceeded: ${quotaCheck.reason}`);
       }
     }
 
-    // 标准化统计参数
     const normalizedParams = normalizeStatsParams(statsParams);
 
-    // 检查缓存
-    const cacheKey = generateStatsCacheKey(normalizedParams, tenantId, userId);
     const service = ctx.service as any;
-    const cachedResult = await service.redis?.get(cacheKey);
-    if (cachedResult) {
-      service.logger?.debug('Returning cached stats result');
-      return JSON.parse(cachedResult);
-    }
 
-    // 执行统计查询
+    const skipMemoryCache = isSystemDarwinStats;
+    const cacheKey = generateStatsCacheKey(normalizedParams, tenantId, userId);
+    const cacheReadStartedAt = Date.now();
+    const memoryCached = skipMemoryCache ? undefined : statsMemoryCache.get(cacheKey);
+    if (memoryCached && memoryCached.expiresAt > Date.now()) {
+      cacheReadDurationMs = Date.now() - cacheReadStartedAt;
+      service.logger?.info('Log stats timing', {
+        tenantId,
+        originType: normalizedParams.originType,
+        service: normalizedParams.service,
+        groupBy: normalizedParams.groupBy,
+        timeRange: normalizedParams.timeRange,
+        cacheHit: true,
+        cacheLayer: skipMemoryCache ? 'disabled' : 'memory',
+        validateApiKeyDurationMs,
+        checkQuotaDurationMs,
+        cacheReadDurationMs,
+        totalDurationMs: Date.now() - totalStartedAt,
+      });
+      return memoryCached.value;
+    }
+    if (memoryCached) {
+      statsMemoryCache.delete(cacheKey);
+    }
+    cacheReadDurationMs = Date.now() - cacheReadStartedAt;
+
+    const esStatsStartedAt = Date.now();
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
     const stats = await esClient.getLogStats(normalizedParams, tenantId, userId);
+    esStatsDurationMs = Date.now() - esStatsStartedAt;
 
-    // 构建 LogStatsResult
     const errorCount = (stats.levelBreakdown.error || 0) + (stats.levelBreakdown.fatal || 0);
     const statsResult: LogStatsResult = {
       total: stats.total,
@@ -87,7 +118,7 @@ export async function getLogStats(
       })),
       trends: {
         current: stats.total,
-        previous: 0, // 需要额外查询或暂不计算
+        previous: 0,
         change: 0,
         changePercent: 0,
       },
@@ -100,10 +131,16 @@ export async function getLogStats(
       avgResponseTime: 0,
     };
 
-    // 缓存结果
-    await service.redis?.setex(cacheKey, STATS_CACHE_TTL, JSON.stringify(statsResult));
+    const cacheWriteStartedAt = Date.now();
+    if (!skipMemoryCache) {
+      statsMemoryCache.set(cacheKey, {
+        value: statsResult,
+        expiresAt: Date.now() + STATS_CACHE_TTL * 1000,
+      });
+    }
+    cacheWriteDurationMs = Date.now() - cacheWriteStartedAt;
 
-    // 记录统计事件
+    const emitStartedAt = Date.now();
     await ctx.emit('logs.stats.generated', {
       tenantId,
       userId,
@@ -111,8 +148,24 @@ export async function getLogStats(
       interval: normalizedParams.interval,
       timestamp: Date.now(),
     });
+    emitDurationMs = Date.now() - emitStartedAt;
 
-    service.logger?.debug('Log stats generated successfully');
+    service.logger?.info('Log stats timing', {
+      tenantId,
+      originType: normalizedParams.originType,
+      service: normalizedParams.service,
+      groupBy: normalizedParams.groupBy,
+      timeRange: normalizedParams.timeRange,
+      cacheHit: false,
+      cacheLayer: skipMemoryCache ? 'disabled' : 'memory',
+      validateApiKeyDurationMs,
+      checkQuotaDurationMs,
+      cacheReadDurationMs,
+      esStatsDurationMs,
+      cacheWriteDurationMs,
+      emitDurationMs,
+      totalDurationMs: Date.now() - totalStartedAt,
+    });
 
     return statsResult;
   } catch (error) {

@@ -1,6 +1,6 @@
 // User微服务主文件
 import { Star } from 'node-universe';
-import { pinoLoggerOptions } from 'config';
+import { isTransportDebugEnabled, pinoLoggerOptions } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
@@ -19,7 +19,7 @@ async function initializeUserService() {
     nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: process.env.KAFKA_HOST || '127.0.0.1:9092',
       options: {
         producer: {

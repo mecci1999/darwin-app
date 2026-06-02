@@ -39,25 +39,32 @@ export async function searchLogs(
     userId?: string;
   },
 ): Promise<LogSearchResult> {
+  const totalStartedAt = Date.now();
   try {
     const { apiKey, searchParams, tenantId, userId } = params;
 
     const isSystemDarwinSearch = tenantId === SYSTEM_LOG_TENANT_ID && searchParams.originType === 'darwin-app';
     const quotaChecker = new QuotaChecker();
 
+    let validateApiKeyDurationMs = 0;
+    let checkQuotaDurationMs = 0;
+    let validateParamsDurationMs = 0;
+    let esSearchDurationMs = 0;
+    let updateQuotaDurationMs = 0;
+    let emitDurationMs = 0;
+
     if (!isSystemDarwinSearch && apiKey) {
-      // 验证API密钥
+      const validateApiKeyStartedAt = Date.now();
       const validatedKey = await ApiKeyManager.getInstance().validateApiKey(apiKey);
+      validateApiKeyDurationMs = Date.now() - validateApiKeyStartedAt;
       if (!validatedKey) {
         throw new Error('Invalid API key');
       }
 
-      // 检查租户匹配
       if (validatedKey.tenantId !== tenantId) {
         throw new Error('API key does not belong to the specified tenant');
       }
 
-      // 检查权限
       const hasSearchPermission = ApiKeyManager.getInstance().hasPermission(
         validatedKey,
         ApiPermission.SEARCH,
@@ -66,37 +73,42 @@ export async function searchLogs(
         throw new Error('Insufficient permissions for log search');
       }
 
-      // 检查搜索配额
+      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
       }
     } else if (!isSystemDarwinSearch) {
+      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
+      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
       }
     }
 
-    // 验证搜索参数
+    const validateParamsStartedAt = Date.now();
     const validationResult = LogUtils.validateSearchParams(searchParams);
+    validateParamsDurationMs = Date.now() - validateParamsStartedAt;
     if (!validationResult.valid) {
       throw new Error(`Invalid search parameters: ${validationResult.errors.join(', ')}`);
     }
 
-    // 标准化搜索参数
     const normalizedParams = normalizeSearchParams(searchParams);
 
-    // 执行搜索
+    const esSearchStartedAt = Date.now();
     const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
     const searchResult = await esClient.searchLogs(normalizedParams);
+    esSearchDurationMs = Date.now() - esSearchStartedAt;
 
-    // 更新搜索配额使用量
     if (!isSystemDarwinSearch) {
+      const updateQuotaStartedAt = Date.now();
       await quotaChecker.updateSearchUsage(tenantId);
+      updateQuotaDurationMs = Date.now() - updateQuotaStartedAt;
     }
 
-    // 记录搜索事件
+    const emitStartedAt = Date.now();
     await ctx.emit('logs.searched', {
       tenantId,
       userId,
@@ -104,10 +116,8 @@ export async function searchLogs(
       resultCount: searchResult.total,
       timestamp: Date.now(),
     });
+    emitDurationMs = Date.now() - emitStartedAt;
 
-    ctx.service?.logger?.debug(`Log search completed: ${searchResult.total} results found`);
-
-    // 确保返回结果符合LogSearchResult接口
     const result: LogSearchResult = {
       logs: (searchResult.logs || []).map(
         (log: StoredLog): LogEntry => ({
@@ -136,11 +146,27 @@ export async function searchLogs(
       total: searchResult.total || 0,
       page: normalizedParams.page || 1,
       limit: normalizedParams.pageSize || normalizedParams.limit || 50,
-      took: 0, // 默认值，实际应该从ES响应中获取
+      took: 0,
       aggregations: undefined,
       highlights: undefined,
       suggestions: undefined,
     };
+
+    ctx.service?.logger?.info('Log search timing', {
+      tenantId,
+      originType: normalizedParams.originType,
+      query: normalizedParams.query,
+      page: normalizedParams.page,
+      pageSize: normalizedParams.pageSize || normalizedParams.limit,
+      resultCount: searchResult.total || 0,
+      validateApiKeyDurationMs,
+      checkQuotaDurationMs,
+      validateParamsDurationMs,
+      esSearchDurationMs,
+      updateQuotaDurationMs,
+      emitDurationMs,
+      totalDurationMs: Date.now() - totalStartedAt,
+    });
 
     return result;
   } catch (error) {
@@ -513,6 +539,19 @@ function normalizeSearchParams(params: LogSearchParams): LogSearchParams {
     sortBy: params.sortBy || 'timestamp',
     sortOrder: params.sortOrder || 'desc',
   };
+
+  const normalizedTimeRange = LogUtils.formatTimeRange(
+    params.startTime ? String(params.startTime) : undefined,
+    params.endTime ? String(params.endTime) : undefined,
+  );
+
+  if (normalizedTimeRange.gte) {
+    normalized.startTime = normalizedTimeRange.gte;
+  }
+
+  if (normalizedTimeRange.lte) {
+    normalized.endTime = normalizedTimeRange.lte;
+  }
 
   // 标准化时间范围
   if (params.timeRange) {

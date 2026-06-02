@@ -62,6 +62,7 @@ export interface MetricsState extends DatabaseState {
       snapshot?: any;
       updatedAt?: number;
     };
+    topologyObservedEdges?: Map<string, any>;
     lastCacheUpdate?: number;
   };
   stats: {

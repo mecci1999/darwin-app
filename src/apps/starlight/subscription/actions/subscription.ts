@@ -778,13 +778,17 @@ const subscription = (star: Starlight) => {
         auth: true,
       },
       params: {
-        limit: { type: 'number', optional: true, default: 20 },
-        offset: { type: 'number', optional: true, default: 0 },
+        limit: { type: 'any', optional: true, default: 20 },
+        offset: { type: 'any', optional: true, default: 0 },
         status: { type: 'string', optional: true }, // active, cancelled, expired
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const { limit, offset, status } = ctx.params;
+          const { status } = ctx.params;
+          const rawLimit = Number(ctx.params.limit ?? 20);
+          const rawOffset = Number(ctx.params.offset ?? 0);
+          const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 100) : 20;
+          const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
           const userId = (ctx.meta as any).user?.userId;
 
           if (!userId) {

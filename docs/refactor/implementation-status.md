@@ -27,7 +27,7 @@
 
 验证结果：
 
-- `build:fengyuServer` 仍被仓库既有问题阻塞（`rollup.config.js` 中 `terser is not a function`）
+- `build:gateway` 仍被仓库既有问题阻塞（`rollup.config.js` 中 `terser is not a function`）
 - 全量 `tsc --noEmit` 仍被仓库既有问题阻塞（`metrics/sdk/client.ts` 缺少 `axios`）
 - 已使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e "require('./src/apps/starlight/metrics/actions/realtime.ts')"` 完成定向模块加载验证，通过
 
@@ -48,7 +48,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：darwin-app 已恢复全量构建与类型检查能力，后续后端改动可重新使用全量验证链路。
@@ -70,7 +70,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：本轮只修认证正确性问题，不涉及整套 auth 架构重构。
@@ -91,7 +91,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过（仅保留外部依赖 warning，不影响构建完成）
+- `npm run build:gateway` 通过（仅保留外部依赖 warning，不影响构建完成）
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：subscription 已开始具备面向前端的 read-model 风格输出，后续 billing/admin 页可逐步接入。
@@ -115,7 +115,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过（保留外部依赖 warning，不影响构建完成）
+- `npm run build:gateway` 通过（保留外部依赖 warning，不影响构建完成）
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alerts 路径已不再悬空，后续可在此基础上再逐步替换为更完整的告警服务实现。
@@ -136,7 +136,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过（保留外部依赖 warning，不影响构建完成）
+- `npm run build:gateway` 通过（保留外部依赖 warning，不影响构建完成）
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：logs 服务已开始具备 explorer/read-model 风格输出，后续前端日志与异常分析页可逐步切换。
@@ -154,7 +154,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：billing 历史相关后端能力不再只是存在于代码中未导出，而是已成为真实可调用契约。
@@ -179,7 +179,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：subscription 的 billing/current 链路现在已从“能编译”提升为“方法真实存在且连接到 DB 层”。
@@ -197,7 +197,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：subscription 价格历史逻辑已从“假数据占位”切换为“空值安全”，为后续接真实数据源留出口。
@@ -216,7 +216,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：payment-handler 已从“伪造支付成功”收敛为“待人工确认”的保守语义，业务可信度更高。
@@ -235,7 +235,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：subscription webhook 处理的安全语义已从“默认放行”收敛为“默认拒绝”。
@@ -253,7 +253,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：logs 导出历史逻辑已从“假记录占位”切换为“空值安全”。
@@ -272,7 +272,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：plan-manager 的套餐查询已从“假套餐占位”切换为真实 DB 查询。
@@ -291,7 +291,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：webhook 重处理逻辑已从“假事件重放”收敛为“空值安全/显式跳过”。
@@ -311,7 +311,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：metrics ingestion 的订阅/配额读取已切到新的 subscription read-model。
@@ -330,7 +330,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：overview/service detail 的 timeRange 参数已从前端 UI 层打通到后端契约层。
@@ -350,7 +350,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：overview incidents 与 service runtime 两条后端契约已补齐，后续前端可继续接入。
@@ -370,7 +370,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：overview incidents 与 service runtime 两条后端契约已补齐，后续前端可继续接入。
@@ -389,7 +389,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：service detail 时间范围已从“仅透传参数”变为“真实参与数据计算”。
@@ -409,7 +409,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：trace 不再只停留在前端伪装层，而是已有最小可用后端契约落点。
@@ -428,7 +428,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：overview incidents 与 service runtime 的伪数据问题已进一步收敛。
@@ -447,7 +447,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alerts 行为已从“永远成功 stub”收敛为最小可交互状态模型。
@@ -468,7 +468,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alert-rules 不再只有只读接口，前端规则编辑链路已有真实后端动作承接。
@@ -489,7 +489,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alerts 规则写链路与最小状态承接已补齐。
@@ -509,7 +509,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alerts service 过滤与 notifications 状态模型的一致性问题已修正。
@@ -529,7 +529,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：alerts 的过滤和通知状态模型已进一步与前端页面对齐。
@@ -548,7 +548,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 
 状态：**已完成** 说明：subscription 的 payment methods 路径已具备真实后端返回，不再因缺失内部方法而悬空。
@@ -569,7 +569,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：可创建 pending 订单、查询订单、取消订单，并从历史列表读回该订单
 
@@ -590,7 +590,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：失败 webhook 可被重放成功，失败标记被清除，统计信息同步更新
 
@@ -611,7 +611,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：启动后支付网关/通知服务状态变为 true，webhook processor 激活；停止后全部回落为 false
 
@@ -633,7 +633,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：当前成功路径实际发出的事件名为 `payment.succeeded`, `payment.succeeded`, `invoice.paid`
 
@@ -653,7 +653,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：可创建 free 订阅，并可从订阅历史接口对应方法读回该记录
 
@@ -674,7 +674,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：`v1.payment.notify` 成功回调返回 200，且对应订单状态更新为 `paid`
 
@@ -696,7 +696,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：成功回调后订单状态为 `paid`、订单已关联 `subscriptionId`、创建出 1 条 `pro` 订阅记录，并发出 `subscription.created` 与 `payment.succeeded`
 
@@ -717,7 +717,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：可创建 free 订阅、取消为 `cancelled`、识别为可恢复订阅，并恢复回 `active`
 
@@ -737,7 +737,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：可判断升级资格、计算升级费用、创建升级订单，并完成无额外费用的直接升级
 
@@ -758,7 +758,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：Stripe / PayPal / Alipay 三条路径均能拒绝错误签名并接受正确签名
 
@@ -780,7 +780,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：`v1.payment.refund` 返回成功，生成 1 条退款记录，退款记录状态为 `processed`，支付订单状态变为 `refunded`
 
@@ -867,7 +867,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：后端计划查询结果按 `sortOrder` 输出
 - 联动浏览器 QA 验证：即使接口返回顺序被打乱，StarLight billing plans 页仍按 `sortOrder` 正确展示和判定动作
@@ -888,7 +888,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：Stripe / PayPal / Alipay 三条路径都返回外部 checkout URL，Alipay 同时返回可用的 `qr://...` 编码值
 
@@ -910,7 +910,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - `npm run build` 通过
 - 手动脚本验证：paid create 返回 `https://checkout.example/stripe/o1`，paid upgrade 返回 `https://checkout.example/paypal/o2`，pending order 的 `nextAction.target` 返回 `https://checkout.example/alipay/o3`
@@ -954,7 +954,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：
   - 含 `providerOrderId` 的 pending 订单返回 `paid`
@@ -983,7 +983,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动浏览器 QA（Tauri bridge mock）验证：paid create 后当前页面 URL 切到 `/home/billing?tab=payment&orderId=o99`，payment tab 自动展示待处理订单并保留外部 checkout 打开动作
@@ -1009,7 +1009,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`v1.explorer.stats` 可返回完整 overview 字段
@@ -1037,7 +1037,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：健康探活成功返回 `200 / connected=true`，失败返回 `503 / connected=false`
@@ -1061,7 +1061,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`new ElasticsearchClient({ username: 'custom-user' })` 的内部 auth 为 `{ username: 'custom-user', password: '' }`，而完全不传认证时 auth 为 `null`
@@ -1080,7 +1080,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：在 `initialize({ node: 'http://service-es:9200', username: 'svc-user', password: 'svc-pass' })` 后，fallback client 与 tenant-scoped client 都返回同一 `node/auth`
@@ -1101,7 +1101,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 
@@ -1130,7 +1130,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`v1.stream` 建连成功后，SSE 输出包含 `connected` 事件和真实 `log` 事件，日志消息为 `stream ok`
@@ -1155,7 +1155,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：导出 action 返回 `status=200 / success=true`，且 `content.exportData` 与 `content.meta.filename` 可用
@@ -1337,7 +1337,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动浏览器 QA（Tauri bridge mock）验证：`/home/real-time-monitor` 路由可显示基于新合约的 `实例运行 / Metrics 采集 / Logs 采集 / 活跃事件` 状态项与图表区
@@ -1407,7 +1407,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：bulk update/export/import 三条动作均返回正确内容
@@ -1511,7 +1511,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 
@@ -1531,7 +1531,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`v1.quota.history` 返回完整 `history/stats/timeRange/total/limit/offset/hasMore` 结构
@@ -1559,7 +1559,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 
@@ -1644,7 +1644,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动浏览器 QA（Tauri bridge mock）验证：`/home/admin-ingestion-v2` 显示真实 AppKey 列表与接入状态概览，点击“生成 AppKey”会命中 `/api/metrics/v1/appkey/generate`
@@ -1670,7 +1670,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：匹配对返回 `200 / valid=true`，不匹配对返回 `401 / AppKey或AppSecret不匹配`
@@ -1710,7 +1710,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：Stripe / PayPal / Alipay 三条路径均返回统一的 manual-review payload，且不再包含伪造的 provider-specific response 字段
@@ -1732,7 +1732,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：Stripe / PayPal / Alipay 三条路径都满足“正确签名=true、错误签名=false”
@@ -1752,7 +1752,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`processRefund(...)` 返回 `manual_review` 且包含 `supported=false / transactionCreated=false`
@@ -1776,7 +1776,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：`v1.appkey.list` 返回条目中的 `usageCount` 已为真实聚合值（示例 `42`），不再固定为 `0`
@@ -1796,7 +1796,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：当 `ApiKeyStats` 有记录时，`getApiKeyUsageStats(...)` 返回真实 `dailyUsage` 数据；当源不可用时不再伪造随机曲线
@@ -1817,7 +1817,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：DB-backed `validateApiKey()` 调用会触发 `updateApiKeyLastUsed('key-1')` 与 `updateApiKeyStats('key-1', 1)`
 
@@ -1837,7 +1837,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：`validateApiKey(...)` 成功后会触发 `updateApiKeyLastUsed('key-1')` 和 `updateApiKeyStats('key-1', 1)`
 
@@ -1857,7 +1857,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：DB-backed `validateApiKey('dk_live_secret_key')` 返回有效 key 信息并触发 `lastUsed/stats` 更新调用
 
@@ -1881,7 +1881,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：
   - `v1.appkey.generate` 可带 tenant 上下文创建新 key
@@ -1903,7 +1903,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - 手动脚本验证：tenant-scoped `getApiKeys()` 仅返回目标 tenant 的 key；同 tenant update/delete 成功；跨 tenant update 被拒绝
 
@@ -1946,7 +1946,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npx tsc --noEmit` 通过
 - StarLight `npm run build` 通过
 - 手动脚本验证：当 `keywords='error-keyword'` 时，SSE 响应只收到匹配该关键字的 `log` 事件
@@ -2050,7 +2050,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npm run build` 通过
 - 手动 QA：使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e` 直接调用 `v1.overview.trends` 的底层构造逻辑，确认返回对象包含 `requests / errors / latency` 三组数组
 
@@ -2072,7 +2072,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npm run build` 通过
 - 手动 QA：使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e` 直接调用 `v1.catalog.service.quick-view` 的 handler，确认返回对象包含 `identity / redSummary / activeIncidentCount / instanceCount`
 
@@ -2094,7 +2094,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npm run build` 通过
 - 手动 QA：使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e` 直接调用 `v1.catalog.services.summary` 的 handler，确认返回对象包含 `total / healthy / degraded / critical / muted`
 
@@ -2116,7 +2116,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npm run build` 通过
 - 手动 QA：使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e` 直接调用 `v1.overview.ingest-status` 的 handler，确认返回对象包含 `metrics / logs / traces / dropped / delayed / failed`
 
@@ -2138,7 +2138,7 @@
 
 验证结果：
 
-- `npm run build:fengyuServer` 通过
+- `npm run build:gateway` 通过
 - `npm run build` 通过
 - 手动 QA：使用 `node -r ts-node/register/transpile-only -r tsconfig-paths/register -e` 直接调用 `v1.overview.risk-services` 的 handler，确认返回对象包含 `highRiskServices / recentDegradedServices`
 

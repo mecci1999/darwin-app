@@ -226,6 +226,7 @@ export class DatabaseService {
       saveOrUpdateUsers: userApi.saveOrUpdateUsers,
       queryAllUsers: userApi.queryAllUsers,
       findUserByUserId: userApi.findUserByUserId,
+      findUsersByUserIds: userApi.findUsersByUserIds,
     };
   }
 

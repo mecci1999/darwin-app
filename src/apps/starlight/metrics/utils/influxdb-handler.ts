@@ -319,7 +319,7 @@ export class InfluxDBHandler {
         row.env || row.environment || row['deployment.environment'] || 'prod';
 
       const groupColumns =
-        '["service", "serviceId", "source", "source_service", "target_service", "targetService", "destination_service", "target", "peer_service", "protocol", "rpc.system", "db.system", "messaging.system", "cluster", "env", "environment", "service.name", "peer.service", "service.id"]';
+        '["service", "serviceId", "source", "source_service", "target_service", "targetService", "destination_service", "target", "peer_service", "protocol", "rpc.system", "db.system", "messaging.system", "cluster", "env", "environment", "service.name", "peer.service", "service.id", "action"]';
       const timeRangeSeconds = parseRangeSeconds(timeRange);
 
       const fluxQuery = `
@@ -462,6 +462,7 @@ export class InfluxDBHandler {
             app: inferApp(finalSource),
             cluster: inferCluster(row),
             env: inferEnv(row),
+            action: row.action,
           });
 
           if (!nodesMap.has(finalSource)) {

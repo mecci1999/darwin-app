@@ -1,11 +1,13 @@
 import { generateKeyPairSync } from 'crypto';
-import { queryConfigs, saveOrUpdateConfigs } from 'db/mysql/apis/config';
+import { saveOrUpdateConfigs } from 'db/mysql/apis/config';
 import jwt from 'jsonwebtoken';
 import { Star } from 'node-universe';
 import nodemailer from 'nodemailer';
 import { verifyCodeOptions } from 'typings';
 import { AuthState } from '../types';
 import { AuthUtils } from '../utils';
+
+const VERIFY_CODE_EMAIL_TIMEOUT_MS = Number(process.env.VERIFY_CODE_EMAIL_TIMEOUT_MS || 8000);
 
 /**
  * 验证微服务的方法
@@ -18,15 +20,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
 
       const payload = { userId: params.userId };
 
-      // 获取密钥
-      const result = (await queryConfigs(['rsa'])) || [];
-
-      if (result.length === 0) {
-        star.logger?.error('generateToken', '获取rsa密钥对失败');
-        return;
-      }
-
-      const rsa = JSON.parse(result[0].value);
+      const rsa = await AuthUtils.getRSAKeys(state, star.logger);
 
       if (!rsa) return;
 
@@ -47,15 +41,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
 
       const payload = { userId: params.userId };
 
-      // 获取密钥
-      const result = (await queryConfigs(['rsa'])) || [];
-
-      if (result.length === 0) {
-        star.logger?.error('generateRefreshToken', '获取rsa密钥对失败');
-        return;
-      }
-
-      const rsa = JSON.parse(result[0].value);
+      const rsa = await AuthUtils.getRSAKeys(state, star.logger);
 
       if (!rsa) return;
 
@@ -74,9 +60,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
     try {
       if (!token) return;
 
-      // 获取公钥
-      const result = (await queryConfigs(['rsa'])) || [];
-      const rsa = JSON.parse(result[0].value);
+      const rsa = await AuthUtils.getRSAKeys(state, star.logger);
 
       if (!rsa) return;
 
@@ -89,19 +73,30 @@ const authMethods = (star: Star, state?: AuthState) => ({
         exp: number;
       };
 
-      // 获取过期时间
-      const expirationTime = decoded.exp * 1000; // 转换为毫秒
+      const expirationTime = decoded.exp * 1000;
       const currentTime = Date.now();
+
+      let tenantId: string | undefined;
+      let isAdmin = false;
+      try {
+        const userInfo = await (star as any).db?.user?.findUserByUserId?.(decoded.userId);
+        tenantId = userInfo?.tenantId ? String(userInfo.tenantId) : undefined;
+        isAdmin = userInfo?.power === 999;
+      } catch (userLookupError) {
+        tenantId = undefined;
+        isAdmin = false;
+      }
 
       return {
         userId: decoded.userId,
+        tenantId: tenantId || decoded.userId,
+        isAdmin,
         expirationTime,
         isExpired: currentTime > expirationTime,
       };
     } catch (error: any) {
       if (error.name === 'TokenExpiredError') {
         star.logger?.error('resolveToken', 'token已过期', error);
-        // 处理 token 过期的逻辑，例如返回特定的错误信息
         return { error: 'Token has expired', code: 40001 };
       }
       star.logger?.error('resolveToken', '验证token失败', error);
@@ -114,49 +109,65 @@ const authMethods = (star: Star, state?: AuthState) => ({
     options: verifyCodeOptions;
     code: string;
   }) {
-    return new Promise(async (resolve, reject) => {
-      try {
-        // 创建邮箱发送对象
-        const transporter = nodemailer.createTransport({
-          service: '163',
-          auth: {
-            user: 'mecci1999@163.com',
-            pass: 'YEVimrR6xg6pNYKK',
-          },
-        });
+    try {
+      const cacheKey = `verifyCode:${params.email};type:${params.type}`;
+      const cacheCode = await star.cacher.get(cacheKey);
 
-        const cacheCode = await star.cacher.get(`verifyCode:${params.email};type:${params.type}`);
-
-        // 获取redis缓存
-        if (cacheCode) {
-          // 存在缓存
-          resolve({
-            code: 200,
-            message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
-          });
-        } else {
-          // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间
-          await star.cacher.set(
-            `verifyCode:${params.email};type:${params.type}`,
-            params.code,
-            300, // 验证码过期时间5分钟
-          );
-
-          // 使用Promise包装sendMail方法
-          transporter.sendMail(params.options as any, (error, info) => {
-            if (error) {
-              star.logger?.error('发送邮件失败', params, error);
-              reject({ code: 500, message: '验证码发送失败，请稍后重试～', error });
-            } else {
-              star.logger?.info('邮件发送成功', info);
-              resolve({ code: 200, message: '验证码已发送至邮箱，请注意查收～', info });
-            }
-          });
-        }
-      } catch (error) {
-        reject({ code: 500, message: '验证码发送失败', error });
+      // 获取redis缓存
+      if (cacheCode) {
+        // 存在缓存
+        return {
+          code: 200,
+          message: '验证码已发送至您的邮箱，请留意。若没收到，请确认邮箱地址是否正确。',
+        };
       }
-    });
+
+      // 缓存不存在或者已过期，将邮箱作为redis的key存储验证码，并设置过期时间
+      await star.cacher.set(
+        cacheKey,
+        params.code,
+        300, // 验证码过期时间5分钟
+      );
+
+      // 创建邮箱发送对象。SMTP 网络不可控，必须设置上限，避免接口一直等待到客户端超时。
+      const transporter = nodemailer.createTransport({
+        service: '163',
+        connectionTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
+        greetingTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
+        socketTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
+        auth: {
+          user: 'mecci1999@163.com',
+          pass: 'YEVimrR6xg6pNYKK',
+        },
+      });
+
+      return await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          transporter.close();
+          reject({ code: 500, message: '验证码发送超时，请稍后重试～' });
+        }, VERIFY_CODE_EMAIL_TIMEOUT_MS + 1000);
+
+        transporter.sendMail(params.options as any, (error, info) => {
+          clearTimeout(timeout);
+          transporter.close();
+
+          if (error) {
+            star.logger?.error('发送邮件失败', params, error);
+            reject({ code: 500, message: '验证码发送失败，请稍后重试～', error });
+            return;
+          }
+
+          star.logger?.info('邮件发送成功', info);
+          resolve({ code: 200, message: '验证码已发送至邮箱，请注意查收～', info });
+        });
+      });
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : '验证码发送失败，请稍后重试～';
+      return { code: 500, message, error };
+    }
   },
   // 检查并生成RSA密钥对 (已迁移到 AuthUtils)
   async checkAndGenerateRSA() {
@@ -165,13 +176,10 @@ const authMethods = (star: Star, state?: AuthState) => ({
     }
     // 兼容旧版本调用
     try {
-      const result = (await queryConfigs(['rsa'])) || [];
-      if (result.length > 0) {
-        const rsaData = JSON.parse(result[0].value);
-        if (rsaData.publicKey && rsaData.privateKey) {
-          star.logger?.info('RSA密钥对已存在，跳过生成', rsaData.privateKey);
-          return;
-        }
+      const existingKeys = await AuthUtils.getRSAKeys(state, star.logger);
+      if (existingKeys?.publicKey && existingKeys?.privateKey) {
+        star.logger?.info('RSA密钥对已存在，跳过生成', existingKeys.privateKey);
+        return;
       }
 
       star.logger?.info('RSA密钥对不存在，开始生成...');

@@ -4,6 +4,7 @@
  * 功能：订阅计划管理、配额控制、计费集成、升级降级
  */
 import { DatabaseService } from 'db/mysql';
+import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
@@ -74,7 +75,7 @@ function createSubscriptionService() {
     nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_CONFIG.BROKERS.join(','),
       options: {
         producer: {

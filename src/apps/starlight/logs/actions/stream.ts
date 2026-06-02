@@ -9,6 +9,7 @@ import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils
 // 全局活跃流存储
 let _activeStreams: Map<string, any> | undefined;
 let _cleanupInterval: NodeJS.Timeout | undefined;
+initializeCleanup();
 
 export default function stream(star: Starlight) {
   return {

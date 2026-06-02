@@ -10,6 +10,8 @@ export interface AuthState extends DatabaseState {
     privateKey: string;
   };
 
+  rsaLoadedAt?: number;
+
   // 登录尝试记录
   loginAttempts: Map<
     string,

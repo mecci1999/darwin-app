@@ -1,4 +1,5 @@
 import '../../../utils/loadEnv';
+import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
@@ -139,7 +140,7 @@ function createMetricsCompatService() {
     nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: { 'linger.ms': 0, 'batch.size': 0, acks: 1 },

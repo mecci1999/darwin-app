@@ -13,15 +13,19 @@ const billing = (star: Starlight) => {
         year: { type: 'number', optional: true },
         month: { type: 'number', optional: true },
         status: { type: 'string', optional: true }, // paid, pending, overdue
-        limit: { type: 'number', optional: true, default: 20 },
-        offset: { type: 'number', optional: true, default: 0 },
+        limit: { type: 'any', optional: true, default: 20 },
+        offset: { type: 'any', optional: true, default: 0 },
       },
       hooks: {
         before: [validators.query],
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const { year, month, status, limit, offset } = ctx.params;
+          const { year, month, status } = ctx.params;
+          const rawLimit = Number(ctx.params.limit ?? 20);
+          const rawOffset = Number(ctx.params.offset ?? 0);
+          const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 100) : 20;
+          const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
           const userId = (ctx.meta as any).user?.userId;
 
           if (!userId) {

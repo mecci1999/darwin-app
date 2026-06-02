@@ -1,4 +1,4 @@
-import { GATEWAY_PORT } from 'config';
+import { DEFAULT_LOG_CATEGORY_ENABLED, GATEWAY_PORT, isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { UniverseWeb } from 'node-universe-gateway';
 import { IPNotPermissionAccess } from 'error';
@@ -33,6 +33,27 @@ import {
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
 
+const GATEWAY_SERVICE_WAIT_TIMEOUT_MS = Number(process.env.GATEWAY_SERVICE_WAIT_TIMEOUT_MS || 20000);
+const GATEWAY_SERVICE_WAIT_INTERVAL_MS = Number(process.env.GATEWAY_SERVICE_WAIT_INTERVAL_MS || 500);
+
+const waitForRegisteredService = async (star: Starlight, service: string) => {
+  const hasService = () => star.registry?.services?.list?.().some((item: any) => item.name === service);
+
+  if (hasService()) return true;
+
+  try {
+    await star.waitForServices(service, GATEWAY_SERVICE_WAIT_TIMEOUT_MS, GATEWAY_SERVICE_WAIT_INTERVAL_MS);
+  } catch (error) {
+    star.logger?.warn('Gateway target service wait timed out', {
+      service,
+      timeoutMs: GATEWAY_SERVICE_WAIT_TIMEOUT_MS,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return hasService();
+};
+
 // 全局状态管理
 const state: GatewayState = {
   ips: [],
@@ -63,6 +84,76 @@ const createInternalServiceAccessError = (service: string) => ({
     },
   },
 });
+
+const emitGatewayTopologyMetric = async (
+  ctx: Context,
+  star: Starlight,
+  params: {
+    service: string;
+    version: string;
+    action: string;
+    status: 'success' | 'error';
+    durationMs: number;
+    userId?: string;
+    method?: string;
+    phase?: 'start' | 'finish';
+  },
+) => {
+  const targetService = String(params.service || '').trim();
+  if (!targetService || targetService === 'gateway') return;
+
+  star.logger?.info('Gateway topology metric emitting', {
+    sourceService: 'gateway',
+    targetService,
+    version: params.version,
+    action: params.action,
+    status: params.status,
+    durationMs: params.durationMs,
+    phase: params.phase,
+    userId: params.userId,
+    method: params.method,
+  });
+
+  const payload = {
+    type: 'observed',
+    sourceService: 'gateway',
+    targetService,
+    version: params.version,
+    action: params.action,
+    status: params.status,
+    durationMs: params.durationMs,
+    phase: params.phase,
+    userId: params.userId,
+    method: params.method,
+    timestamp: Date.now(),
+  };
+
+  await ctx.call('metrics.v1.topology', payload, { meta: ctx.meta })
+    .then(() => {
+      star.logger?.info('Gateway topology metric recorded', {
+        sourceService: payload.sourceService,
+        targetService: payload.targetService,
+        action: payload.action,
+        status: payload.status,
+      });
+    })
+    .catch((error) => {
+      star.logger?.error('Gateway topology metric record failed', {
+        sourceService: payload.sourceService,
+        targetService: payload.targetService,
+        action: payload.action,
+        status: payload.status,
+        error: error?.message || String(error),
+      });
+    });
+};
+
+const shouldSkipTopologyObservation = (service: string, action: string, params: any) => {
+  if (service === 'metrics' && action === 'topology') {
+    return params?.type === 'graph' || !params?.type;
+  }
+  return false;
+};
 
 const remapMetricsRoute = (rawService: string, rawVersion: string, rawAction: string, rawParams: any = {}) => {
   let service = rawService;
@@ -157,7 +248,7 @@ async function initializeGatewayService() {
     // 通信模块使用kafka
     transporter: {
       type: 'KAFKA',
-      debug: true,
+      debug: isTransportDebugEnabled(),
       host: KAFKA_BROKERS,
       options: {
         producer: {
@@ -190,8 +281,13 @@ async function initializeGatewayService() {
       type: 'NotePack',
     },
     // 日志模块
-    // logger: pinoOptions,
-    logger: true,
+    logger: {
+      type: 'Console',
+      options: {
+        level: 'info',
+        categories: DEFAULT_LOG_CATEGORY_ENABLED,
+      },
+    },
     cacher: {
       type: 'Redis',
       clone: true,
@@ -221,9 +317,13 @@ async function initializeGatewayService() {
       port: Number(GATEWAY_PORT || DEFAULT_PORT),
       ip: '0.0.0.0',
       cors: {
-        origin: '*',
+        origin: [
+          'http://localhost:6130',
+          'http://127.0.0.1:6130',
+          'tauri://localhost',
+        ],
         methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
-        allowedHeaders: '*',
+        allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
         // exposedHeaders: '*',
         credentials: true,
         maxAge: null,
@@ -244,7 +344,110 @@ async function initializeGatewayService() {
             GET: 'gateway.health',
           },
         },
-        // 主要API路由
+        // 单段 action 路由，优先处理 /api/:service/:version/:action
+        {
+          path: '/:service/:version/:action',
+          authorization: false,
+          aliases: {
+            '/': 'gateway.dispatch',
+          },
+          bodyParsers: {
+            json: true,
+          },
+          async onBeforeCall(
+            ctx: Context,
+            route: Route,
+            req: IncomingRequest,
+            res: GatewayResponse,
+          ) {
+            (ctx.meta as any).req = {
+              userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
+              headers: req.headers,
+              method: req.method,
+            };
+
+            if (req?.socket?.remoteAddress) {
+              (ctx.meta as any).req = { ...(ctx.meta as any).req, ip: req.socket.remoteAddress };
+            }
+
+            if (INTERNAL_ONLY_SERVICES.has(String(req.$params.service || ''))) {
+              throw createInternalServiceAccessError(String(req.$params.service));
+            }
+
+            const actions = star.registry?.actions.list() || [];
+            const normalizedVersion =
+              req.$params.version === '1' ? 'v1' : String(req.$params.version || '');
+            const remappedMetrics = remapMetricsRoute(
+              req.$params.service,
+              req.$params.version,
+              req.$params.action || '',
+              req.$params || {},
+            );
+            const remapped = remapSubscriptionRoute(
+              remappedMetrics.service,
+              remappedMetrics.action || '',
+              remappedMetrics.params || {},
+            );
+            const actionName = remapped.action ? remapped.action.replace(/\//g, '.') : '';
+
+            let targetActionName = `${remapped.service}.${normalizedVersion}.${actionName}`;
+            let action = actions.find((item) => item.name === targetActionName);
+
+            if (!action) {
+              targetActionName = `${remapped.service}.${actionName}`;
+              action = actions.find((item) => item.name === targetActionName);
+            }
+
+            if (INTERNAL_ONLY_ACTIONS.has(targetActionName)) {
+              throw createInternalServiceAccessError(targetActionName);
+            }
+
+            await GatewayHelper.handleAuthentication(ctx, req, action, async (ctx, token) => {
+              await (this as any).authorize(ctx, token);
+            });
+          },
+          onAfterCall(
+            ctx: Context,
+            route: Route,
+            req: IncomingRequest,
+            res: GatewayResponse,
+            data: any,
+          ) {
+            if ((ctx.meta as any)?.token && (ctx.meta as any)?.refreshToken) {
+              GatewayHelper.setAuthCookies(
+                res,
+                (ctx.meta as any).token,
+                (ctx.meta as any).refreshToken,
+              );
+            }
+
+            if ((ctx.meta as any)?.clearCookies) {
+              GatewayHelper.clearAuthCookies(res);
+            }
+
+            return data;
+          },
+          onError(req: IncomingRequest, res: GatewayResponse, err: any) {
+            if (err.code === 429 && req?.socket?.remoteAddress) {
+              GatewayHelper.addIpToBlacklist(req.socket.remoteAddress, state, '频繁请求');
+            }
+
+            res.setHeader('Content-Type', 'application/json');
+            res.writeHead(err.code || 500);
+            res.end(
+              JSON.stringify({
+                status: HttpStatusCode.BAD_REQUEST,
+                data: {
+                  content: err,
+                  message: err.message || 'Bad request',
+                  code: HttpResponseCode.BAD_REQUEST,
+                  success: false,
+                },
+              }),
+            );
+          },
+        },
+        // 主要API路由（多段 action）
         {
           path: '/:service/:version/:action*',
           authorization: false,
@@ -265,6 +468,7 @@ async function initializeGatewayService() {
             (ctx.meta as any).req = {
               userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
               headers: req.headers,
+              method: req.method,
             };
 
             // IP黑名单检查
@@ -386,7 +590,7 @@ async function initializeGatewayService() {
       // 请求分发
       dispatch: {
         timeout: 0,
-        handler(ctx: Context) {
+        async handler(ctx: Context) {
           const rawService = String(ctx.params?.service || '');
           if (INTERNAL_ONLY_SERVICES.has(rawService)) {
             return createInternalServiceAccessError(rawService).data;
@@ -413,6 +617,28 @@ async function initializeGatewayService() {
             return createInternalServiceAccessError(targetActionName).data;
           }
 
+          if (service === 'metrics-query') {
+            star.logger?.info('Gateway metrics-query dispatch target', {
+              targetActionName,
+              paramsKeys: Object.keys(params || {}),
+              userId: (ctx.meta as any)?.user?.userId,
+              scope: (params as any)?.scope || (params as any)?.context?.scope,
+            });
+          }
+
+          const isTargetServiceReady = await waitForRegisteredService(star, service);
+          if (!isTargetServiceReady) {
+            return {
+              status: HttpStatusCode.SERVICE_UNAVAILABLE,
+              data: {
+                content: null,
+                message: `Service '${service}' is not registered yet`,
+                code: HttpResponseCode.ServiceActionFaild,
+                success: false,
+              },
+            };
+          }
+
           if (params?.meta) {
             ctx.meta = { ...ctx.meta, ...params.meta };
           }
@@ -422,7 +648,68 @@ async function initializeGatewayService() {
             params.userId = (ctx.meta as any).user.userId;
           }
 
-          return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta });
+          const dispatchStartedAt = Date.now();
+          const userId = (ctx.meta as any)?.user?.userId;
+          const method = (ctx.meta as any)?.req?.method;
+          const shouldRecordBeforeDispatch = !shouldSkipTopologyObservation(service, action, params);
+
+          if (shouldRecordBeforeDispatch) {
+            await emitGatewayTopologyMetric(ctx, star, {
+              service,
+              version,
+              action,
+              status: 'success',
+              durationMs: 0,
+              phase: 'start',
+              userId,
+              method,
+            });
+          }
+
+          return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta })
+            .then((result) => {
+              if (!shouldSkipTopologyObservation(service, action, params)) {
+                void emitGatewayTopologyMetric(ctx, star, {
+                  service,
+                  version,
+                  action,
+                  status: 'success',
+                  durationMs: Date.now() - dispatchStartedAt,
+                  phase: 'finish',
+                  userId,
+                  method,
+                });
+              }
+              if (service === 'metrics-query') {
+                star.logger?.info('Gateway metrics-query dispatch completed', {
+                  targetActionName: `${service}.${version}.${action}`,
+                  durationMs: Date.now() - dispatchStartedAt,
+                });
+              }
+              return result;
+            })
+            .catch((error) => {
+              if (!shouldSkipTopologyObservation(service, action, params)) {
+                void emitGatewayTopologyMetric(ctx, star, {
+                  service,
+                  version,
+                  action,
+                  status: 'error',
+                  durationMs: Date.now() - dispatchStartedAt,
+                  phase: 'finish',
+                  userId,
+                  method,
+                });
+              }
+              if (service === 'metrics-query') {
+                star.logger?.error('Gateway metrics-query dispatch failed', {
+                  targetActionName: `${service}.${version}.${action}`,
+                  durationMs: Date.now() - dispatchStartedAt,
+                  error: error?.message || String(error),
+                });
+              }
+              throw error;
+            });
         },
       },
       'websocket.trigger': {

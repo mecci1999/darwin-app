@@ -12,6 +12,134 @@ import {
   resolveSystemServiceIdentity
 } from '../utils'
 
+export const queueGatewayTopologyMetric = (ctx: any) => {
+  const { metricsState } = ctx.service as { metricsState: MetricsState }
+  const payload = ctx.params || {}
+  const sourceService = String(payload.sourceService || 'gateway')
+  const targetService = String(payload.targetService || '')
+  const timestamp = payload.timestamp || Date.now()
+  const isStartPhase = payload.phase === 'start'
+
+  if (!targetService || sourceService === targetService) {
+    ctx.service.logger.info('Metrics topology observed skipped', {
+      sourceService,
+      targetService,
+      reason: !targetService ? 'missing_target_service' : 'self_edge'
+    })
+    return
+  }
+
+  ctx.service.logger.info('Metrics topology observed received', {
+    sourceService,
+    targetService,
+    version: payload.version,
+    action: payload.action,
+    status: payload.status,
+    durationMs: payload.durationMs,
+    phase: payload.phase,
+    method: payload.method
+  })
+
+  const edgeKey = `${sourceService}=>${targetService}`
+  const observedEdges = metricsState.cache.topologyObservedEdges || new Map<string, any>()
+  const existing = observedEdges.get(edgeKey) || {
+    from: sourceService,
+    to: targetService,
+    protocol: 'http',
+    callType: 'sync',
+    count: 0,
+    errors: 0,
+    totalDurationMs: 0,
+    source: 'gateway-routing'
+  }
+  if (!isStartPhase) {
+    existing.count += 1
+    existing.errors += payload.status === 'error' ? 1 : 0
+    existing.totalDurationMs += Number(payload.durationMs || 0)
+  }
+  existing.lastSeenAt = timestamp
+  existing.action = payload.action
+  existing.qps = existing.count / 60
+  existing.errorRate = existing.count > 0 ? existing.errors / existing.count : 0
+  existing.p99 = existing.count > 0 ? Math.round(existing.totalDurationMs / existing.count) : 0
+  existing.successRate = Math.max(0, 1 - existing.errorRate)
+  existing.status = existing.errorRate >= 0.05 || existing.p99 >= 1000 ? 'critical' : existing.errorRate >= 0.01 || existing.p99 >= 500 ? 'warning' : 'healthy'
+  observedEdges.set(edgeKey, existing)
+  metricsState.cache.topologyObservedEdges = observedEdges
+
+  ctx.service.logger.info('Metrics topology observed cached', {
+    edgeKey,
+    from: existing.from,
+    to: existing.to,
+    count: existing.count,
+    errors: existing.errors,
+    p99: existing.p99,
+    status: existing.status,
+    phase: payload.phase,
+    observedEdgeCacheSize: observedEdges.size
+  })
+
+  if (isStartPhase) {
+    ctx.service.logger.info('Metrics topology observed start cached without counting', {
+      edgeKey,
+      observedEdgeCacheSize: observedEdges.size
+    })
+    return
+  }
+
+  const baseTags = {
+    tenantId: SYSTEM_TENANT_ID,
+    appKeyId: SYSTEM_APP_KEY_ID,
+    visibilityScope: SYSTEM_VISIBILITY_SCOPE,
+    sourceType: 'darwin-system',
+    source: 'gateway-routing',
+    service: sourceService,
+    serviceId: buildSystemServiceId(sourceService),
+    source_service: sourceService,
+    target_service: targetService,
+    targetService,
+    destination_service: targetService,
+    peer_service: targetService,
+    protocol: 'http',
+    'rpc.system': 'http',
+    env: 'prod',
+    region: '华东-1',
+    route: `${payload.version || 'v1'}.${payload.action || ''}`,
+    action: String(payload.action || ''),
+    method: String(payload.method || 'HTTP'),
+    status: payload.status === 'error' ? '500' : '200'
+  }
+
+  const data = [
+    {
+      measurement: 'http_requests_total',
+      tags: baseTags,
+      fields: { value: 1, count: 1 },
+      timestamp
+    },
+    {
+      measurement: 'http_request_duration_ms',
+      tags: baseTags,
+      fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
+      timestamp
+    }
+  ]
+
+  metricsState.processingQueue.push({
+    id: `${SYSTEM_TENANT_ID}-gateway-topology-${targetService}-${timestamp}`,
+    format: 'system',
+    data,
+    timestamp,
+    retryCount: 0
+  })
+
+  ctx.service.logger.info('Metrics topology metric queued', {
+    edgeKey,
+    queueSize: metricsState.processingQueue.length,
+    measurements: data.map((item) => item.measurement)
+  })
+}
+
 const resolveServiceNameFromNodeId = (nodeID?: string) => {
   const normalized = String(nodeID || '').trim()
   if (!normalized) return 'unknown'
@@ -128,6 +256,16 @@ const systemMetricsHandlers = Object.fromEntries(
 )
 
 export default {
+  'metrics.topology.observed': {
+    async handler(ctx: any) {
+      try {
+        queueGatewayTopologyMetric(ctx)
+      } catch (error) {
+        ctx.service.logger.error('Failed to handle metrics.topology.observed event:', error)
+      }
+    }
+  },
+
   // 处理原始指标数据（支持多租户）
   'metrics.raw': {
     async handler(ctx: any) {

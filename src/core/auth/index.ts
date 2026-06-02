@@ -17,6 +17,7 @@
  */
 
 import { Star } from 'node-universe';
+import { isTransportDebugEnabled } from 'config';
 import { DatabaseService } from 'db/mysql';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
@@ -51,7 +52,7 @@ async function initializeAuthService() {
     // 通信模块使用kafka
     transporter: {
       type: 'KAFKA',
-      debug: process.env.NODE_ENV !== 'production',
+      debug: isTransportDebugEnabled(),
       host: process.env.KAFKA_HOST || '127.0.0.1:9092',
       options: {
         producer: {

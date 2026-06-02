@@ -43,8 +43,8 @@ jest path/to/file.test.ts
 ### Build
 
 ```bash
-# Build the project
-npm run build:fengyuServer
+# Build the gateway bundle
+npm run build
 ```
 
 ### Database
