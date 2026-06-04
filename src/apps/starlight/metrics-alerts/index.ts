@@ -2,10 +2,15 @@ import { Star } from 'node-universe';
 import { isTransportDebugEnabled } from 'config';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
-import alerts from '../metrics/actions/alerts';
+import alerts, { evaluateAlertRules } from '../metrics/actions/alerts';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
+import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
 import '../../../utils/loadEnv';
 import {
+  INFLUXDB_BUCKET,
+  INFLUXDB_ORG,
+  INFLUXDB_TOKEN,
+  INFLUXDB_URL,
   KAFKA_BROKERS,
   KAFKA_PASSWORD,
   KAFKA_USER,
@@ -16,6 +21,7 @@ import {
 } from '../metrics/constants';
 
 const APP_NAME = 'metrics-alerts';
+const ALERT_EVALUATION_INTERVAL_MS = 60 * 1000;
 
 function createMetricsAlertsService() {
   const star = new Star({
@@ -85,15 +91,35 @@ function createMetricsAlertsService() {
     settings: {
       multiTenant: true,
       tenantIdField: 'tenantId',
+      influxdb: {
+        url: INFLUXDB_URL,
+        token: INFLUXDB_TOKEN,
+        org: INFLUXDB_ORG,
+        bucket: INFLUXDB_BUCKET,
+      },
     },
     async created() {
       this.logger.info('Metrics alerts service created');
       (this as any).redis = (star as any).cacher;
     },
     async started() {
+      await InfluxDBHandler.initialize(this.settings.influxdb, star);
+      const runEvaluation = async () => {
+        try {
+          await evaluateAlertRules(this as any, star);
+        } catch (error) {
+          this.logger.error('Metrics alert rule evaluation failed:', error);
+        }
+      };
+      await runEvaluation();
+      (this as any).alertEvaluationTimer = setInterval(runEvaluation, ALERT_EVALUATION_INTERVAL_MS);
       this.logger.info('Metrics alerts service started successfully');
     },
     async stopped() {
+      if ((this as any).alertEvaluationTimer) {
+        clearInterval((this as any).alertEvaluationTimer);
+        (this as any).alertEvaluationTimer = null;
+      }
       this.logger.info('Metrics alerts service stopped successfully');
     },
     methods: {

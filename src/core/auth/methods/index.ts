@@ -7,7 +7,7 @@ import { verifyCodeOptions } from 'typings';
 import { AuthState } from '../types';
 import { AuthUtils } from '../utils';
 
-const VERIFY_CODE_EMAIL_TIMEOUT_MS = Number(process.env.VERIFY_CODE_EMAIL_TIMEOUT_MS || 8000);
+const VERIFY_CODE_EMAIL_TIMEOUT_MS = Number(process.env.VERIFY_CODE_EMAIL_TIMEOUT_MS || 5000);
 
 /**
  * 验证微服务的方法
@@ -162,6 +162,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
         });
       });
     } catch (error) {
+      await star.cacher.delete(`verifyCode:${params.email};type:${params.type}`).catch(() => undefined);
       const message =
         typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
           ? error.message

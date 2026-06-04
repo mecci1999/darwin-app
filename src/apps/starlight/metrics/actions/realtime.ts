@@ -1,6 +1,12 @@
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { InfluxDBHandler } from '../utils/influxdb-handler';
+import {
+  RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
+  RESPONSE_DURATION_FIELD_FILTER,
+  RESPONSE_DURATION_MEASUREMENT_FILTER,
+  RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+} from '../utils/duration-metrics';
 import { normalizeRssMemoryValue } from '../utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../utils/system-telemetry';
 import { buildAlerts } from './alerts';
@@ -131,9 +137,11 @@ const buildDurationSeries = async (
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
-      |> filter(fn: (r) => r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms")
+      |> filter(fn: (r) => ${RESPONSE_DURATION_MEASUREMENT_FILTER})
       ${filter}
-      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time")
+      |> filter(fn: (r) => ${RESPONSE_DURATION_FIELD_FILTER})
+      ${RESPONSE_DURATION_MS_NORMALIZATION_FLUX}
+      ${RESPONSE_DURATION_COMPLETED_REQUEST_FILTER}
       |> aggregateWindow(every: ${every}, fn: mean, createEmpty: false)
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
@@ -238,8 +246,10 @@ const getAvgResponseTime = async (timeRange: string, star: Starlight) => {
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${timeRange})
-      |> filter(fn: (r) => r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms")
-      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time")
+      |> filter(fn: (r) => ${RESPONSE_DURATION_MEASUREMENT_FILTER})
+      |> filter(fn: (r) => ${RESPONSE_DURATION_FIELD_FILTER})
+      ${RESPONSE_DURATION_MS_NORMALIZATION_FLUX}
+      ${RESPONSE_DURATION_COMPLETED_REQUEST_FILTER}
       |> mean()
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);

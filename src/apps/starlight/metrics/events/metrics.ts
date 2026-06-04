@@ -117,12 +117,16 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
       fields: { value: 1, count: 1 },
       timestamp
     },
-    {
-      measurement: 'http_request_duration_ms',
-      tags: baseTags,
-      fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
-      timestamp
-    }
+    ...(isStartPhase
+      ? []
+      : [
+          {
+            measurement: 'http_request_duration_ms',
+            tags: { ...baseTags, phase: 'finish', unit: 'ms' },
+            fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
+            timestamp
+          }
+        ])
   ]
 
   metricsState.processingQueue.push({

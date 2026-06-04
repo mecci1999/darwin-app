@@ -155,6 +155,8 @@ const shouldSkipTopologyObservation = (service: string, action: string, params: 
   return false;
 };
 
+const shouldPreserveSlashActionPath = (service: string) => service === 'metrics-alerts';
+
 const remapMetricsRoute = (rawService: string, rawVersion: string, rawAction: string, rawParams: any = {}) => {
   let service = rawService;
   let action = rawAction;
@@ -176,8 +178,20 @@ const remapMetricsRoute = (rawService: string, rawVersion: string, rawAction: st
     const notificationResendMatch = action.match(/^notifications\/([^/]+)\/resend$/);
     const alertRuleDeleteMatch = action.match(/^alert-rules\/([^/]+)\/delete$/);
     const alertRuleUpdateMatch = action.match(/^alert-rules\/([^/]+)$/);
+    const staticMetricsAlertActions = new Set([
+      'alerts',
+      'alerts/assignees',
+      'alert-rules',
+      'alert-rules/create',
+      'alert-rules/bulk-update',
+      'alert-rules/export',
+      'alert-rules/import',
+      'notifications',
+    ]);
 
-    if (alertResolveMatch) {
+    if (staticMetricsAlertActions.has(action)) {
+      service = 'metrics-alerts';
+    } else if (alertResolveMatch) {
       service = 'metrics-alerts';
       params.id = alertResolveMatch[1];
       action = `alerts/:id/${alertResolveMatch[2]}`;
@@ -388,7 +402,11 @@ async function initializeGatewayService() {
               remappedMetrics.action || '',
               remappedMetrics.params || {},
             );
-            const actionName = remapped.action ? remapped.action.replace(/\//g, '.') : '';
+            const actionName = remapped.action
+              ? shouldPreserveSlashActionPath(remapped.service)
+                ? remapped.action
+                : remapped.action.replace(/\//g, '.')
+              : '';
 
             let targetActionName = `${remapped.service}.${normalizedVersion}.${actionName}`;
             let action = actions.find((item) => item.name === targetActionName);
@@ -500,7 +518,11 @@ async function initializeGatewayService() {
               remappedMetrics.action || '',
               remappedMetrics.params || {},
             );
-            const actionName = remapped.action ? remapped.action.replace(/\//g, '.') : '';
+            const actionName = remapped.action
+              ? shouldPreserveSlashActionPath(remapped.service)
+                ? remapped.action
+                : remapped.action.replace(/\//g, '.')
+              : '';
 
             let targetActionName = `${remapped.service}.${normalizedVersion}.${actionName}`;
             let action = actions.find((item) => item.name === targetActionName);
@@ -610,7 +632,9 @@ async function initializeGatewayService() {
           action = remapped.action;
           params = remapped.params;
 
-          action = GatewayHelper.processActionPath(action);
+          action = shouldPreserveSlashActionPath(service)
+            ? action
+            : GatewayHelper.processActionPath(action);
 
           const targetActionName = `${service}.${version}.${action}`;
           if (INTERNAL_ONLY_ACTIONS.has(targetActionName)) {
@@ -654,7 +678,7 @@ async function initializeGatewayService() {
           const shouldRecordBeforeDispatch = !shouldSkipTopologyObservation(service, action, params);
 
           if (shouldRecordBeforeDispatch) {
-            await emitGatewayTopologyMetric(ctx, star, {
+            void emitGatewayTopologyMetric(ctx, star, {
               service,
               version,
               action,

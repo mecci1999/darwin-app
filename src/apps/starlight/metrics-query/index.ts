@@ -17,10 +17,17 @@ import {
   REDIS_PORT,
 } from '../metrics/constants';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
-import { calculateMemoryUsagePercent, MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
+import {
+  RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
+  RESPONSE_DURATION_FIELD_FILTER,
+  RESPONSE_DURATION_MEASUREMENT_FILTER,
+  RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+} from '../metrics/utils/duration-metrics';
+import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { buildSupportedMetricSchema, isRawSystemMetricRef, parseRangeSeconds, resolveInterval, validateQuerySpec } from './utils/query-contract';
+import { buildRequestStatsDistributionItems } from './utils/request-stats';
 
 const APP_NAME = 'metrics-query';
 const QUERY_CACHE_TTL_MS = 30 * 1000;
@@ -32,6 +39,86 @@ const formatInterval = (seconds: number) => {
   if (seconds % 3600 === 0) return `${seconds / 3600}h`;
   if (seconds % 60 === 0) return `${seconds / 60}m`;
   return `${seconds}s`;
+};
+
+const formatOffset = (seconds: number) => `-${Math.max(1, Math.round(seconds))}s`;
+
+const resolveCompareConfig = (compare: any) => {
+  if (!compare) return null;
+  if (typeof compare === 'string') {
+    if (compare === 'previous-period') {
+      return { enabled: true, mode: 'previous-period', display: 'relative', directionality: 'neutral' };
+    }
+    if (compare === 'same-period') {
+      return { enabled: true, mode: 'previous-day', display: 'relative', directionality: 'neutral' };
+    }
+    return null;
+  }
+  if (compare.enabled === false) return null;
+  return {
+    enabled: true,
+    mode: compare.mode || 'previous-period',
+    display: compare.display || 'relative',
+    directionality: compare.directionality || 'neutral',
+  };
+};
+
+const resolveCompareLabel = (mode: string) => {
+  if (mode === 'previous-day') return '较昨天同一时间';
+  if (mode === 'previous-week') return '较上周同一时间';
+  return '较上一周期';
+};
+
+const resolveCompareTimeRange = (timeRange: string, mode: string) => {
+  const seconds = parseRangeSeconds(timeRange);
+  if (mode === 'previous-day') {
+    return { timeRange: formatOffset(seconds + 86400), stop: formatOffset(86400) };
+  }
+  if (mode === 'previous-week') {
+    return { timeRange: formatOffset(seconds + 604800), stop: formatOffset(604800) };
+  }
+  return { timeRange: formatOffset(seconds * 2), stop: formatOffset(seconds) };
+};
+
+const resolveCompareSentiment = (direction: 'up' | 'down' | 'flat', directionality: string) => {
+  if (direction === 'flat' || directionality === 'neutral') return 'neutral';
+  if (directionality === 'increase_better') return direction === 'up' ? 'good' : 'bad';
+  if (directionality === 'decrease_better') return direction === 'down' ? 'good' : 'bad';
+  return 'neutral';
+};
+
+const buildNumberCompare = (params: {
+  currentValue: unknown;
+  baselineValue: unknown;
+  mode: string;
+  display: 'relative' | 'absolute' | 'both';
+  directionality: string;
+}) => {
+  const current = Number(params.currentValue);
+  const baseline = Number(params.baselineValue);
+  if (!Number.isFinite(current) || !Number.isFinite(baseline)) {
+    return {
+      baselineValue: null,
+      absoluteDelta: null,
+      relativeDelta: null,
+      direction: 'flat' as const,
+      sentiment: 'neutral' as const,
+      label: resolveCompareLabel(params.mode),
+      display: params.display,
+    };
+  }
+  const absoluteDelta = toFixed(current - baseline, 2);
+  const relativeDelta = baseline === 0 ? null : toFixed((absoluteDelta / Math.abs(baseline)) * 100, 2);
+  const direction = Math.abs(absoluteDelta) < 0.000001 ? 'flat' : absoluteDelta > 0 ? 'up' : 'down';
+  return {
+    baselineValue: toFixed(baseline, 2),
+    absoluteDelta,
+    relativeDelta,
+    direction,
+    sentiment: resolveCompareSentiment(direction, params.directionality),
+    label: resolveCompareLabel(params.mode),
+    display: params.display,
+  };
 };
 
 const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2)) =>
@@ -64,25 +151,32 @@ const queryTimeseries = async (params: {
   fieldFilter: string;
   aggregateFn: 'mean' | 'sum' | 'max' | 'last';
   timeRange: string;
+  stop?: string;
   serviceId?: string;
   every?: string;
   star: Starlight;
   normalizeValue?: (value: unknown) => number;
+  normalizeFlux?: string;
 }) => {
   const bucket = getBucketNameOrThrow();
   const fluxQuery = `
     from(bucket: "${bucket}")
-      |> range(start: ${params.timeRange})
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
       |> filter(fn: (r) => ${params.measurementFilter})
       ${buildServiceFilter(params.serviceId)}
       |> filter(fn: (r) => ${params.fieldFilter})
+      ${params.normalizeFlux || ''}
+      ${params.normalizeFlux === RESPONSE_DURATION_MS_NORMALIZATION_FLUX ? RESPONSE_DURATION_COMPLETED_REQUEST_FILTER : ''}
       |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${params.aggregateFn}, createEmpty: false)
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
   return normalizeSeries(rows, params.normalizeValue);
 };
 
-const normalizeUtilizationValue = (value: unknown) => toFixed(Number(value || 0) * 100, 2);
+const normalizeUtilizationValue = (value: unknown) => {
+  const numericValue = Number(value || 0);
+  return toFixed(numericValue > 1 ? numericValue : numericValue * 100, 2);
+};
 
 const rawSystemMetricUnit = (metricRef: string) => {
   if (metricRef.includes('utilization')) return '%';
@@ -96,6 +190,7 @@ const queryRawSystemMetricSeries = async (params: {
   metricRef: string;
   aggregation?: string;
   timeRange: string;
+  stop?: string;
   serviceId?: string;
   star: Starlight;
 }) => {
@@ -105,6 +200,7 @@ const queryRawSystemMetricSeries = async (params: {
     fieldFilter: 'r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "time" or r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "memory_total"',
     aggregateFn,
     timeRange: params.timeRange,
+    stop: params.stop,
     serviceId: params.serviceId,
     star: params.star,
     normalizeValue: params.metricRef === 'process.memory.rss'
@@ -115,55 +211,37 @@ const queryRawSystemMetricSeries = async (params: {
   });
 };
 
-const queryMemoryUsagePercentSeries = async (params: { timeRange: string; serviceId?: string; star: Starlight; aggregateFn: 'mean' | 'max' | 'last' }) => {
-  const every = resolveInterval(params.timeRange);
+const queryMemoryUsagePercentSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight; aggregateFn: 'mean' | 'max' | 'last' }) => {
+  return queryTimeseries({
+    measurementFilter: 'r["_measurement"] == "process.memory.heap.utilization"',
+    fieldFilter: 'r["_field"] == "value"',
+    aggregateFn: params.aggregateFn,
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+    normalizeValue: normalizeUtilizationValue,
+  });
+};
+
+const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
   const bucket = getBucketNameOrThrow();
-  const rssServiceFilter = buildServiceFilter(params.serviceId);
-  const aggregateExpression = params.aggregateFn === 'last' ? 'last()' : `aggregateWindow(every: ${every}, fn: ${params.aggregateFn}, createEmpty: false)`;
-  const rssQuery = `
-    from(bucket: "${bucket}")
-      |> range(start: ${params.timeRange})
-      |> filter(fn: (r) => r["_measurement"] == "process.memory.rss")
-      ${rssServiceFilter}
-      |> filter(fn: (r) => r["_field"] == "memory_usage" or r["_field"] == "value")
-      |> ${aggregateExpression}
+  const every = resolveInterval(params.timeRange);
+  const intervalSeconds = Math.max(1, parseRangeSeconds(every));
+  const serviceFilter = buildServiceFilter(params.serviceId);
+  const fluxQuery = `
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
       |> group(columns: ["_time"])
       |> sum(column: "_value")
       |> sort(columns: ["_time"])
   `;
-  const totalQuery = `
-    from(bucket: "${bucket}")
-      |> range(start: ${params.timeRange})
-      |> filter(fn: (r) => r["_measurement"] == "os.memory.total")
-      |> filter(fn: (r) => r["_field"] == "memory_total" or r["_field"] == "total" or r["_field"] == "value")
-      |> ${aggregateExpression}
-      |> group(columns: ["_time"])
-      |> max(column: "_value")
-      |> sort(columns: ["_time"])
-  `;
-  const [rssRows, totalRows] = await Promise.all([
-    InfluxDBHandler.queryMetrics(rssQuery, params.star),
-    InfluxDBHandler.queryMetrics(totalQuery, params.star),
-  ]);
-  const rssSeries = normalizeSeries(rssRows);
-  const totalSeries = normalizeSeries(totalRows);
-
-  if (!rssSeries.length || !totalSeries.length) {
-    return [];
-  }
-
-  const latestTotalValue = Number(totalSeries[totalSeries.length - 1]?.value || 0);
-  const totalMap = new Map(totalSeries.map((point) => [point.timestamp, Number(point.value || 0)]));
-
-  return rssSeries
-    .map((point) => {
-      const denominator = Number(totalMap.get(point.timestamp) || latestTotalValue || 0);
-      return {
-        timestamp: point.timestamp,
-        value: calculateMemoryUsagePercent(point.value, denominator, 2),
-      };
-    })
-    .filter((point) => Number.isFinite(point.value));
+  const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
+  return normalizeSeries(rows, (value) => toFixed(Number(value || 0) / intervalSeconds, 2));
 };
 
 
@@ -171,6 +249,7 @@ const buildMetricSeriesForCalculation = async (params: {
   metricRef: string;
   aggregation?: string;
   timeRange: string;
+  stop?: string;
   serviceId?: string;
   star: Starlight;
 }) => {
@@ -181,6 +260,7 @@ const buildMetricSeriesForCalculation = async (params: {
       fieldFilter: 'r["_field"] == "memory_usage" or r["_field"] == "value"',
       aggregateFn,
       timeRange: params.timeRange,
+      stop: params.stop,
       serviceId: params.serviceId,
       star: params.star,
     });
@@ -192,6 +272,7 @@ const buildMetricSeriesForCalculation = async (params: {
       fieldFilter: 'r["_field"] == "memory_total" or r["_field"] == "total" or r["_field"] == "value"',
       aggregateFn: params.aggregation === 'max' ? 'max' : 'last',
       timeRange: params.timeRange,
+      stop: params.stop,
       star: params.star,
     });
   }
@@ -199,13 +280,14 @@ const buildMetricSeriesForCalculation = async (params: {
   return [];
 };
 
-const queryRatioCalculationSeries = async (params: { query: any; timeRange: string; serviceId?: string; star: Starlight }) => {
+const queryRatioCalculationSeries = async (params: { query: any; timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
   const calculation = params.query?.calculation;
   const [numeratorSeries, denominatorSeries] = await Promise.all([
     buildMetricSeriesForCalculation({
       metricRef: String(calculation?.numerator?.metricRef || ''),
       aggregation: calculation?.numerator?.aggregation || params.query?.aggregation,
       timeRange: params.timeRange,
+      stop: params.stop,
       serviceId: params.serviceId,
       star: params.star,
     }),
@@ -213,6 +295,7 @@ const queryRatioCalculationSeries = async (params: { query: any; timeRange: stri
       metricRef: String(calculation?.denominator?.metricRef || ''),
       aggregation: calculation?.denominator?.aggregation || params.query?.aggregation,
       timeRange: params.timeRange,
+      stop: params.stop,
       serviceId: params.serviceId,
       star: params.star,
     }),
@@ -230,21 +313,21 @@ const queryRatioCalculationSeries = async (params: { query: any; timeRange: stri
     .filter((point) => Number.isFinite(point.value));
 };
 
-const queryErrorRateSeries = async (params: { timeRange: string; serviceId?: string; star: Starlight }) => {
+const queryErrorRateSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
   const bucket = getBucketNameOrThrow();
   const serviceFilter = buildServiceFilter(params.serviceId);
   const every = resolveInterval(params.timeRange);
   const totalQuery = `
-    from(bucket: "${bucket}")
-      |> range(start: ${params.timeRange})
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
       |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
       ${serviceFilter}
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
       |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
   `;
   const errorQuery = `
-    from(bucket: "${bucket}")
-      |> range(start: ${params.timeRange})
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
       |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
       ${serviceFilter}
       |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
@@ -270,15 +353,16 @@ const queryErrorRateSeries = async (params: { timeRange: string; serviceId?: str
 const getLatestPoint = (series: Array<{ timestamp: number; value: number }>) =>
   series.length ? series[series.length - 1] : null;
 
-const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContext: any) => {
+const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceContext: any, options?: { stop?: string }) => {
   const metricRef = String(query?.metricRef || '').trim();
   const timeRange = String(query?.timeRange || '-1h');
+  const stop = options?.stop;
   const serviceId = query?.subject?.type === 'service' ? String(query?.subject?.id || '') : undefined;
   const visualizationHint = query?.visualizationHint;
   const isSingleValueVisualization = visualizationHint === 'number' || visualizationHint === 'donut';
 
   if (query?.calculation?.type === 'ratio') {
-    const series = await queryRatioCalculationSeries({ query, timeRange, serviceId, star });
+    const series = await queryRatioCalculationSeries({ query, timeRange, stop, serviceId, star });
     const unit = typeof query.calculation.unit === 'string' ? query.calculation.unit : '';
     if (isSingleValueVisualization) {
       return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit };
@@ -292,6 +376,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
       fieldFilter: 'r["_field"] == "cpu_usage" or r["_field"] == "value"',
       aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
+      stop,
       serviceId,
       star,
     });
@@ -307,6 +392,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
       fieldFilter: 'r["_field"] == "memory_usage" or r["_field"] == "value"',
       aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
+      stop,
       serviceId,
       star,
       normalizeValue: normalizeRssMemoryValue,
@@ -321,6 +407,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
     const series = await queryMemoryUsagePercentSeries({
       aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
+      stop,
       serviceId,
       star,
     });
@@ -331,17 +418,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
   }
 
   if (metricRef === 'service.qps') {
-    const aggregateFn = query?.aggregation === 'latest' ? 'last' : 'sum';
-    const series = await queryTimeseries({
-      measurementFilter: 'r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total"',
-      fieldFilter: 'r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total"',
-      aggregateFn,
-      timeRange,
-      serviceId,
-      star,
-    });
-    const intervalSeconds = Math.max(1, parseRangeSeconds(resolveInterval(timeRange)));
-    const qpsSeries = series.map((point) => ({ timestamp: point.timestamp, value: toFixed(Number(point.value || 0) / intervalSeconds, 2) }));
+    const qpsSeries = await queryServiceQpsSeries({ timeRange, stop, serviceId, star });
     if (isSingleValueVisualization) {
       return { kind: 'number', value: qpsSeries.length ? qpsSeries[qpsSeries.length - 1].value : null };
     }
@@ -349,14 +426,16 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
   }
 
   if (metricRef === 'service.response.time') {
-    const aggregateFn = query?.aggregation === 'latest' ? 'last' : 'mean';
+    const aggregateFn = query?.aggregation === 'max' ? 'max' : 'mean';
     const series = await queryTimeseries({
-      measurementFilter: 'r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms"',
-      fieldFilter: 'r["_field"] == "value" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time"',
+      measurementFilter: RESPONSE_DURATION_MEASUREMENT_FILTER,
+      fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
       aggregateFn,
       timeRange,
+      stop,
       serviceId,
       star,
+      normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
     });
     if (isSingleValueVisualization) {
       return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: 'ms' };
@@ -365,7 +444,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
   }
 
   if (metricRef === 'service.error.rate') {
-    const series = await queryErrorRateSeries({ timeRange, serviceId, star });
+    const series = await queryErrorRateSeries({ timeRange, stop, serviceId, star });
     if (isSingleValueVisualization) {
       const latest = getLatestPoint(series);
       return { kind: 'number', value: latest ? latest.value : null, unit: '%' };
@@ -390,24 +469,25 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
 
   if (metricRef === 'service.request.stats') {
     const bucket = getBucketNameOrThrow();
+    const limit = Math.max(1, Math.min(20, Number(query?.limit || 8)));
     const fluxQuery = `
       from(bucket: "${bucket}")
         |> range(start: ${timeRange})
         |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+        ${buildServiceFilter(serviceId)}
         |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
-        |> aggregateWindow(every: 1d, fn: sum, createEmpty: false)
+        |> map(fn: (r) => ({ r with
+          stat_target: if exists r.target_service then string(v: r.target_service) else if exists r.targetService then string(v: r.targetService) else if exists r.destination_service then string(v: r.destination_service) else if exists r.peer_service then string(v: r.peer_service) else if exists r.service then string(v: r.service) else "未知服务",
+          stat_route: if exists r.route then string(v: r.route) else if exists r.action then string(v: r.action) else "",
+          stat_method: if exists r.method then string(v: r.method) else ""
+        }))
+        |> group(columns: ["_field", "stat_target", "stat_route", "stat_method"])
+        |> sum()
     `;
     const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
-    const map = new Map<string, number>();
-    rows.forEach((row: any) => {
-      if (!row?._time) return;
-      const date = new Date(row._time);
-      const label = `${date.getMonth() + 1}/${date.getDate()}`;
-      map.set(label, (map.get(label) || 0) + Number(row._value || 0));
-    });
     return {
       kind: 'distribution',
-      items: Array.from(map.entries()).map(([name, value]) => ({ name, value: Math.round(value) })),
+      items: buildRequestStatsDistributionItems(rows, limit),
     };
   }
 
@@ -416,6 +496,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
       metricRef,
       aggregation: query?.aggregation,
       timeRange,
+      stop,
       serviceId,
       star,
     });
@@ -427,6 +508,39 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
   }
 
   return null;
+};
+
+const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContext: any) => {
+  const data = await buildBaseCardDataFromQuery(query, star, serviceContext);
+  const compare = resolveCompareConfig(query?.compare);
+  if (!compare || data?.kind !== 'number') return data;
+
+  const currentValue = Number(data.value);
+  if (!Number.isFinite(currentValue)) return data;
+
+  const { timeRange, stop } = resolveCompareTimeRange(String(query?.timeRange || '-1h'), compare.mode);
+  const baselineData = await buildBaseCardDataFromQuery(
+    {
+      ...query,
+      timeRange,
+      compare: undefined,
+    },
+    star,
+    serviceContext,
+    { stop }
+  ).catch(() => null);
+
+  const baselineValue = baselineData?.kind === 'number' ? baselineData.value : null;
+  return {
+    ...data,
+    compare: buildNumberCompare({
+      currentValue: data.value,
+      baselineValue,
+      mode: compare.mode,
+      display: compare.display,
+      directionality: compare.directionality,
+    }),
+  };
 };
 
 const getCachedQueryResult = (key: string) => {

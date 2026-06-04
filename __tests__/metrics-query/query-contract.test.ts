@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, calculateMemoryUsagePercent, normalizeRssMemoryValue } from '../../src/apps/starlight/metrics/utils/memory-units';
 import {
+  RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
+  RESPONSE_DURATION_FIELD_FILTER,
+  RESPONSE_DURATION_MEASUREMENT_FILTER,
+  RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+} from '../../src/apps/starlight/metrics/utils/duration-metrics';
+import {
   buildSupportedMetricSchema,
   getAllowedAggregationsForMetric,
   isVisualizationSupportedForMetric,
@@ -9,6 +15,7 @@ import {
   resolveQueryResultKind,
   validateQuerySpec,
 } from '../../src/apps/starlight/metrics-query/utils/query-contract';
+import { buildRequestStatsDistributionItems } from '../../src/apps/starlight/metrics-query/utils/request-stats';
 
 describe('metrics-query query contract helpers', () => {
   it('parses relative time ranges into seconds', () => {
@@ -141,6 +148,44 @@ describe('metrics-query query contract helpers', () => {
     expect(result.issues).toContain('aggregation is unsupported for this metric');
   });
 
+  it('accepts structured compare only for number query cards', () => {
+    const normalizeScope = (value: unknown) => (value === 'system' ? 'system' : 'tenant') as 'tenant' | 'system';
+    const numberResult = validateQuerySpec(
+      {
+        scope: 'tenant',
+        sourceKind: 'auto',
+        subject: { type: 'service', id: 'svc-1' },
+        metricRef: 'service.cpu.usage',
+        aggregation: 'latest',
+        visualizationHint: 'number',
+        compare: {
+          enabled: true,
+          mode: 'previous-week',
+          display: 'both',
+          directionality: 'decrease_better',
+        },
+      },
+      normalizeScope
+    );
+    const lineResult = validateQuerySpec(
+      {
+        scope: 'tenant',
+        sourceKind: 'auto',
+        subject: { type: 'service', id: 'svc-1' },
+        metricRef: 'service.cpu.usage',
+        aggregation: 'avg',
+        visualizationHint: 'line',
+        compare: { enabled: true, mode: 'previous-period' },
+      },
+      normalizeScope
+    );
+
+    expect(numberResult.valid).toBe(true);
+    expect(numberResult.issues).toEqual([]);
+    expect(lineResult.valid).toBe(false);
+    expect(lineResult.issues).toContain('compare only supports number visualization');
+  });
+
   it('derives allowed aggregations from metric and visualization together', () => {
     expect(getAllowedAggregationsForMetric('service.qps', 'line')).toEqual(['sum']);
     expect(getAllowedAggregationsForMetric('service.qps', 'number')).toEqual(['latest']);
@@ -173,6 +218,13 @@ describe('metrics-query query contract helpers', () => {
     expect(MEMORY_USAGE_PERCENT_UNIT).toBe('%');
   });
 
+  it('documents the process heap utilization source for service memory percent', () => {
+    const items = buildSupportedMetricSchema({ scope: 'system', sourceKind: 'darwin-event' });
+
+    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.unit).toBe('%');
+    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.subjectKinds).toContain('service');
+  });
+
   it('builds schema items from the same supported query contract', () => {
     const items = buildSupportedMetricSchema({ scope: 'tenant' });
 
@@ -190,6 +242,24 @@ describe('metrics-query query contract helpers', () => {
     expect(items.find((item) => item.name === 'service.memory.usage.percent')?.recommendedVisualizations).toContain('donut');
     expect(items.find((item) => item.name === 'service.qps')?.allowedAggregations).toEqual(['latest', 'sum']);
     expect(items.find((item) => item.name === 'service.request.stats')?.recommendedVisualizations).toEqual(['bar', 'donut']);
+    expect(items.find((item) => item.name === 'service.request.stats')?.labelNames).toEqual([
+      'service',
+      'target_service',
+      'route',
+      'action',
+      'method',
+    ]);
+  });
+
+  it('normalizes second-based HTTP duration metrics to milliseconds before aggregation', () => {
+    expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('http_request_duration_ms');
+    expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('http_request_duration');
+    expect(RESPONSE_DURATION_FIELD_FILTER).toContain('response_time');
+    expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r["_measurement"] == "http_request_duration"');
+    expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r.unit == "s"');
+    expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('* 1000.0');
+    expect(RESPONSE_DURATION_COMPLETED_REQUEST_FILTER).toContain('r.phase != "start"');
+    expect(RESPONSE_DURATION_COMPLETED_REQUEST_FILTER).toContain('> 0.0');
   });
 
   it('exposes Chinese descriptions for system metric catalog items', () => {
@@ -201,5 +271,21 @@ describe('metrics-query query contract helpers', () => {
     expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.description).toBe('Node-Universe 采集的进程堆内存使用率');
     expect(items.find((item) => item.name === 'os.memory.utilization')?.description).toBe('Node-Universe 采集的系统内存使用率');
     expect(items.some((item) => /Darwin raw|Service CPU usage|request count/.test(item.description))).toBe(false);
+  });
+
+  it('builds request distribution labels from request targets instead of dates', () => {
+    const items = buildRequestStatsDistributionItems([
+      { _field: 'value', _value: 4, stat_target: 'metrics-query', stat_route: 'v2.query.cards', stat_method: 'POST' },
+      { _field: 'count', _value: 4, stat_target: 'metrics-query', stat_route: 'v2.query.cards', stat_method: 'POST' },
+      { _field: 'value', _value: 9, service: 'gateway', action: 'v1.health' },
+      { _field: 'total', _value: 99, service: 'gateway', action: 'v1.health' },
+      { _field: 'value', _value: 2, stat_target: 'logs', stat_route: 'v1.search' },
+    ]);
+
+    expect(items).toEqual([
+      { name: 'gateway · v1.health', value: 9 },
+      { name: 'metrics-query · POST v2.query.cards', value: 4 },
+      { name: 'logs · v1.search', value: 2 },
+    ]);
   });
 });

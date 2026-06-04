@@ -2,10 +2,153 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { queryAllUsers } from 'db/mysql/apis/user';
 import { normalizeMetricsScope } from '../utils/system-telemetry';
+import { InfluxDBHandler } from '../utils/influxdb-handler';
+import {
+  RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
+  RESPONSE_DURATION_FIELD_FILTER,
+  RESPONSE_DURATION_MEASUREMENT_FILTER,
+  RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+} from '../utils/duration-metrics';
 
 const ALERT_STATE_PREFIX = 'metrics:alerts:state:';
 const ALERT_NOTIFICATION_PREFIX = 'metrics:alerts:notification:';
 const ALERT_RULE_PREFIX = 'metrics:alerts:rule:';
+
+type AlertLevel = 'critical' | 'warning' | 'info';
+type AlertStatus = 'active' | 'resolved' | 'suppressed' | 'pending';
+type AlertOperator = '>' | '<' | '=' | '>=' | '<=';
+
+type StoredAlertRule = {
+  id: string;
+  name: string;
+  service: string;
+  metric: string;
+  operator: AlertOperator;
+  threshold: number;
+  unit: string;
+  duration: number;
+  level: AlertLevel;
+  enabled: boolean;
+  channels: string[];
+  updatedAt: number;
+};
+
+type AlertEvaluationState = {
+  id: string;
+  ruleId: string;
+  source: 'rule';
+  status: AlertStatus;
+  level: AlertLevel;
+  serviceId: string;
+  service: string;
+  metric: string;
+  metricLabel: string;
+  operator: AlertOperator;
+  threshold: number;
+  unit: string;
+  value: number;
+  duration: string;
+  durationMinutes: number;
+  channels: string[];
+  message: string;
+  time: string;
+  firstTriggeredAt: number | null;
+  lastTriggeredAt: number | null;
+  conditionStartedAt: number | null;
+  lastEvaluatedAt: number;
+  lastNotificationAt?: number;
+  assigneeUserId?: string;
+  assigneeName?: string;
+};
+
+type AlertNotification = {
+  id: string;
+  alertId: string;
+  ruleId: string;
+  type: AlertLevel;
+  channel: string;
+  status: 'sent' | 'delivered' | 'failed';
+  target: string;
+  content: string;
+  sentAt: string;
+  serviceId: string;
+  service: string;
+  metric: string;
+  value: number;
+  threshold: number;
+  operator: AlertOperator;
+  mobileTitle: string;
+  mobileBody: string;
+  updatedAt: number;
+};
+
+const ALERT_EVALUATION_INTERVAL_MS = 60 * 1000;
+const ALERT_NOTIFICATION_COOLDOWN_MS = 5 * 60 * 1000;
+
+const metricAliases: Record<string, string> = {
+  错误率: 'service.error.rate',
+  CPU: 'service.cpu.usage',
+  内存: 'service.memory.usage.percent',
+  响应时间: 'service.response.time',
+};
+
+const operatorMap: Record<string, AlertOperator> = {
+  gt: '>',
+  gte: '>=',
+  lt: '<',
+  lte: '<=',
+  eq: '=',
+  '>': '>',
+  '>=': '>=',
+  '<': '<',
+  '<=': '<=',
+  '=': '=',
+};
+
+const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
+
+const escapeFluxString = (value: string) => String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+const normalizeServiceId = (serviceId?: string) =>
+  serviceId?.startsWith('system:') ? serviceId.slice('system:'.length) : serviceId;
+
+const buildServiceFilter = (serviceId?: string) => {
+  const normalized = normalizeServiceId(serviceId || '');
+  if (!normalized || normalized === 'all') return '';
+  return `|> filter(fn: (r) => r["service"] == "${escapeFluxString(normalized)}")`;
+};
+
+const compareValue = (value: number, operator: AlertOperator, threshold: number) => {
+  switch (operator) {
+    case '>':
+      return value > threshold;
+    case '>=':
+      return value >= threshold;
+    case '<':
+      return value < threshold;
+    case '<=':
+      return value <= threshold;
+    case '=':
+      return value === threshold;
+    default:
+      return false;
+  }
+};
+
+const formatDuration = (minutes: number) => `${Math.max(1, Math.round(minutes || 5))}m`;
+
+const formatAlertMessage = (params: {
+  rule: StoredAlertRule;
+  value: number;
+  serviceName: string;
+}) =>
+  `${params.serviceName} ${params.rule.metric} 当前值 ${toFixed(params.value)}${params.rule.unit || ''} ${params.rule.operator} ${params.rule.threshold}${params.rule.unit || ''}，级别 ${params.rule.level}`;
+
+const resolveNotificationTarget = (channel: string) => {
+  if (channel === 'Webhook') return 'https://hooks.starlight.local/alerts';
+  if (channel === 'InApp') return 'in-app';
+  return 'ops@starlight.local';
+};
 
 const levelFromHealth = (health: string) => {
   if (health === 'critical' || health === 'unhealthy') return 'critical';
@@ -19,10 +162,31 @@ const statusFromHealth = (health: string) => {
   return 'suppressed';
 };
 
+const getRedisStore = (serviceContext: any) => serviceContext.redis?.client || serviceContext.redis?.redis || serviceContext.redis;
+
+const getRedisKeys = async (serviceContext: any, pattern: string): Promise<string[]> => {
+  const logicalPrefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
+  if (typeof serviceContext.redis?.getCacheKeys === 'function') {
+    const cacheKeys = await serviceContext.redis.getCacheKeys();
+    return cacheKeys
+      .map((item: { key?: string } | string) => (typeof item === 'string' ? item : item.key || ''))
+      .filter((key: string) => key.startsWith(logicalPrefix));
+  }
+
+  const store = getRedisStore(serviceContext);
+  if (!store || typeof store.keys !== 'function') return [];
+  const redisPrefix = serviceContext.redis?.prefix || '';
+  const keys = await store.keys(`${redisPrefix}${pattern}`);
+  return Array.isArray(keys)
+    ? keys.map((key: string) => (redisPrefix && key.startsWith(redisPrefix) ? key.slice(redisPrefix.length) : key))
+    : [];
+};
+
 const redisGetJson = async (serviceContext: any, key: string) => {
   try {
-    const raw = await serviceContext.redis?.get(key);
-    return raw ? JSON.parse(raw) : null;
+    const raw = await serviceContext.redis?.get?.(key);
+    if (!raw) return null;
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch {
     return null;
   }
@@ -30,7 +194,7 @@ const redisGetJson = async (serviceContext: any, key: string) => {
 
 const redisSetJson = async (serviceContext: any, key: string, value: any) => {
   try {
-    await serviceContext.redis?.set(key, JSON.stringify(value));
+    await serviceContext.redis?.set?.(key, value);
     return true;
   } catch {
     return false;
@@ -39,7 +203,11 @@ const redisSetJson = async (serviceContext: any, key: string, value: any) => {
 
 const redisDelete = async (serviceContext: any, key: string) => {
   try {
-    await serviceContext.redis?.del(key);
+    if (typeof serviceContext.redis?.delete === 'function') {
+      await serviceContext.redis.delete(key);
+    } else {
+      await serviceContext.redis?.del?.(key);
+    }
     return true;
   } catch {
     return false;
@@ -50,6 +218,12 @@ const loadAlertState = async (serviceContext: any, alertId: string) => {
   return redisGetJson(serviceContext, `${ALERT_STATE_PREFIX}${alertId}`);
 };
 
+const loadAllAlertStates = async (serviceContext: any) => {
+  const keys = await getRedisKeys(serviceContext, `${ALERT_STATE_PREFIX}*`);
+  const values = await Promise.all(keys.map((key: string) => redisGetJson(serviceContext, key)));
+  return values.filter(Boolean);
+};
+
 const saveAlertState = async (serviceContext: any, alertId: string, payload: any) => {
   return redisSetJson(serviceContext, `${ALERT_STATE_PREFIX}${alertId}`, payload);
 };
@@ -58,18 +232,48 @@ const loadNotificationState = async (serviceContext: any, notificationId: string
   return redisGetJson(serviceContext, `${ALERT_NOTIFICATION_PREFIX}${notificationId}`);
 };
 
+const loadAllNotificationStates = async (serviceContext: any) => {
+  const keys = await getRedisKeys(serviceContext, `${ALERT_NOTIFICATION_PREFIX}*`);
+  const values = await Promise.all(keys.map((key: string) => redisGetJson(serviceContext, key)));
+  return values.filter(Boolean);
+};
+
 const saveNotificationState = async (serviceContext: any, notificationId: string, payload: any) => {
   return redisSetJson(serviceContext, `${ALERT_NOTIFICATION_PREFIX}${notificationId}`, payload);
 };
 
 const loadAlertRules = async (serviceContext: any) => {
-  const keys = (await serviceContext.redis?.keys(`${ALERT_RULE_PREFIX}*`)) || [];
+  const keys = await getRedisKeys(serviceContext, `${ALERT_RULE_PREFIX}*`);
   const values = await Promise.all(keys.map((key: string) => redisGetJson(serviceContext, key)));
   return values.filter(Boolean);
 };
 
 const saveAlertRule = async (serviceContext: any, rule: any) => {
   return redisSetJson(serviceContext, `${ALERT_RULE_PREFIX}${rule.id}`, rule);
+};
+
+const normalizeAlertRule = (rule: any): StoredAlertRule => ({
+  id: rule.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  name: rule.name || '未命名规则',
+  service: rule.service || 'all',
+  metric: metricAliases[rule.metric] || rule.metric || 'service.error.rate',
+  operator: operatorMap[String(rule.operator || rule.condition || '>')] || '>',
+  threshold: Number(rule.threshold || 0),
+  unit: rule.unit || '',
+  duration: Number(rule.duration || 5),
+  level: ['critical', 'warning', 'info'].includes(String(rule.level)) ? rule.level : 'warning',
+  enabled: rule.enabled !== false,
+  channels: Array.isArray(rule.channels)
+    ? rule.channels
+    : Array.isArray(rule.notificationChannels)
+      ? rule.notificationChannels
+      : ['Email'],
+  updatedAt: Number(rule.updatedAt || Date.now()),
+});
+
+const loadNormalizedAlertRules = async (serviceContext: any): Promise<StoredAlertRule[]> => {
+  const rules = await loadAlertRules(serviceContext);
+  return rules.map(normalizeAlertRule).filter((rule: StoredAlertRule) => rule.enabled);
 };
 
 const normalizeImportedRule = (rule: any) => ({
@@ -91,8 +295,253 @@ const normalizeImportedRule = (rule: any) => ({
   updatedAt: Date.now(),
 });
 
+const queryLatestSeriesValue = async (params: {
+  star: Starlight;
+  metricRef: string;
+  serviceId?: string;
+  aggregateFn?: 'mean' | 'max' | 'last' | 'sum';
+  timeRange?: string;
+  normalizeValue?: (value: number) => number;
+}) => {
+  const bucket = InfluxDBHandler.getBucketName();
+  if (!bucket) return null;
+  const aggregateFn = params.aggregateFn || 'mean';
+  const timeRange = params.timeRange || '-5m';
+  const fluxQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: ${timeRange})
+      |> filter(fn: (r) => r["_measurement"] == "${escapeFluxString(params.metricRef)}")
+      ${buildServiceFilter(params.serviceId)}
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time" or r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "memory_total")
+      |> aggregateWindow(every: 5m, fn: ${aggregateFn}, createEmpty: false)
+      |> last()
+  `;
+  const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
+  const value = Number(rows[rows.length - 1]?._value);
+  if (!Number.isFinite(value)) return null;
+  return params.normalizeValue ? params.normalizeValue(value) : value;
+};
+
+const queryErrorRateValue = async (star: Starlight, serviceId?: string) => {
+  const bucket = InfluxDBHandler.getBucketName();
+  if (!bucket) return null;
+  const serviceFilter = buildServiceFilter(serviceId);
+  const totalQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -5m)
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> group()
+      |> sum()
+  `;
+  const errorQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -5m)
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> group()
+      |> sum()
+  `;
+  const [totalRows, errorRows] = await Promise.all([
+    InfluxDBHandler.queryMetrics(totalQuery, star),
+    InfluxDBHandler.queryMetrics(errorQuery, star).catch(() => []),
+  ]);
+  const total = Number(totalRows[totalRows.length - 1]?._value || 0);
+  const errors = Number(errorRows[errorRows.length - 1]?._value || 0);
+  return total > 0 ? toFixed((errors / total) * 100, 2) : 0;
+};
+
+const queryMemoryUsagePercentValue = async (star: Starlight, serviceId?: string) => {
+  return queryLatestSeriesValue({
+    star,
+    metricRef: 'process.memory.heap.utilization',
+    serviceId,
+    normalizeValue: (value) => toFixed(value > 1 ? value : value * 100, 2),
+  });
+};
+
+const queryResponseTimeValue = async (star: Starlight, serviceId?: string) => {
+  const bucket = InfluxDBHandler.getBucketName();
+  if (!bucket) return null;
+  const fluxQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -5m)
+      |> filter(fn: (r) => ${RESPONSE_DURATION_MEASUREMENT_FILTER})
+      ${buildServiceFilter(serviceId)}
+      |> filter(fn: (r) => ${RESPONSE_DURATION_FIELD_FILTER})
+      ${RESPONSE_DURATION_MS_NORMALIZATION_FLUX}
+      ${RESPONSE_DURATION_COMPLETED_REQUEST_FILTER}
+      |> mean()
+  `;
+  const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
+  const value = Number(rows[rows.length - 1]?._value);
+  return Number.isFinite(value) ? toFixed(value, 2) : null;
+};
+
+const queryRuleMetricValue = async (rule: StoredAlertRule, star: Starlight) => {
+  const metricRef = metricAliases[rule.metric] || rule.metric;
+  const serviceId = rule.service === 'all' ? undefined : rule.service;
+
+  if (metricRef === 'service.error.rate') return queryErrorRateValue(star, serviceId);
+  if (metricRef === 'service.memory.usage.percent') return queryMemoryUsagePercentValue(star, serviceId);
+  if (metricRef === 'service.cpu.usage') {
+    return queryLatestSeriesValue({
+      star,
+      metricRef: 'os.cpu.utilization',
+      serviceId,
+      normalizeValue: (value) => toFixed(value > 1 ? value : value * 100, 2),
+    });
+  }
+  if (metricRef === 'service.memory.usage') {
+    return queryLatestSeriesValue({ star, metricRef: 'process.memory.rss', serviceId });
+  }
+  if (metricRef === 'service.response.time') {
+    return queryResponseTimeValue(star, serviceId);
+  }
+  if (metricRef === 'service.qps') {
+    const values = await Promise.all([
+      queryLatestSeriesValue({ star, metricRef: 'universe.request.total', serviceId, aggregateFn: 'sum', timeRange: '-1m' }).catch(() => null),
+      queryLatestSeriesValue({ star, metricRef: 'http_requests_total', serviceId, aggregateFn: 'sum', timeRange: '-1m' }).catch(() => null),
+      queryLatestSeriesValue({ star, metricRef: 'rpc_requests_total', serviceId, aggregateFn: 'sum', timeRange: '-1m' }).catch(() => null),
+      queryLatestSeriesValue({ star, metricRef: 'messaging_requests_total', serviceId, aggregateFn: 'sum', timeRange: '-1m' }).catch(() => null),
+    ]);
+    const numericValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    if (!numericValues.length) return null;
+    return toFixed(numericValues.reduce((sum, value) => sum + value, 0) / 60, 2);
+  }
+
+  return queryLatestSeriesValue({
+    star,
+    metricRef,
+    serviceId,
+    normalizeValue: metricRef.includes('utilization') ? (value) => toFixed(value > 1 ? value : value * 100, 2) : undefined,
+  });
+};
+
+const createNotificationPayloads = (alert: AlertEvaluationState, now: number): AlertNotification[] =>
+  alert.channels.map((channel) => ({
+    id: `notification-${alert.id}-${channel}-${now}`,
+    alertId: alert.id,
+    ruleId: alert.ruleId,
+    type: alert.level,
+    channel,
+    status: 'sent',
+    target: resolveNotificationTarget(channel),
+    content: alert.message,
+    sentAt: new Date(now).toISOString(),
+    serviceId: alert.serviceId,
+    service: alert.service,
+    metric: alert.metric,
+    value: alert.value,
+    threshold: alert.threshold,
+    operator: alert.operator,
+    mobileTitle: `${alert.level === 'critical' ? '严重告警' : alert.level === 'warning' ? '警告告警' : '提示告警'} · ${alert.service}`,
+    mobileBody: alert.message,
+    updatedAt: now,
+  }));
+
+export const evaluateAlertRules = async (serviceContext: any, star: Starlight) => {
+  const rules = await loadNormalizedAlertRules(serviceContext);
+  const now = Date.now();
+  const results: AlertEvaluationState[] = [];
+
+  for (const rule of rules) {
+    const alertId = `alert-rule-${rule.id}`;
+    const previous = (await loadAlertState(serviceContext, alertId)) || {};
+    try {
+      const value = await queryRuleMetricValue(rule, star);
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        continue;
+      }
+      const matched = compareValue(value, rule.operator, rule.threshold);
+      const conditionStartedAt = matched ? Number(previous.conditionStartedAt || now) : null;
+      const durationMs = Math.max(1, Number(rule.duration || 5)) * 60 * 1000;
+      const sustained = matched && conditionStartedAt !== null && now - conditionStartedAt >= durationMs;
+      const previousStatus = previous.status as AlertStatus | undefined;
+      const nextStatus: AlertStatus = sustained ? 'active' : matched ? 'pending' : previousStatus === 'suppressed' ? 'suppressed' : 'resolved';
+      const serviceName = rule.service === 'all' ? '全系统' : normalizeServiceId(rule.service) || rule.service;
+      const nextAlert: AlertEvaluationState = {
+        ...previous,
+        id: alertId,
+        ruleId: rule.id,
+        source: 'rule',
+        status: nextStatus,
+        level: rule.level,
+        serviceId: rule.service,
+        service: serviceName,
+        metric: rule.metric,
+        metricLabel: rule.metric,
+        operator: rule.operator,
+        threshold: rule.threshold,
+        unit: rule.unit,
+        value: toFixed(value, 2),
+        duration: formatDuration(rule.duration),
+        durationMinutes: Math.max(1, Number(rule.duration || 5)),
+        channels: rule.channels,
+        message: formatAlertMessage({ rule, value, serviceName }),
+        time: new Date(sustained ? Number(previous.firstTriggeredAt || now) : now).toISOString(),
+        firstTriggeredAt: sustained ? Number(previous.firstTriggeredAt || now) : previous.firstTriggeredAt || null,
+        lastTriggeredAt: sustained ? now : previous.lastTriggeredAt || null,
+        conditionStartedAt,
+        lastEvaluatedAt: now,
+        assigneeUserId: previous.assigneeUserId || '',
+        assigneeName: previous.assigneeName || '',
+      };
+
+      if (previousStatus === 'suppressed' && matched) {
+        nextAlert.status = 'suppressed';
+      }
+
+      await saveAlertState(serviceContext, alertId, nextAlert);
+
+      if (
+        nextAlert.status === 'active' &&
+        (!previous.lastNotificationAt || now - Number(previous.lastNotificationAt) >= ALERT_NOTIFICATION_COOLDOWN_MS)
+      ) {
+        const notifications = createNotificationPayloads(nextAlert, now);
+        await Promise.all(notifications.map((notification) => saveNotificationState(serviceContext, notification.id, notification)));
+        await saveAlertState(serviceContext, alertId, { ...nextAlert, lastNotificationAt: now });
+      }
+
+      results.push(nextAlert);
+    } catch (error) {
+      star.logger?.error(`Failed to evaluate alert rule ${rule.id}:`, error);
+    }
+  }
+
+  return results;
+};
+
 export const buildAlerts = async (serviceContext: any, params: any) => {
   const scope = normalizeMetricsScope(params?.scope);
+  const storedAlerts = await loadAllAlertStates(serviceContext);
+  const ruleAlerts = storedAlerts
+    .filter((alert: any) => alert?.source === 'rule')
+    .map((alert: any) => ({
+      id: alert.id,
+      ruleId: alert.ruleId,
+      source: 'rule',
+      time: alert.time || new Date(alert.lastEvaluatedAt || Date.now()).toISOString(),
+      serviceId: alert.serviceId,
+      service: alert.service,
+      level: alert.level || 'warning',
+      message: alert.message,
+      status: alert.status || 'active',
+      duration: alert.duration || '5m',
+      metric: alert.metric,
+      value: alert.value,
+      threshold: alert.threshold,
+      operator: alert.operator,
+      unit: alert.unit,
+      channels: alert.channels || [],
+      assigneeUserId: alert.assigneeUserId || '',
+      assigneeName: alert.assigneeName || '',
+      mobileTitle: `${alert.level === 'critical' ? '严重告警' : alert.level === 'warning' ? '警告告警' : '提示告警'} · ${alert.service}`,
+      mobileBody: alert.message,
+    }));
   const servicesResult = await serviceContext.getServicesList({
     page: 1,
     pageSize: 200,
@@ -103,7 +552,7 @@ export const buildAlerts = async (serviceContext: any, params: any) => {
   const startTime = params?.startTime ? Number(params.startTime) : null;
   const endTime = params?.endTime ? Number(params.endTime) : null;
 
-  const alerts = await Promise.all(
+  const healthAlerts = await Promise.all(
     services
       .filter((service: any) => service.health !== 'healthy' || Number(service.errorRate || 0) > 0)
       .slice(0, 50)
@@ -128,6 +577,8 @@ export const buildAlerts = async (serviceContext: any, params: any) => {
       }),
   );
 
+  const alerts = [...ruleAlerts, ...healthAlerts];
+
   return alerts.filter((alert: any) => {
     const timestamp = new Date(alert.time).getTime();
     if (params?.serviceId && alert.serviceId !== params.serviceId) return false;
@@ -137,7 +588,7 @@ export const buildAlerts = async (serviceContext: any, params: any) => {
     if (startTime && timestamp < startTime) return false;
     if (endTime && timestamp > endTime) return false;
     return true;
-  });
+  }).sort((left: any, right: any) => new Date(right.time).getTime() - new Date(left.time).getTime());
 };
 
 const buildAlertAssignees = async () => {
@@ -190,28 +641,39 @@ const buildAlertRules = async (serviceContext: any, params: any) => {
   });
 };
 
-const buildNotifications = async (serviceContext: any, params: any) => {
-  const alerts = await buildAlerts(serviceContext, params || {});
-  return Promise.all(
-    alerts.slice(0, 20).map(async (alert: any, index: number) => {
-      const id = `notification-${index + 1}`;
-      const stored = await loadNotificationState(serviceContext, id);
-      return {
-        id,
-        type: alert.level,
-        channel: index % 2 === 0 ? 'email' : 'webhook',
-        status: stored?.status || (alert.status === 'active' ? 'sent' : 'delivered'),
-        target: index % 2 === 0 ? 'ops@starlight.local' : 'https://hooks.starlight.local/alerts',
-        content: alert.message,
-        sentAt: stored?.updatedAt ? new Date(stored.updatedAt).toISOString() : alert.time,
-        serviceId: alert.serviceId,
-        service: alert.service,
-      };
-    }),
-  );
+export const buildNotifications = async (serviceContext: any, params: any) => {
+  const normalizedParams = {
+    keyword: String(params?.keyword || '').trim(),
+    channel: String(params?.channel || '').trim(),
+    status: String(params?.status || '').trim(),
+    serviceId: String(params?.serviceId || '').trim(),
+    startTime: params?.startTime ? Number(params.startTime) : null,
+    endTime: params?.endTime ? Number(params.endTime) : null,
+  };
+  const storedNotifications = await loadAllNotificationStates(serviceContext);
+  return storedNotifications
+    .filter((notification: any) => notification?.alertId)
+    .filter((notification: any) => {
+      const timestamp = Number(notification.updatedAt || new Date(notification.sentAt || 0).getTime());
+      if (normalizedParams.serviceId && notification.serviceId !== normalizedParams.serviceId) return false;
+      if (normalizedParams.channel && notification.channel !== normalizedParams.channel) return false;
+      if (normalizedParams.status && notification.status !== normalizedParams.status) return false;
+      if (normalizedParams.keyword && !String(notification.content || '').includes(normalizedParams.keyword)) return false;
+      if (normalizedParams.startTime && timestamp < normalizedParams.startTime) return false;
+      if (normalizedParams.endTime && timestamp > normalizedParams.endTime) return false;
+      return true;
+    })
+    .sort((left: any, right: any) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
+    .slice(0, 50);
 };
 
 const alerts = (star: Starlight) => ({
+  'internal.evaluate-rules': {
+    async handler(ctx: Context): Promise<any> {
+      const content = await evaluateAlertRules(this as any, star);
+      return { evaluated: content.length, items: content };
+    },
+  },
   'v1.alerts': {
     metadata: { auth: true },
     params: {

@@ -49,6 +49,7 @@ export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: un
   const aggregation = query?.aggregation;
   const visualization = query?.visualizationHint || 'line';
   const calculation = query?.calculation;
+  const compare = query?.compare;
 
   if (!metricRef) issues.push('metricRef is required');
   if (!['auto', 'sdk', 'darwin-event'].includes(String(sourceKind))) {
@@ -94,6 +95,31 @@ export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: un
       if (calculation.scale !== undefined && (!Number.isFinite(Number(calculation.scale)) || Number(calculation.scale) <= 0)) {
         issues.push('calculation.scale must be a positive number');
       }
+    }
+  }
+  if (compare !== undefined && compare !== null) {
+    if (visualization !== 'number') {
+      issues.push('compare only supports number visualization');
+    }
+    if (typeof compare === 'string') {
+      if (!['previous-period', 'same-period'].includes(compare)) {
+        issues.push('compare is invalid');
+      }
+    } else if (typeof compare === 'object') {
+      if (compare.enabled !== undefined && typeof compare.enabled !== 'boolean') {
+        issues.push('compare.enabled is invalid');
+      }
+      if (!['previous-period', 'previous-day', 'previous-week'].includes(String(compare.mode || ''))) {
+        issues.push('compare.mode is invalid');
+      }
+      if (compare.display !== undefined && !['relative', 'absolute', 'both'].includes(String(compare.display))) {
+        issues.push('compare.display is invalid');
+      }
+      if (compare.directionality !== undefined && !['increase_better', 'decrease_better', 'neutral'].includes(String(compare.directionality))) {
+        issues.push('compare.directionality is invalid');
+      }
+    } else {
+      issues.push('compare is invalid');
     }
   }
 
@@ -489,8 +515,8 @@ const METRIC_SCHEMA_BASE: SupportedMetricSchemaItem[] = [
   },
   {
     name: 'service.qps',
-    description: '服务每秒请求数',
-    type: 'counter',
+    description: '由请求总数指标按时间窗口换算的服务每秒请求数',
+    type: 'gauge',
     unit: 'count/s',
     scope: ['tenant', 'system'],
     sourceKind: 'auto',
@@ -545,7 +571,7 @@ const METRIC_SCHEMA_BASE: SupportedMetricSchemaItem[] = [
     subjectKinds: ['system', 'service'],
     allowedAggregations: ['sum'],
     recommendedVisualizations: ['bar', 'donut'],
-    labelNames: ['metric'],
+    labelNames: ['service', 'target_service', 'route', 'action', 'method'],
     sampleLabels: {},
     sampleCount: 0,
     lastSeenAt: null,

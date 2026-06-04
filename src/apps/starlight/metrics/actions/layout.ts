@@ -20,6 +20,28 @@ const setCachedLayout = async (star: Starlight, cacheKey: string, value: unknown
   }
 };
 
+const isOverviewStateKey = (key: string) =>
+  key === 'starlight_overview_default_view_v5' ||
+  key === 'starlight_overview_panel_state_v5' ||
+  key === 'starlight_overview_auto_refresh_v1';
+
+const isValidOverviewCachedLayout = (key: string, value: unknown) => {
+  if (!isOverviewStateKey(key)) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  if (key === 'starlight_overview_default_view_v5') {
+    return 'panelId' in value || 'timeRange' in value || 'scope' in value;
+  }
+
+  if (key === 'starlight_overview_auto_refresh_v1') {
+    return ['off', 'auto', '15s', '30s', '1m', '5m'].includes(
+      (value as { autoRefresh?: string }).autoRefresh || '',
+    );
+  }
+
+  return Array.isArray((value as { panels?: unknown }).panels);
+};
+
 const layout = (star: Starlight) => {
   return {
     'v1.layout': {
@@ -60,24 +82,53 @@ const layout = (star: Starlight) => {
             const cached = await getCachedLayout(star, cacheKey);
             const cacheReadDurationMs = Date.now() - cacheReadStartedAt;
             if (cached !== undefined) {
-              star.logger?.info('Metrics layout timing', {
-                userId,
-                key,
-                operation: 'read',
-                cacheHit: true,
-                cacheReadDurationMs,
-                totalDurationMs: Date.now() - requestStartedAt,
-              });
-              return {
-                status: 200,
-                data: {
-                  code: HttpResponseCode.Success,
-                  content: { layout: cached || [] },
-                  message: '布局获取成功',
-                  success: true,
-                },
-              };
+              if (!isValidOverviewCachedLayout(key, cached)) {
+                star.logger?.warn('Ignoring invalid cached metrics layout shape', {
+                  userId,
+                  key,
+                  cacheKey,
+                  cachedType: Array.isArray(cached) ? 'array' : typeof cached,
+                  cacheReadDurationMs,
+                });
+              } else {
+                star.logger?.info('Metrics layout timing', {
+                  userId,
+                  key,
+                  operation: 'read',
+                  cacheHit: true,
+                  cacheReadDurationMs,
+                  totalDurationMs: Date.now() - requestStartedAt,
+                });
+                return {
+                  status: 200,
+                  data: {
+                    code: HttpResponseCode.Success,
+                    content: { layout: cached || [] },
+                    message: '布局获取成功',
+                    success: true,
+                  },
+                };
+              }
             }
+          }
+
+          if (layout !== undefined && !isValidOverviewCachedLayout(key, layout)) {
+            star.logger?.warn('Rejected invalid overview layout write', {
+              userId,
+              key,
+              cacheKey,
+              layoutType: Array.isArray(layout) ? 'array' : typeof layout,
+              totalDurationMs: Date.now() - requestStartedAt,
+            });
+            return {
+              status: 400,
+              data: {
+                code: HttpResponseCode.ParamsError,
+                content: null,
+                message: '概览布局数据格式不正确',
+                success: false,
+              },
+            };
           }
 
           const findUserStartedAt = Date.now();

@@ -8,6 +8,8 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { decryptPassword } from 'utils';
 
+const LOGIN_USER_INFO_TIMEOUT_MS = Number(process.env.LOGIN_USER_INFO_TIMEOUT_MS || 8000);
+
 export default function login(star: Starlight) {
   return {
     'v1.login': {
@@ -94,24 +96,27 @@ export default function login(star: Starlight) {
           star.logger?.debug('login', data);
 
           // 生成token和refreshToken
+          const userInfoPromise = ctx.call(
+            'user.v1.getUserInfo',
+            {
+              userId: data.userId,
+            },
+            {
+              meta: {
+                ...ctx.meta,
+                appId: ctx.meta?.appId || 'starlight',
+              },
+              timeout: LOGIN_USER_INFO_TIMEOUT_MS,
+            },
+          ).catch((userInfoError) => ({
+            data: null,
+            error: userInfoError,
+          }));
+
           const tokenResult = await Promise.all([
             (this as any).generateToken({ userId: data.userId }),
             (this as any).generateRefreshToken({ userId: data.userId }),
-            ctx.call(
-              'user.v1.getUserInfo',
-              {
-                userId: data.userId,
-              },
-              {
-                meta: {
-                  ...ctx.meta,
-                  appId: ctx.meta?.appId || 'starlight',
-                },
-              },
-            ).catch((userInfoError) => ({
-              data: null,
-              error: userInfoError,
-            })),
+            userInfoPromise,
           ]);
 
           const [accessToken, refreshToken, userInfoResult] = tokenResult;
