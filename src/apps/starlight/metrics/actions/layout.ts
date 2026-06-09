@@ -1,4 +1,5 @@
 import { Context } from 'node-universe';
+import { IUserTableAttributes } from 'db/mysql/models/user';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 
 const getCachedLayout = async (star: Starlight, cacheKey: string) => {
@@ -18,6 +19,72 @@ const setCachedLayout = async (star: Starlight, cacheKey: string, value: unknown
   } catch (error) {
     star.logger?.warn('Metrics layout cache write failed', { cacheKey, error: String(error) });
   }
+};
+
+type DashboardLayoutsMeta = {
+  dashboardLayouts?: Record<string, unknown>;
+};
+
+const parseJsonRecord = (value?: string): Record<string, unknown> => {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const parseLayoutValue = (value?: string) => {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const saveLayoutRecord = async (star: Starlight, userId: string, key: string, layout: unknown) => {
+  await star.db.userLayout.saveOrUpdateUserLayout({
+    userId,
+    key,
+    layout: JSON.stringify(layout),
+  });
+};
+
+const removeLegacyDashboardLayouts = async (
+  star: Starlight,
+  user: IUserTableAttributes,
+  meta: DashboardLayoutsMeta & Record<string, unknown>,
+) => {
+  if (!meta.dashboardLayouts) return;
+  delete meta.dashboardLayouts;
+  await star.db.user.saveOrUpdateUsers([
+    {
+      ...user,
+      meta: JSON.stringify(meta),
+    },
+  ]);
+};
+
+const migrateLegacyDashboardLayouts = async (
+  star: Starlight,
+  userId: string,
+  user: IUserTableAttributes,
+  meta: DashboardLayoutsMeta & Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+) => {
+  if (!meta.dashboardLayouts) return;
+  const layoutsToMigrate = {
+    ...meta.dashboardLayouts,
+    ...overrides,
+  };
+
+  for (const [layoutKey, layoutValue] of Object.entries(layoutsToMigrate)) {
+    await saveLayoutRecord(star, userId, layoutKey, layoutValue);
+  }
+
+  await removeLegacyDashboardLayouts(star, user, meta);
 };
 
 const isOverviewStateKey = (key: string) =>
@@ -184,26 +251,12 @@ const layout = (star: Starlight) => {
             };
           }
 
-          let meta: Record<string, any> = {};
-          try {
-            meta = user.meta ? JSON.parse(user.meta) : {};
-          } catch {
-            meta = {};
-          }
-
-          if (!meta.dashboardLayouts) {
-            meta.dashboardLayouts = {};
-          }
+          const meta = parseJsonRecord(user.meta) as DashboardLayoutsMeta & Record<string, unknown>;
 
           if (layout !== undefined) {
-            meta.dashboardLayouts[key] = layout;
             const updateUserStartedAt = Date.now();
-            await star.db.user.saveOrUpdateUsers([
-              {
-                ...user,
-                meta: JSON.stringify(meta),
-              },
-            ]);
+            await saveLayoutRecord(star, userId, key, layout);
+            await migrateLegacyDashboardLayouts(star, userId, user, meta, { [key]: layout });
             const cacheWriteStartedAt = Date.now();
             await setCachedLayout(star, cacheKey, layout);
             star.logger?.info('Metrics layout timing', {
@@ -228,7 +281,13 @@ const layout = (star: Starlight) => {
             };
           }
 
-          const result = meta.dashboardLayouts[key] || [];
+          const savedLayout = await star.db.userLayout.findUserLayout(userId, key);
+          const savedLayoutValue = parseLayoutValue(savedLayout?.layout);
+          const legacyLayout = meta.dashboardLayouts?.[key];
+          const result = savedLayoutValue !== undefined ? savedLayoutValue : legacyLayout || [];
+          if (savedLayoutValue === undefined && legacyLayout !== undefined) {
+            await migrateLegacyDashboardLayouts(star, userId, user, meta);
+          }
           const cacheWriteStartedAt = Date.now();
           await setCachedLayout(star, cacheKey, result);
           star.logger?.info('Metrics layout timing', {

@@ -8,7 +8,38 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { decryptPassword } from 'utils';
 
-const LOGIN_USER_INFO_TIMEOUT_MS = Number(process.env.LOGIN_USER_INFO_TIMEOUT_MS || 8000);
+const LOGIN_USER_INFO_TIMEOUT_MS = Number(process.env.LOGIN_USER_INFO_TIMEOUT_MS || 2000);
+
+const buildSafeUserInfo = (userInfo: any, isStarlight = true) => {
+  if (!userInfo) return null;
+
+  const safeUserInfo: any = {
+    userId: userInfo.userId,
+    nickname: userInfo.nickname,
+    avatar: userInfo.avatar,
+    status: userInfo.status,
+    source: userInfo.source,
+    isAdmin: userInfo.power === 999,
+    devices: userInfo.devices ? JSON.parse(userInfo.devices) : {},
+    timezone: userInfo.timezone,
+    locale: userInfo.locale,
+    lastActiveAt: userInfo.lastActiveAt,
+    meta: userInfo.meta ? JSON.parse(userInfo.meta) : {},
+    createdAt: userInfo.createdAt,
+    updatedAt: userInfo.updatedAt,
+  };
+
+  if (isStarlight) {
+    safeUserInfo.isOnboardingCompleted = userInfo.isOnboardingCompleted ?? false;
+  }
+
+  return safeUserInfo;
+};
+
+const loadUserInfoFallback = async (star: Starlight, userId: string, isStarlight = true) => {
+  const userInfo = await star.db.user.findUserByUserId(userId);
+  return buildSafeUserInfo(userInfo, isStarlight);
+};
 
 export default function login(star: Starlight) {
   return {
@@ -96,6 +127,7 @@ export default function login(star: Starlight) {
           star.logger?.debug('login', data);
 
           // 生成token和refreshToken
+          const isStarlight = ctx.meta?.appId !== 'starlight' ? ctx.meta?.appId === 'starlight' : true;
           const userInfoPromise = ctx.call(
             'user.v1.getUserInfo',
             {
@@ -108,10 +140,31 @@ export default function login(star: Starlight) {
               },
               timeout: LOGIN_USER_INFO_TIMEOUT_MS,
             },
-          ).catch((userInfoError) => ({
-            data: null,
-            error: userInfoError,
-          }));
+          ).catch(async (userInfoError) => {
+            star.logger?.warn('getUserInfo timed out after login, using local DB fallback', {
+              userId: data.userId,
+              timeoutMs: LOGIN_USER_INFO_TIMEOUT_MS,
+              error: userInfoError instanceof Error ? userInfoError.message : String(userInfoError),
+            });
+            const fallbackUserInfo = await loadUserInfoFallback(star, data.userId, isStarlight).catch((fallbackError) => {
+              star.logger?.error('Local user info fallback after login failed', fallbackError);
+              return null;
+            });
+
+            return fallbackUserInfo
+              ? {
+                  data: {
+                    code: HttpResponseCode.Success,
+                    content: fallbackUserInfo,
+                  },
+                  fallback: true,
+                  error: userInfoError,
+                }
+              : {
+                  data: null,
+                  error: userInfoError,
+                };
+          });
 
           const tokenResult = await Promise.all([
             (this as any).generateToken({ userId: data.userId }),

@@ -34,6 +34,7 @@ class MainDatabaseConnection {
     return databaseConnectionManager.getConnection(options, {
       models: [
         DataBaseTableNames.User,
+        DataBaseTableNames.UserLayout,
         DataBaseTableNames.Config,
         DataBaseTableNames.IPBlackList,
         DataBaseTableNames.EmailAuth,

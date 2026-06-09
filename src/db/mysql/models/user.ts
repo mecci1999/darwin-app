@@ -1,7 +1,7 @@
 /**
  * 用户表
  */
-import { DataTypes, Model, Optional, Sequelize } from 'sequelize';
+import { DataTypes, Model, Sequelize } from 'sequelize';
 import { DataBaseTableNames } from 'typings';
 
 export interface IUserTableAttributes {
@@ -106,7 +106,6 @@ export default function (sequelize: Sequelize) {
       lastActiveAt: { type: DataTypes.DATE },
       meta: {
         type: DataTypes.TEXT,
-        defaultValue: '{}',
         comment: '扩展元数据的JSON字符串',
         validate: {
           isValidJSON(value: any) {
@@ -141,7 +140,6 @@ export default function (sequelize: Sequelize) {
       },
       devices: {
         type: DataTypes.TEXT,
-        defaultValue: '{}',
         comment: '多设备登录信息的JSON字符串',
         validate: {
           isValidJSON(value: any) {
@@ -150,7 +148,7 @@ export default function (sequelize: Sequelize) {
                 const parsed = JSON.parse(value);
                 // 验证设备信息格式
                 if (parsed && typeof parsed === 'object') {
-                  for (const [deviceType, deviceInfo] of Object.entries(parsed)) {
+                  for (const deviceType of Object.keys(parsed)) {
                     if (!['web', 'mobile', 'desktop'].includes(deviceType)) {
                       throw new Error(`Invalid device type: ${deviceType}`);
                     }
@@ -175,7 +173,6 @@ export default function (sequelize: Sequelize) {
       applicationIds: {
         type: DataTypes.TEXT,
         field: 'application_ids',
-        defaultValue: '[]',
         comment: '用户可访问的应用ID列表，JSON数组字符串',
         validate: {
           isValidJSON(value: any) {
@@ -229,6 +226,17 @@ export default function (sequelize: Sequelize) {
         { fields: ['tenant_id', 'created_at'] },
       ],
       hooks: {
+        beforeValidate: (user: UserTable) => {
+          if (user.meta === undefined || user.meta === null) {
+            user.meta = '{}';
+          }
+          if (user.devices === undefined || user.devices === null) {
+            user.devices = '{}';
+          }
+          if (user.applicationIds === undefined || user.applicationIds === null) {
+            user.applicationIds = '[]';
+          }
+        },
         beforeUpdate: (user: UserTable) => {
           user.version += 1; // 乐观锁版本控制
         },

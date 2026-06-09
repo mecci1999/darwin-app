@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'crypto';
+import { REFRESH_TOKEN_EXIPRE_TIME, TOKEN_EXIPRE_TIME } from 'config';
 import { saveOrUpdateConfigs } from 'db/mysql/apis/config';
 import jwt from 'jsonwebtoken';
 import { Star } from 'node-universe';
@@ -8,6 +9,22 @@ import { AuthState } from '../types';
 import { AuthUtils } from '../utils';
 
 const VERIFY_CODE_EMAIL_TIMEOUT_MS = Number(process.env.VERIFY_CODE_EMAIL_TIMEOUT_MS || 5000);
+const normalizeJwtExpiresIn = (
+  value: string | undefined,
+  fallback: jwt.SignOptions['expiresIn'],
+): jwt.SignOptions['expiresIn'] => {
+  const normalized = String(value || '').trim().split(/\s+/)[0];
+  if (!normalized) return fallback;
+
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  if (/^\d+(ms|s|m|h|d|w|y)$/.test(normalized)) {
+    return normalized as jwt.SignOptions['expiresIn'];
+  }
+
+  return fallback;
+};
+const ACCESS_TOKEN_EXPIRE_TIME = normalizeJwtExpiresIn(TOKEN_EXIPRE_TIME, '6h');
+const REFRESH_TOKEN_EXPIRE_TIME = normalizeJwtExpiresIn(REFRESH_TOKEN_EXIPRE_TIME, '3d');
 
 /**
  * 验证微服务的方法
@@ -27,7 +44,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
       const { privateKey } = rsa;
 
       return jwt.sign(payload, privateKey, {
-        expiresIn: '2h', // token过期时间
+        expiresIn: ACCESS_TOKEN_EXPIRE_TIME, // token过期时间
         algorithm: 'RS256',
       });
     } catch (error) {
@@ -48,7 +65,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
       const { privateKey } = rsa;
 
       return jwt.sign(payload, privateKey, {
-        expiresIn: '3d',
+        expiresIn: REFRESH_TOKEN_EXPIRE_TIME,
         algorithm: 'RS256',
       });
     } catch (error) {

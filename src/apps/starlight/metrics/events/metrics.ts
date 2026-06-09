@@ -281,7 +281,11 @@ export default {
           ...data,
           tenantId,
           timestamp: Date.now(),
-          serviceId: ctx.service.fullName
+          tags: {
+            ...(data?.tags || {}),
+            tenantId: data?.tags?.tenantId || tenantId
+          },
+          serviceId: data?.serviceId || data?.tags?.serviceId || ctx.service.fullName
         }
 
         metricsState.processingQueue.push({

@@ -1,5 +1,16 @@
+export const PROTOCOL_DURATION_METRIC_REFS = [
+  'universe.request.time',
+  'http_request_duration_ms',
+  'http_request_duration',
+  'rpc_duration_ms',
+  'messaging_duration_ms',
+  'db_query_duration_ms',
+];
+
+export const isProtocolDurationMetricRef = (metricRef: string) => PROTOCOL_DURATION_METRIC_REFS.includes(metricRef);
+
 export const RESPONSE_DURATION_MEASUREMENT_FILTER =
-  'r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "db_query_duration_ms"';
+  'r["_measurement"] == "universe.request.time" or r["_measurement"] == "http_request_duration_ms" or r["_measurement"] == "http_request_duration" or r["_measurement"] == "rpc_duration_ms" or r["_measurement"] == "messaging_duration_ms" or r["_measurement"] == "db_query_duration_ms"';
 
 export const RESPONSE_DURATION_FIELD_FILTER =
   'r["_field"] == "value" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "response_time" or r["_field"] == "time"';

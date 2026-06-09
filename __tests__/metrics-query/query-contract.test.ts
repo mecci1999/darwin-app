@@ -5,6 +5,7 @@ import {
   RESPONSE_DURATION_FIELD_FILTER,
   RESPONSE_DURATION_MEASUREMENT_FILTER,
   RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+  isProtocolDurationMetricRef,
 } from '../../src/apps/starlight/metrics/utils/duration-metrics';
 import {
   buildSupportedMetricSchema,
@@ -254,12 +255,22 @@ describe('metrics-query query contract helpers', () => {
   it('normalizes second-based HTTP duration metrics to milliseconds before aggregation', () => {
     expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('http_request_duration_ms');
     expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('http_request_duration');
+    expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('messaging_duration_ms');
     expect(RESPONSE_DURATION_FIELD_FILTER).toContain('response_time');
     expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r["_measurement"] == "http_request_duration"');
     expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r.unit == "s"');
     expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('* 1000.0');
     expect(RESPONSE_DURATION_COMPLETED_REQUEST_FILTER).toContain('r.phase != "start"');
     expect(RESPONSE_DURATION_COMPLETED_REQUEST_FILTER).toContain('> 0.0');
+  });
+
+  it('classifies protocol duration metric refs for duration-specific normalization', () => {
+    expect(isProtocolDurationMetricRef('http_request_duration_ms')).toBe(true);
+    expect(isProtocolDurationMetricRef('http_request_duration')).toBe(true);
+    expect(isProtocolDurationMetricRef('rpc_duration_ms')).toBe(true);
+    expect(isProtocolDurationMetricRef('messaging_duration_ms')).toBe(true);
+    expect(isProtocolDurationMetricRef('db_query_duration_ms')).toBe(true);
+    expect(isProtocolDurationMetricRef('http_requests_total')).toBe(false);
   });
 
   it('exposes Chinese descriptions for system metric catalog items', () => {

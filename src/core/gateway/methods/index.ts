@@ -11,7 +11,28 @@ let wss: WebSocket.Server | null = null;
 const wsClients = new Map<string, WebSocketClient>();
 const eventListeners: Map<string, (data: any) => void> = new Map();
 const AUTH_CACHE_TTL_MS = 30 * 1000;
+const AUTH_CACHE_STALE_GRACE_MS = 5 * 60 * 1000;
 const authCache = new Map<string, { expiresAt: number; user: any }>();
+
+const isTransientAuthTransportError = (error: any) =>
+  error?.type === 'REQUEST_REJECTED' ||
+  error?.code === 503 ||
+  String(error?.message || '').includes('Request timeout during cleanup');
+
+const applyAuthorizedUser = (ctx: Context, user: any) => {
+  const authorizedUser = {
+    ...user,
+    isAdmin: Boolean(user?.isAdmin),
+  };
+  (ctx.meta as any).user = authorizedUser;
+  const tenantId =
+    (authorizedUser as any).tenantId ||
+    (authorizedUser as any).tenantID ||
+    (authorizedUser as any).tenant_id ||
+    (authorizedUser as any).userId;
+  if (tenantId) (ctx.meta as any).tenantId = String(tenantId);
+  return { authorizedUser, tenantId };
+};
 
 // WebSocket 客户端类型定义
 // WebSocket 客户端接口
@@ -381,17 +402,7 @@ const gatewayMethods: any = (star: Star) => ({
     try {
       const cachedAuth = authCache.get(token);
       if (cachedAuth && cachedAuth.expiresAt > Date.now()) {
-        const authorizedUser = {
-          ...cachedAuth.user,
-          isAdmin: Boolean(cachedAuth.user?.isAdmin),
-        };
-        (ctx.meta as any).user = authorizedUser;
-        const tenantId =
-          (authorizedUser as any).tenantId ||
-          (authorizedUser as any).tenantID ||
-          (authorizedUser as any).tenant_id ||
-          (authorizedUser as any).userId;
-        if (tenantId) (ctx.meta as any).tenantId = String(tenantId);
+        const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, cachedAuth.user);
 
         star.logger?.info('Gateway authorize timing', {
           userId: (authorizedUser as any).userId,
@@ -403,9 +414,6 @@ const gatewayMethods: any = (star: Star) => ({
           totalDurationMs: Date.now() - authorizeStartedAt,
         });
         return;
-      }
-      if (cachedAuth) {
-        authCache.delete(token);
       }
 
       const resolveTokenStartedAt = Date.now();
@@ -427,22 +435,12 @@ const gatewayMethods: any = (star: Star) => ({
       authCache.set(token, {
         user,
         expiresAt: Math.min(
-          Date.now() + AUTH_CACHE_TTL_MS,
+          Date.now() + AUTH_CACHE_STALE_GRACE_MS,
           Number((user as any).expirationTime || Date.now() + AUTH_CACHE_TTL_MS),
         ),
       });
 
-      const authorizedUser = {
-        ...user,
-        isAdmin: Boolean((user as any).isAdmin),
-      };
-      (ctx.meta as any).user = authorizedUser;
-      const tenantId =
-        (authorizedUser as any).tenantId ||
-        (authorizedUser as any).tenantID ||
-        (authorizedUser as any).tenant_id ||
-        (authorizedUser as any).userId;
-      if (tenantId) (ctx.meta as any).tenantId = String(tenantId);
+      const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, user);
 
       star.logger?.info('Gateway authorize timing', {
         userId: (authorizedUser as any).userId,
@@ -456,6 +454,25 @@ const gatewayMethods: any = (star: Star) => ({
     } catch (err: any) {
       if (err?.code === HttpResponseCode.REFRESH_TOKEN) {
         return Promise.reject(new TokenExpiredError());
+      }
+      const cachedAuth = authCache.get(token);
+      const tokenExpirationTime = Number(cachedAuth?.user?.expirationTime || 0);
+      const canUseStaleAuth =
+        cachedAuth &&
+        isTransientAuthTransportError(err) &&
+        tokenExpirationTime > Date.now() &&
+        cachedAuth.expiresAt + AUTH_CACHE_STALE_GRACE_MS > Date.now();
+
+      if (canUseStaleAuth) {
+        const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, cachedAuth.user);
+        star.logger?.warn('Gateway authorize used stale cached auth after transient auth service error', {
+          userId: (authorizedUser as any).userId,
+          tenantId: tenantId ? String(tenantId) : undefined,
+          errorType: err?.type,
+          errorCode: err?.code,
+          totalDurationMs: Date.now() - authorizeStartedAt,
+        });
+        return;
       }
       star.logger?.error('gateway_app authorize error~', 'error:', err);
       return Promise.reject(new UnAuthorizedError());

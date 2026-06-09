@@ -8,24 +8,27 @@ import { IUserTableAttributes, UserTable } from '../models/user';
 export async function saveOrUpdateUsers(users: IUserTableAttributes[]) {
   try {
     const model = await mainConnection.getModel<UserTable>(DataBaseTableNames.User);
+    const mutableFields: Array<keyof IUserTableAttributes> = [
+      'nickname',
+      'avatar',
+      'status',
+      'source',
+      'power',
+      'devices',
+      'timezone',
+      'locale',
+      'lastActiveAt',
+      'meta',
+      'version',
+      'tenantId',
+      'applicationIds',
+      'isOnboardingCompleted',
+    ];
+    const updateOnDuplicate = mutableFields.filter((field) => users.some((user) => user[field] !== undefined));
+
     return model
       .bulkCreate(users, {
-        updateOnDuplicate: [
-          'nickname',
-          'avatar',
-          'status',
-          'source',
-          'power',
-          'devices',
-          'timezone',
-          'locale',
-          'lastActiveAt',
-          'meta',
-          'version',
-          'tenantId',
-          'applicationIds',
-          'isOnboardingCompleted',
-        ],
+        updateOnDuplicate,
       })
       .then(() => users);
   } catch (error) {

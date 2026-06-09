@@ -22,6 +22,7 @@ import {
   RESPONSE_DURATION_FIELD_FILTER,
   RESPONSE_DURATION_MEASUREMENT_FILTER,
   RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+  isProtocolDurationMetricRef,
 } from '../metrics/utils/duration-metrics';
 import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
@@ -34,12 +35,6 @@ const QUERY_CACHE_TTL_MS = 30 * 1000;
 const queryMemoryCache = new Map<string, { expiresAt: number; value: any }>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
-
-const formatInterval = (seconds: number) => {
-  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
-  if (seconds % 60 === 0) return `${seconds / 60}m`;
-  return `${seconds}s`;
-};
 
 const formatOffset = (seconds: number) => `-${Math.max(1, Math.round(seconds))}s`;
 
@@ -146,6 +141,20 @@ const buildServiceFilter = (serviceId?: string) => {
   return normalizedServiceId ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")` : '';
 };
 
+const buildProtocolServiceFilter = (serviceId?: string) => {
+  const normalizedServiceId = normalizeServiceId(serviceId);
+  if (!normalizedServiceId) return '';
+  return `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}" or r["target_service"] == "${normalizedServiceId}" or r["targetService"] == "${normalizedServiceId}" or r["destination_service"] == "${normalizedServiceId}" or r["peer_service"] == "${normalizedServiceId}")`;
+};
+
+const PROTOCOL_REQUEST_TOTAL_MEASUREMENTS = new Set([
+  'http_requests_total',
+  'rpc_requests_total',
+  'messaging_requests_total',
+]);
+
+const isProtocolRequestTotalMetricRef = (metricRef: string) => PROTOCOL_REQUEST_TOTAL_MEASUREMENTS.has(metricRef);
+
 const queryTimeseries = async (params: {
   measurementFilter: string;
   fieldFilter: string;
@@ -153,21 +162,27 @@ const queryTimeseries = async (params: {
   timeRange: string;
   stop?: string;
   serviceId?: string;
+  serviceFilter?: string;
   every?: string;
   star: Starlight;
   normalizeValue?: (value: unknown) => number;
   normalizeFlux?: string;
+  seriesAggregateFn?: 'mean' | 'sum' | 'max';
 }) => {
   const bucket = getBucketNameOrThrow();
+  const seriesAggregateFn = params.seriesAggregateFn || (params.aggregateFn === 'sum' ? 'sum' : params.aggregateFn === 'max' ? 'max' : 'mean');
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
       |> filter(fn: (r) => ${params.measurementFilter})
-      ${buildServiceFilter(params.serviceId)}
+      ${params.serviceFilter ?? buildServiceFilter(params.serviceId)}
       |> filter(fn: (r) => ${params.fieldFilter})
       ${params.normalizeFlux || ''}
       ${params.normalizeFlux === RESPONSE_DURATION_MS_NORMALIZATION_FLUX ? RESPONSE_DURATION_COMPLETED_REQUEST_FILTER : ''}
       |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${params.aggregateFn}, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> ${seriesAggregateFn}(column: "_value")
+      |> sort(columns: ["_time"])
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
   return normalizeSeries(rows, params.normalizeValue);
@@ -202,13 +217,115 @@ const queryRawSystemMetricSeries = async (params: {
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
+    serviceFilter: isProtocolRequestTotalMetricRef(params.metricRef) ? buildProtocolServiceFilter(params.serviceId) : undefined,
     star: params.star,
-    normalizeValue: params.metricRef === 'process.memory.rss'
+    normalizeValue: params.metricRef === 'process.memory.rss' || params.metricRef === 'os.memory.total'
       ? normalizeRssMemoryValue
       : params.metricRef.includes('utilization')
         ? normalizeUtilizationValue
         : undefined,
   });
+};
+
+const queryExactProtocolDurationSeries = async (params: {
+  metricRef: string;
+  aggregation?: string;
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
+  return queryTimeseries({
+    measurementFilter: `r["_measurement"] == "${params.metricRef}"`,
+    fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
+    aggregateFn: params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+    normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+  });
+};
+
+const queryProtocolDurationSeries = async (params: {
+  aggregation?: string;
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
+  return queryTimeseries({
+    measurementFilter: RESPONSE_DURATION_MEASUREMENT_FILTER,
+    fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
+    aggregateFn: params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+    normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+  });
+};
+
+const queryLatestDurationWithFallback = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+  const series = await queryProtocolDurationSeries({
+    aggregation: 'latest',
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+  });
+  if (series.length > 0) return series;
+  if (params.stop) return series;
+  return queryProtocolDurationSeries({
+    aggregation: 'latest',
+    timeRange: '-1h',
+    serviceId: params.serviceId,
+    star: params.star,
+  });
+};
+
+const queryRawRequestErrorSeries = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
+  const bucket = getBucketNameOrThrow();
+  const serviceFilter = buildProtocolServiceFilter(params.serviceId);
+  const every = resolveInterval(params.timeRange);
+  const totalQuery = `
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
+  `;
+  const errorQuery = `
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
+      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
+  `;
+  const [totalRows, errorRows] = await Promise.all([
+    InfluxDBHandler.queryMetrics(totalQuery, params.star),
+    InfluxDBHandler.queryMetrics(errorQuery, params.star).catch(() => []),
+  ]);
+  const totalSeries = normalizeSeries(totalRows);
+  const errorValueByTimestamp = new Map(normalizeSeries(errorRows).map((point) => [point.timestamp, point.value]));
+  return totalSeries.map((point) => ({
+    timestamp: point.timestamp,
+    value: errorValueByTimestamp.get(point.timestamp) || 0,
+  }));
 };
 
 const queryMemoryUsagePercentSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight; aggregateFn: 'mean' | 'max' | 'last' }) => {
@@ -224,7 +341,13 @@ const queryMemoryUsagePercentSeries = async (params: { timeRange: string; stop?:
   });
 };
 
-const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+const queryRequestRateSeries = async (params: {
+  measurementFilter: string;
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
   const bucket = getBucketNameOrThrow();
   const every = resolveInterval(params.timeRange);
   const intervalSeconds = Math.max(1, parseRangeSeconds(every));
@@ -232,7 +355,7 @@ const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string;
   const fluxQuery = `
       from(bucket: "${bucket}")
       |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
-      |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
+      |> filter(fn: (r) => ${params.measurementFilter})
       ${serviceFilter}
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
       |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
@@ -242,6 +365,26 @@ const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string;
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
   return normalizeSeries(rows, (value) => toFixed(Number(value || 0) / intervalSeconds, 2));
+};
+
+const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+  const protocolSeries = await queryRequestRateSeries({
+    measurementFilter: 'r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total"',
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+  });
+
+  if (protocolSeries.length > 0) return protocolSeries;
+
+  return queryRequestRateSeries({
+    measurementFilter: 'r["_measurement"] == "universe.request.total"',
+    timeRange: params.timeRange,
+    stop: params.stop,
+    serviceId: params.serviceId,
+    star: params.star,
+  });
 };
 
 
@@ -324,6 +467,9 @@ const queryErrorRateSeries = async (params: { timeRange: string; stop?: string; 
       ${serviceFilter}
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
       |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
   `;
   const errorQuery = `
       from(bucket: "${bucket}")
@@ -333,6 +479,9 @@ const queryErrorRateSeries = async (params: { timeRange: string; stop?: string; 
       |> filter(fn: (r) => r["_measurement"] == "universe.request.error.total" or (exists r.status and string(v: r.status) =~ /5../) or (exists r.status_code and string(v: r.status_code) =~ /5../) or (exists r.http_status_code and string(v: r.http_status_code) =~ /5../) or (exists r.code and string(v: r.code) =~ /5../))
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
       |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
   `;
   const [totalRows, errorRows] = await Promise.all([
     InfluxDBHandler.queryMetrics(totalQuery, params.star),
@@ -420,23 +569,22 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
   if (metricRef === 'service.qps') {
     const qpsSeries = await queryServiceQpsSeries({ timeRange, stop, serviceId, star });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: qpsSeries.length ? qpsSeries[qpsSeries.length - 1].value : null };
+      return { kind: 'number', value: qpsSeries.length ? qpsSeries[qpsSeries.length - 1].value : 0 };
     }
     return { kind: 'timeseries', series: [{ name: 'QPS', points: qpsSeries }] };
   }
 
   if (metricRef === 'service.response.time') {
     const aggregateFn = query?.aggregation === 'max' ? 'max' : 'mean';
-    const series = await queryTimeseries({
-      measurementFilter: RESPONSE_DURATION_MEASUREMENT_FILTER,
-      fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
-      aggregateFn,
-      timeRange,
-      stop,
-      serviceId,
-      star,
-      normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
-    });
+    const series = isSingleValueVisualization && query?.aggregation === 'latest'
+      ? await queryLatestDurationWithFallback({ timeRange, stop, serviceId, star })
+      : await queryProtocolDurationSeries({
+          aggregation: aggregateFn,
+          timeRange,
+          stop,
+          serviceId,
+          star,
+        });
     if (isSingleValueVisualization) {
       return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: 'ms' };
     }
@@ -447,7 +595,7 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
     const series = await queryErrorRateSeries({ timeRange, stop, serviceId, star });
     if (isSingleValueVisualization) {
       const latest = getLatestPoint(series);
-      return { kind: 'number', value: latest ? latest.value : null, unit: '%' };
+      return { kind: 'number', value: latest ? latest.value : 0, unit: '%' };
     }
     return { kind: 'timeseries', unit: '%', series: [{ name: 'Error Rate', points: series }] };
   }
@@ -492,14 +640,25 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
   }
 
   if (isRawSystemMetricRef(metricRef)) {
-    const series = await queryRawSystemMetricSeries({
-      metricRef,
-      aggregation: query?.aggregation,
-      timeRange,
-      stop,
-      serviceId,
-      star,
-    });
+    const series = metricRef === 'universe.request.error.total'
+      ? await queryRawRequestErrorSeries({ timeRange, stop, serviceId, star })
+      : isProtocolDurationMetricRef(metricRef)
+        ? await queryExactProtocolDurationSeries({
+            metricRef,
+            aggregation: query?.aggregation,
+            timeRange,
+            stop,
+            serviceId,
+            star,
+          })
+      : await queryRawSystemMetricSeries({
+          metricRef,
+          aggregation: query?.aggregation,
+          timeRange,
+          stop,
+          serviceId,
+          star,
+        });
     const unit = rawSystemMetricUnit(metricRef);
     if (isSingleValueVisualization) {
       return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit };

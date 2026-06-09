@@ -128,24 +128,34 @@ const emitGatewayTopologyMetric = async (
     timestamp: Date.now(),
   };
 
-  await ctx.call('metrics.v1.topology', payload, { meta: ctx.meta })
-    .then(() => {
-      star.logger?.info('Gateway topology metric recorded', {
-        sourceService: payload.sourceService,
-        targetService: payload.targetService,
-        action: payload.action,
-        status: payload.status,
-      });
-    })
-    .catch((error) => {
-      star.logger?.error('Gateway topology metric record failed', {
-        sourceService: payload.sourceService,
-        targetService: payload.targetService,
-        action: payload.action,
-        status: payload.status,
-        error: error?.message || String(error),
-      });
+  const emitTopologyObserved = typeof ctx.emit === 'function' ? ctx.emit.bind(ctx) : null;
+  if (!emitTopologyObserved) {
+    star.logger?.warn('Gateway topology metric emit unavailable', {
+      sourceService: payload.sourceService,
+      targetService: payload.targetService,
+      action: payload.action,
+      status: payload.status,
     });
+    return;
+  }
+
+  try {
+    await emitTopologyObserved('metrics.topology.observed', payload);
+    star.logger?.info('Gateway topology metric recorded', {
+      sourceService: payload.sourceService,
+      targetService: payload.targetService,
+      action: payload.action,
+      status: payload.status,
+    });
+  } catch (error) {
+    star.logger?.error('Gateway topology metric record failed', {
+      sourceService: payload.sourceService,
+      targetService: payload.targetService,
+      action: payload.action,
+      status: payload.status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const shouldSkipTopologyObservation = (service: string, action: string, params: any) => {
@@ -335,6 +345,9 @@ async function initializeGatewayService() {
           'http://localhost:6130',
           'http://127.0.0.1:6130',
           'tauri://localhost',
+          'http://tauri.localhost',
+          'https://tauri.localhost',
+          'asset://localhost',
         ],
         methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
         allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],

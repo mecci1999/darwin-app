@@ -3,6 +3,7 @@
  */
 export enum DataBaseTableNames {
   User = 'user',
+  UserLayout = 'userLayout',
   Config = 'config',
   IPBlackList = 'ipBlackList',
   EmailAuth = 'emailAuth',

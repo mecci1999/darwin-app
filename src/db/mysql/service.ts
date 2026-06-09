@@ -18,6 +18,7 @@ import * as paymentApi from './apis/payment';
 import * as quotaApi from './apis/quota';
 import * as subscriptionApi from './apis/subscription';
 import * as userApi from './apis/user';
+import * as userLayoutApi from './apis/userLayout';
 
 /**
  * 数据库服务配置接口
@@ -45,6 +46,42 @@ export class DatabaseService {
     this.serviceName = serviceName;
   }
 
+  private emitQueryDurationMetric(sql: string, timing?: number) {
+    if (typeof timing !== 'number' || !Number.isFinite(timing) || timing < 0) return;
+
+    const [firstToken] = sql.trim().split(/\s+/);
+    const operation = firstToken ? firstToken.toUpperCase() : 'UNKNOWN';
+    const timestamp = Date.now();
+
+    if (typeof this.star.emit !== 'function') return;
+
+    const emitResult = this.star.emit('metrics.raw', {
+      tenantId: 'system',
+      data: {
+        measurement: 'db_query_duration_ms',
+        tags: {
+          tenantId: 'system',
+          appKeyId: 'system',
+          visibilityScope: 'system-admin',
+          sourceType: 'darwin-system',
+          source: 'mysql-sequelize',
+          service: this.serviceName,
+          serviceId: `system:${this.serviceName}`,
+          protocol: 'db',
+          'db.system': 'mysql',
+          operation,
+          unit: 'ms',
+        },
+        fields: { value: timing, duration: timing },
+        timestamp,
+      },
+    });
+
+    Promise.resolve(emitResult).catch((error: unknown) => {
+      this.star.logger?.warn(`[${this.serviceName}] Failed to emit DB query duration metric`, error);
+    });
+  }
+
   /**
    * 初始化数据库服务
    */
@@ -60,6 +97,7 @@ export class DatabaseService {
         {
           benchmark: true,
           logging: (sql: string, timing?: number) => {
+            this.emitQueryDurationMetric(sql, timing);
             if (timing && timing > (config.slowQueryThreshold ?? 1000)) {
               this.star.logger?.warn(
                 `[${this.serviceName}] Slow query detected: ${sql}, timing: ${timing}ms`,
@@ -70,6 +108,7 @@ export class DatabaseService {
         {
           models: [
             DataBaseTableNames.User,
+            DataBaseTableNames.UserLayout,
             DataBaseTableNames.Config,
             DataBaseTableNames.IPBlackList,
             DataBaseTableNames.EmailAuth,
@@ -97,6 +136,8 @@ export class DatabaseService {
       if (!mainConnection.connection) {
         mainConnection.connection = this.connection;
       }
+
+      await this.connection.sync({ force: false });
 
       // 如果需要完整初始化（包括IP黑名单等）
       if (config.enableIpBlacklist || config.enableIpSyncTimer) {
@@ -134,6 +175,7 @@ export class DatabaseService {
         {
           benchmark: true,
           logging: (sql: string, timing?: number) => {
+            this.emitQueryDurationMetric(sql, timing);
             if (timing && timing > 1000) {
               this.star.logger?.warn(
                 `[${this.serviceName}] Slow query detected: ${sql}, timing: ${timing}ms`,
@@ -144,6 +186,7 @@ export class DatabaseService {
         {
           models: [
             DataBaseTableNames.User,
+            DataBaseTableNames.UserLayout,
             DataBaseTableNames.Config,
             DataBaseTableNames.IPBlackList,
             DataBaseTableNames.EmailAuth,
@@ -171,6 +214,8 @@ export class DatabaseService {
       if (!mainConnection.connection) {
         mainConnection.connection = this.connection;
       }
+
+      await this.connection.sync({ force: false });
 
       this.isInitialized = true;
       this.star.logger?.info(`Database connection [${this.serviceName}] established`);
@@ -227,6 +272,16 @@ export class DatabaseService {
       queryAllUsers: userApi.queryAllUsers,
       findUserByUserId: userApi.findUserByUserId,
       findUsersByUserIds: userApi.findUsersByUserIds,
+    };
+  }
+
+  /**
+   * 用户布局相关数据库操作
+   */
+  get userLayout() {
+    return {
+      saveOrUpdateUserLayout: userLayoutApi.saveOrUpdateUserLayout,
+      findUserLayout: userLayoutApi.findUserLayout,
     };
   }
 

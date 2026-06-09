@@ -33,7 +33,7 @@ export default function (sequelize: Sequelize) {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       ipv4: { type: DataTypes.STRING(32), allowNull: true, field: 'ipv4' },
       ipv6: { type: DataTypes.STRING(45), allowNull: true, field: 'ipv6' },
-      reason: { type: DataTypes.TEXT, allowNull: true, defaultValue: '', field: 'reason' },
+      reason: { type: DataTypes.TEXT, allowNull: true, field: 'reason' },
       status: {
         type: DataTypes.STRING(32),
         allowNull: false,
@@ -50,6 +50,13 @@ export default function (sequelize: Sequelize) {
       sequelize,
       tableName: DataBaseTableNames.IPBlackList,
       modelName: DataBaseTableNames.IPBlackList,
+      hooks: {
+        beforeValidate: (ipBlackList: IPBlackListTable) => {
+          if (ipBlackList.reason === undefined || ipBlackList.reason === null) {
+            ipBlackList.reason = '';
+          }
+        },
+      },
     },
   );
 
