@@ -3820,8 +3820,8 @@ packages:
     resolution: {integrity: sha512-jRniCdCLPiZnfSn+/ytilTi3znMBZBunafp56ZDApi4ft0zV9bnmYnHwhdRL6K3J74GFcdAZ5g3774U1JNeIqA==}
     engines: {node: '>= 18.x.x'}
 
-  node-universe@1.7.0:
-    resolution: {integrity: sha512-CzYc8Dp/ufM5IkwUUuQAHGhYEcMGgrzJgaP6we98sfZVprVhaA5q4ucdu7oAPg5prK3nuEbG8Q3dQ0qQ84GGXw==}
+  node-universe@1.7.1:
+    resolution: {integrity: sha512-8oH4ZYomHtTEREuPzGM+1mz7L1borQF7hnN3Y31jdlF9JEtkWMf+WkH0u/34QCoYEPFwGDWsfy54xfdhcW9AYw==}
     peerDependencies:
       amqplib: '*'
       avsc: '*'
@@ -9405,7 +9405,7 @@ snapshots:
       isstream: 0.1.2
       kleur: 4.1.5
       lodash: 4.18.1
-      node-universe: 1.7.0(encoding@0.1.13)
+      node-universe: 1.7.1(encoding@0.1.13)
       path-to-regexp: 6.3.0
       qs: 6.15.1
       serve-static: 1.16.3
@@ -9427,7 +9427,7 @@ snapshots:
       - utf-8-validate
       - winston
 
-  node-universe@1.7.0(encoding@0.1.13):
+  node-universe@1.7.1(encoding@0.1.13):
     dependencies:
       cbor-x: 1.6.4
       crypto: 1.0.1

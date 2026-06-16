@@ -9,6 +9,7 @@ import register from './register';
 import rsa from './rsa';
 import updateHash from './updateHash';
 import verifyCode from './verifyCode';
+import { instrumentServiceActions } from '../../../apps/starlight/metrics/utils/action-metrics';
 
 /**
  * 验证微服务的动作
@@ -24,7 +25,7 @@ const authAction = (star: Starlight) => {
   const refreshAction = refresh(star);
   const qrcodeAction = qrcode(star);
 
-  return {
+  return instrumentServiceActions(star, 'auth', {
     ...verifyCodeAction,
     ...registerAction,
     ...loginAction,
@@ -54,7 +55,7 @@ const authAction = (star: Starlight) => {
         return (this as any).resolveToken(token);
       },
     },
-  };
+  });
 };
 
 export default authAction;

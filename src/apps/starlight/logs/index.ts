@@ -29,6 +29,7 @@ import {
   stopDarwinLogCapture,
 } from './utils/darwin-log-capture';
 import { elasticsearchManager } from './utils/elasticsearch-manager';
+import { summarizeElasticsearchError } from './utils/elasticsearch';
 
 // 加载环境变量
 
@@ -225,19 +226,29 @@ function createLogsService() {
         // 初始化数据库连接
         await star.db.simpleInitialize();
 
-        // 初始化Elasticsearch连接
-        await elasticsearchManager.initialize({
+        const elasticsearchConfig = {
           node: this.settings.elasticsearch.node,
           password: this.settings.elasticsearch.auth?.password,
           username: this.settings.elasticsearch.auth?.username,
-        });
-        logsState.elasticsearchConnected = true;
+        };
+
+        // Elasticsearch 是日志存储后端，但开发环境里容器可能还在恢复或磁盘水位保护中。
+        // 这里允许服务先启动，Darwin 日志会落到 fallback 文件，ES 恢复后再重放。
+        try {
+          await elasticsearchManager.initialize(elasticsearchConfig);
+          logsState.elasticsearchConnected = true;
+          this.logger.info('Elasticsearch connection initialized');
+        } catch (error) {
+          elasticsearchManager.configure(elasticsearchConfig);
+          logsState.elasticsearchConnected = false;
+          this.logger.warn('Elasticsearch unavailable on startup; logs service will run with fallback storage', summarizeElasticsearchError(error));
+        }
+
         startDarwinLogCapture({
           onBroadcast: (log) => {
             void publishDarwinLogToGateway(star, log)
           },
         });
-        this.logger.info('Elasticsearch connection initialized');
 
         // 启动处理器（示例实现）
         this.logger.info('Starting log processors...');
@@ -247,17 +258,26 @@ function createLogsService() {
           processBatchedLogs,
           this.settings.processing.flushInterval,
         );
+        const elasticsearchReconnectInterval = setInterval(async () => {
+          if (logsState.elasticsearchConnected) return;
+          const connected = await elasticsearchManager.ensureConnected();
+          if (connected) {
+            logsState.elasticsearchConnected = true;
+            this.logger.info('Elasticsearch connection restored');
+          }
+        }, 30000);
 
         // 存储定时器引用以便清理
         logsState.timers = {
           dataProcessor: null,
           batchProcessor: batchInterval,
           quotaChecker: null,
+          elasticsearchReconnect: elasticsearchReconnectInterval,
         };
 
         this.logger.info('Logs service started successfully');
       } catch (error) {
-        this.logger.error('Failed to start logs service:', error);
+        this.logger.error('Failed to start logs service:', summarizeElasticsearchError(error));
         throw error;
       }
     },
@@ -273,6 +293,9 @@ function createLogsService() {
         }
         if (logsState.timers.quotaChecker) {
           clearInterval(logsState.timers.quotaChecker);
+        }
+        if (logsState.timers.elasticsearchReconnect) {
+          clearInterval(logsState.timers.elasticsearchReconnect);
         }
 
         // 关闭Elasticsearch连接
@@ -336,7 +359,7 @@ async function startLogsService() {
 
     return { star, logsService };
   } catch (error) {
-    console.error('Failed to start logs service:', error);
+    console.error('Failed to start logs service:', summarizeElasticsearchError(error));
     process.exit(1);
   }
 }

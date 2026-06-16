@@ -6,6 +6,7 @@
 import { BaseLog, StoredLog, LogLevel, LogSource } from '../types';
 import { LOG_LEVELS, LOG_SOURCES, SENSITIVE_FIELDS, MAX_LOG_SIZE } from '../constants';
 import { grokParser } from './grok-parser';
+import { sanitizeLogMessageText } from './log-message-sanitize';
 
 export class LogProcessor {
   private sensitiveFields: Set<string>;
@@ -195,7 +196,7 @@ export class LogProcessor {
     }
 
     // 移除潜在的敏感信息模式
-    let sanitized = message;
+    let sanitized = sanitizeLogMessageText(message);
 
     // 清理信用卡号
     sanitized = sanitized.replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, '[CREDIT_CARD]');

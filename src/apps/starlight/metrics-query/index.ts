@@ -27,6 +27,7 @@ import {
 import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
+import { instrumentServiceActions } from '../metrics/utils/action-metrics';
 import { buildSupportedMetricSchema, isRawSystemMetricRef, parseRangeSeconds, resolveInterval, validateQuerySpec } from './utils/query-contract';
 import { buildRequestStatsDistributionItems } from './utils/request-stats';
 
@@ -116,12 +117,16 @@ const buildNumberCompare = (params: {
   };
 };
 
-const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2)) =>
+const normalizeSeries = (
+  rows: any[],
+  normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2),
+  options?: { preserveEmptyWindows?: boolean }
+) =>
   rows
-    .filter((row) => row?._time && row?._value !== undefined && row?._value !== null)
+    .filter((row) => row?._time && row?._value !== undefined && (options?.preserveEmptyWindows || row?._value !== null))
     .map((row) => ({
       timestamp: new Date(row._time).getTime(),
-      value: normalizeValue(row._value),
+      value: row._value === null ? null : normalizeValue(row._value),
     }))
     .sort((a, b) => a.timestamp - b.timestamp);
 
@@ -168,6 +173,7 @@ const queryTimeseries = async (params: {
   normalizeValue?: (value: unknown) => number;
   normalizeFlux?: string;
   seriesAggregateFn?: 'mean' | 'sum' | 'max';
+  createEmpty?: boolean;
 }) => {
   const bucket = getBucketNameOrThrow();
   const seriesAggregateFn = params.seriesAggregateFn || (params.aggregateFn === 'sum' ? 'sum' : params.aggregateFn === 'max' ? 'max' : 'mean');
@@ -179,13 +185,13 @@ const queryTimeseries = async (params: {
       |> filter(fn: (r) => ${params.fieldFilter})
       ${params.normalizeFlux || ''}
       ${params.normalizeFlux === RESPONSE_DURATION_MS_NORMALIZATION_FLUX ? RESPONSE_DURATION_COMPLETED_REQUEST_FILTER : ''}
-      |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${params.aggregateFn}, createEmpty: false)
+      |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${params.aggregateFn}, createEmpty: ${params.createEmpty ? 'true' : 'false'})
       |> group(columns: ["_time"])
       |> ${seriesAggregateFn}(column: "_value")
       |> sort(columns: ["_time"])
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, params.star);
-  return normalizeSeries(rows, params.normalizeValue);
+  return normalizeSeries(rows, params.normalizeValue, { preserveEmptyWindows: params.createEmpty });
 };
 
 const normalizeUtilizationValue = (value: unknown) => {
@@ -244,6 +250,7 @@ const queryExactProtocolDurationSeries = async (params: {
     serviceId: params.serviceId,
     star: params.star,
     normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+    createEmpty: params.aggregation !== 'latest',
   });
 };
 
@@ -263,6 +270,7 @@ const queryProtocolDurationSeries = async (params: {
     serviceId: params.serviceId,
     star: params.star,
     normalizeFlux: RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
+    createEmpty: params.aggregation !== 'latest',
   });
 };
 
@@ -358,7 +366,8 @@ const queryRequestRateSeries = async (params: {
       |> filter(fn: (r) => ${params.measurementFilter})
       ${serviceFilter}
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
-      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: true)
+      |> fill(value: 0.0)
       |> group(columns: ["_time"])
       |> sum(column: "_value")
       |> sort(columns: ["_time"])
@@ -833,7 +842,7 @@ function createMetricsQueryService() {
         );
       },
     },
-    actions: {
+    actions: instrumentServiceActions(star, APP_NAME, {
       'v2.schema': {
         metadata: { auth: true },
         params: {
@@ -1123,7 +1132,7 @@ function createMetricsQueryService() {
           };
         },
       },
-    },
+    }),
   });
 
   return { star, queryService };

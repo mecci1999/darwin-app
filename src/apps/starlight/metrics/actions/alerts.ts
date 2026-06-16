@@ -683,8 +683,8 @@ const alerts = (star: Starlight) => ({
       assigneeUserId: { type: 'string', optional: true },
       scope: { type: 'string', optional: true },
       keyword: { type: 'string', optional: true },
-      startTime: { type: 'number', optional: true },
-      endTime: { type: 'number', optional: true },
+      startTime: { type: 'number', optional: true, convert: true },
+      endTime: { type: 'number', optional: true, convert: true },
     },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       try {
@@ -759,8 +759,8 @@ const alerts = (star: Starlight) => ({
     params: {
       serviceId: { type: 'string', optional: true },
       scope: { type: 'string', optional: true },
-      startTime: { type: 'number', optional: true },
-      endTime: { type: 'number', optional: true },
+      startTime: { type: 'number', optional: true, convert: true },
+      endTime: { type: 'number', optional: true, convert: true },
     },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       try {
@@ -791,7 +791,11 @@ const alerts = (star: Starlight) => ({
   'v1.alert-rules/create': {
     metadata: { auth: true },
     async handler(ctx: Context): Promise<HttpResponseItem> {
-      const payload = { ...(ctx.params || {}), id: `rule-${Date.now()}`, updatedAt: Date.now() };
+      const payload = {
+        ...(ctx.params || {}),
+        id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        updatedAt: Date.now(),
+      };
       const success = await saveAlertRule(this as any, payload);
       if (!success) {
         return {
@@ -842,6 +846,12 @@ const alerts = (star: Starlight) => ({
   },
   'v1.alert-rules/export': {
     metadata: { auth: true },
+    params: {
+      serviceId: { type: 'string', optional: true },
+      scope: { type: 'string', optional: true },
+      startTime: { type: 'number', optional: true, convert: true },
+      endTime: { type: 'number', optional: true, convert: true },
+    },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       const rules = await buildAlertRules(this as any, ctx.params || {});
       return {
@@ -941,8 +951,8 @@ const alerts = (star: Starlight) => ({
       status: { type: 'string', optional: true },
       serviceId: { type: 'string', optional: true },
       scope: { type: 'string', optional: true },
-      startTime: { type: 'number', optional: true },
-      endTime: { type: 'number', optional: true },
+      startTime: { type: 'number', optional: true, convert: true },
+      endTime: { type: 'number', optional: true, convert: true },
     },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       try {

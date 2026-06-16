@@ -19,7 +19,8 @@ const quota = (star: Starlight) => {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
           const { quotaType, amount } = ctx.params;
-          const userId = (ctx.meta as any).user?.userId;
+          const user = (ctx.meta as any).user;
+          const userId = user?.userId;
 
           if (!userId) {
             return {
@@ -131,7 +132,8 @@ const quota = (star: Starlight) => {
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const userId = (ctx.meta as any).user?.userId;
+          const user = (ctx.meta as any).user;
+          const userId = user?.userId;
 
           if (!userId) {
             return {
@@ -253,7 +255,8 @@ const quota = (star: Starlight) => {
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const userId = (ctx.meta as any).user?.userId;
+          const user = (ctx.meta as any).user;
+          const userId = user?.userId;
 
           if (!userId) {
             return {
@@ -263,6 +266,47 @@ const quota = (star: Starlight) => {
                 content: null,
                 message: '用户未认证',
                 success: false,
+              },
+            };
+          }
+
+          if (user?.isAdmin) {
+            const [plans, activeSubscriptions, trialSubscriptions] = await Promise.all([
+              (this as any).getAllPlans?.('CNY') || [],
+              (this as any).getSubscriptionsByStatus?.('active') || [],
+              (this as any).getTrialSubscriptions?.() || [],
+            ]);
+            const quotaTypes = ['maxAppKeys', 'maxMetricsPerMonth', 'maxCustomSchemas'];
+            const highestLimits = quotaTypes.map((quotaType) => {
+              const total = plans.reduce((max: number, plan: any) => {
+                const limit = Number(plan?.features?.[quotaType] ?? plan?.limits?.[quotaType] ?? 0);
+                return limit === -1 ? -1 : Math.max(max, Number.isFinite(limit) ? limit : 0);
+              }, 0);
+
+              return {
+                type: quotaType,
+                current: quotaType === 'maxAppKeys' ? activeSubscriptions.length : trialSubscriptions.length,
+                total,
+              };
+            });
+
+            return {
+              status: 200,
+              data: {
+                code: HttpResponseCode.Success,
+                content: {
+                  quotas: highestLimits,
+                  summary: {
+                    planName: 'admin-global',
+                    planDisplayName: '管理员全局视角',
+                    expiresAt: '—',
+                    activeSubscriptions: activeSubscriptions.length,
+                    trialUsers: trialSubscriptions.length,
+                    planCount: plans.length,
+                  },
+                },
+                message: '获取管理员用量摘要成功',
+                success: true,
               },
             };
           }

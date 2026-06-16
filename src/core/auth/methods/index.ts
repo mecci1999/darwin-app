@@ -196,7 +196,7 @@ const authMethods = (star: Star, state?: AuthState) => ({
     try {
       const existingKeys = await AuthUtils.getRSAKeys(state, star.logger);
       if (existingKeys?.publicKey && existingKeys?.privateKey) {
-        star.logger?.info('RSA密钥对已存在，跳过生成', existingKeys.privateKey);
+        star.logger?.info('RSA密钥对已存在，跳过生成');
         return;
       }
 

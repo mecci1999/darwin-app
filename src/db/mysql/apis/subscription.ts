@@ -146,6 +146,50 @@ export async function findUserSubscriptionHistory(
   }
 }
 
+export async function findUserSubscriptionsByStatus(
+  status: UserSubscriptionAttributes['status'],
+): Promise<UserSubscriptionAttributes[]> {
+  try {
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
+    if (!model) return [];
+
+    const subscriptions = await model.findAll({
+      where: { status },
+      order: [['createdAt', 'DESC']],
+    });
+
+    return subscriptions.map((sub) => sub.toJSON());
+  } catch (error) {
+    console.log('findUserSubscriptionsByStatus error:', error);
+    return [];
+  }
+}
+
+export async function findTrialUserSubscriptions(): Promise<UserSubscriptionAttributes[]> {
+  try {
+    const model = await mainConnection.getModel<UserSubscriptionTable>(
+      DataBaseTableNames.UserSubscription,
+    );
+    if (!model) return [];
+
+    const subscriptions = await model.findAll({
+      where: {
+        trialEndsAt: {
+          [mainConnection.Sequelize.Op.gt]: new Date(),
+        },
+      },
+      order: [['trialEndsAt', 'ASC']],
+    });
+
+    return subscriptions.map((sub) => sub.toJSON());
+  } catch (error) {
+    console.log('findTrialUserSubscriptions error:', error);
+    return [];
+  }
+}
+
 /**
  * 更新订阅状态
  */

@@ -22,6 +22,7 @@ import {
 } from '../metrics/constants';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
+import { instrumentServiceActions } from '../metrics/utils/action-metrics';
 
 const APP_NAME = 'metrics-compat';
 
@@ -224,7 +225,7 @@ function createMetricsCompatService() {
         );
       },
     },
-    actions: {
+    actions: instrumentServiceActions(star, APP_NAME, {
       'v1.realtime': {
         metadata: { auth: true },
         params: {
@@ -362,7 +363,7 @@ function createMetricsCompatService() {
           }
         },
       },
-    },
+    }),
   });
 
   return { star, compatService };

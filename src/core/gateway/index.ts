@@ -102,18 +102,6 @@ const emitGatewayTopologyMetric = async (
   const targetService = String(params.service || '').trim();
   if (!targetService || targetService === 'gateway') return;
 
-  star.logger?.info('Gateway topology metric emitting', {
-    sourceService: 'gateway',
-    targetService,
-    version: params.version,
-    action: params.action,
-    status: params.status,
-    durationMs: params.durationMs,
-    phase: params.phase,
-    userId: params.userId,
-    method: params.method,
-  });
-
   const payload = {
     type: 'observed',
     sourceService: 'gateway',
@@ -128,33 +116,52 @@ const emitGatewayTopologyMetric = async (
     timestamp: Date.now(),
   };
 
-  const emitTopologyObserved = typeof ctx.emit === 'function' ? ctx.emit.bind(ctx) : null;
-  if (!emitTopologyObserved) {
-    star.logger?.warn('Gateway topology metric emit unavailable', {
-      sourceService: payload.sourceService,
-      targetService: payload.targetService,
-      action: payload.action,
-      status: payload.status,
-    });
-    return;
-  }
-
   try {
-    await emitTopologyObserved('metrics.topology.observed', payload);
-    star.logger?.info('Gateway topology metric recorded', {
-      sourceService: payload.sourceService,
-      targetService: payload.targetService,
-      action: payload.action,
-      status: payload.status,
+    if (typeof ctx.call !== 'function') {
+      throw new Error('ctx.call unavailable');
+    }
+    const result = await ctx.call('metrics.v1.topology', {
+      ...payload,
+      scope: 'system',
+    }, {
+      meta: {
+        ...ctx.meta,
+        adminMetrics: true,
+      },
     });
+    if ((result as any)?.data?.success === false || (result as any)?.status >= 400) {
+      throw new Error(`metrics.v1.topology rejected observed metric: ${JSON.stringify((result as any)?.data || result)}`);
+    }
   } catch (error) {
-    star.logger?.error('Gateway topology metric record failed', {
+    star.logger?.warn('Gateway topology metric rpc failed, falling back to event emit', {
       sourceService: payload.sourceService,
       targetService: payload.targetService,
       action: payload.action,
       status: payload.status,
       error: error instanceof Error ? error.message : String(error),
     });
+    const emitTopologyObserved = typeof ctx.emit === 'function' ? ctx.emit.bind(ctx) : null;
+    if (!emitTopologyObserved) {
+      star.logger?.warn('Gateway topology metric emit unavailable', {
+        sourceService: payload.sourceService,
+        targetService: payload.targetService,
+        action: payload.action,
+        status: payload.status,
+      });
+      return;
+    }
+
+    try {
+      await emitTopologyObserved('metrics.topology.observed', payload);
+    } catch (emitError) {
+      star.logger?.error('Gateway topology metric record failed', {
+        sourceService: payload.sourceService,
+        targetService: payload.targetService,
+        action: payload.action,
+        status: payload.status,
+        error: emitError instanceof Error ? emitError.message : String(emitError),
+      });
+    }
   }
 };
 
@@ -260,6 +267,23 @@ const remapSubscriptionRoute = (rawService: string, rawAction: string, rawParams
   return { service, action, params };
 };
 
+const normalizeGatewayRouteParams = (req: IncomingRequest) => {
+  const originalUrl = String(req.originalUrl || '');
+  const rawPath = originalUrl.split('?')[0] || '';
+  const apiPath = rawPath.startsWith('/api/') ? rawPath.slice('/api/'.length) : rawPath.replace(/^\//, '');
+  const segments = apiPath.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+
+  if (segments.length < 3) return req.$params;
+
+  return {
+    ...req.$params,
+    routeService: segments[0],
+    service: segments[0],
+    version: segments[1],
+    action: segments.slice(2).join('/'),
+  };
+};
+
 let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
 
 // 主应用初始化
@@ -350,7 +374,15 @@ async function initializeGatewayService() {
           'asset://localhost',
         ],
         methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
+        allowedHeaders: [
+          'Content-Type',
+          'Authorization',
+          'Cache-Control',
+          'X-Api-Key',
+          'X-App-Key',
+          'X-Tenant-Id',
+          'X-Starlight-Tenant',
+        ],
         // exposedHeaders: '*',
         credentials: true,
         maxAge: null,
@@ -361,6 +393,8 @@ async function initializeGatewayService() {
         headers: true,
       },
       path: '/api',
+      requestTimeout: 0,
+      httpServerTimeout: 0,
       routes: [
         // 健康检查路由
         {
@@ -397,18 +431,21 @@ async function initializeGatewayService() {
               (ctx.meta as any).req = { ...(ctx.meta as any).req, ip: req.socket.remoteAddress };
             }
 
-            if (INTERNAL_ONLY_SERVICES.has(String(req.$params.service || ''))) {
-              throw createInternalServiceAccessError(String(req.$params.service));
+            const routeParams = normalizeGatewayRouteParams(req);
+            req.$params = routeParams;
+
+            if (INTERNAL_ONLY_SERVICES.has(String(routeParams.service || ''))) {
+              throw createInternalServiceAccessError(String(routeParams.service));
             }
 
             const actions = star.registry?.actions.list() || [];
             const normalizedVersion =
-              req.$params.version === '1' ? 'v1' : String(req.$params.version || '');
+              routeParams.version === '1' ? 'v1' : String(routeParams.version || '');
             const remappedMetrics = remapMetricsRoute(
-              req.$params.service,
-              req.$params.version,
-              req.$params.action || '',
-              req.$params || {},
+              routeParams.service,
+              routeParams.version,
+              routeParams.action || '',
+              routeParams || {},
             );
             const remapped = remapSubscriptionRoute(
               remappedMetrics.service,
@@ -512,19 +549,22 @@ async function initializeGatewayService() {
             }
 
             // 禁止直接通过公网访问内部拆分服务
-            if (INTERNAL_ONLY_SERVICES.has(String(req.$params.service || ''))) {
-              throw createInternalServiceAccessError(String(req.$params.service));
+            const routeParams = normalizeGatewayRouteParams(req);
+            req.$params = routeParams;
+
+            if (INTERNAL_ONLY_SERVICES.has(String(routeParams.service || ''))) {
+              throw createInternalServiceAccessError(String(routeParams.service));
             }
 
             // 认证处理
             const actions = star.registry?.actions.list() || [];
             const normalizedVersion =
-              req.$params.version === '1' ? 'v1' : String(req.$params.version || '');
+              routeParams.version === '1' ? 'v1' : String(routeParams.version || '');
             const remappedMetrics = remapMetricsRoute(
-              req.$params.service,
-              req.$params.version,
-              req.$params.action || '',
-              req.$params || {},
+              routeParams.service,
+              routeParams.version,
+              routeParams.action || '',
+              routeParams || {},
             );
             const remapped = remapSubscriptionRoute(
               remappedMetrics.service,
@@ -688,6 +728,18 @@ async function initializeGatewayService() {
           const dispatchStartedAt = Date.now();
           const userId = (ctx.meta as any)?.user?.userId;
           const method = (ctx.meta as any)?.req?.method;
+          const isLogStreamDispatch = service === 'logs' && version === 'v1' && action === 'stream';
+          if (isLogStreamDispatch) {
+            star.logger?.info('Gateway log stream dispatch start', {
+              streamTraceId: (params as any)?.streamTraceId,
+              targetActionName,
+              method,
+              userId,
+              originType: (params as any)?.originType,
+              serviceFilter: (params as any)?.service,
+              level: (params as any)?.level,
+            });
+          }
           const shouldRecordBeforeDispatch = !shouldSkipTopologyObservation(service, action, params);
 
           if (shouldRecordBeforeDispatch) {
@@ -705,6 +757,16 @@ async function initializeGatewayService() {
 
           return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta })
             .then((result) => {
+              if (isLogStreamDispatch) {
+                star.logger?.info('Gateway log stream dispatch result', {
+                  streamTraceId: (params as any)?.streamTraceId,
+                  durationMs: Date.now() - dispatchStartedAt,
+                  resultType: result?.constructor?.name || typeof result,
+                  hasPipe: typeof (result as any)?.pipe === 'function',
+                  readable: Boolean((result as any)?.readable),
+                  destroyed: Boolean((result as any)?.destroyed),
+                });
+              }
               if (!shouldSkipTopologyObservation(service, action, params)) {
                 void emitGatewayTopologyMetric(ctx, star, {
                   service,
@@ -726,6 +788,13 @@ async function initializeGatewayService() {
               return result;
             })
             .catch((error) => {
+              if (isLogStreamDispatch) {
+                star.logger?.error('Gateway log stream dispatch failed', {
+                  streamTraceId: (params as any)?.streamTraceId,
+                  durationMs: Date.now() - dispatchStartedAt,
+                  error: error?.message || String(error),
+                });
+              }
               if (!shouldSkipTopologyObservation(service, action, params)) {
                 void emitGatewayTopologyMetric(ctx, star, {
                   service,
@@ -841,6 +910,7 @@ async function initializeGatewayService() {
 
     async started() {
       try {
+        wsManager?.initWebSocketServer();
         star.logger?.info('WebSocket server initialized successfully');
       } catch (error) {
         star.logger?.error('Failed to initialize WebSocket server:', error);

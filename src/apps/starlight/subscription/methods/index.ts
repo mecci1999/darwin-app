@@ -10,12 +10,15 @@ import { Starlight } from 'typings';
 import {
   findBillById,
   findBillItemsByBillId,
+  findBillsByStatus,
   findBillsByUserId,
   getUserBillingStats,
 } from 'db/mysql/apis/billing';
 import {
   createUserSubscription,
   findUserSubscriptionHistory,
+  findUserSubscriptionsByStatus,
+  findTrialUserSubscriptions,
   updateUserSubscription,
 } from 'db/mysql/apis/subscription';
 import {
@@ -164,6 +167,24 @@ export function createMethods(star: Starlight) {
       } catch (error) {
         star.logger?.error('Failed to get user current usage:', error);
         return null;
+      }
+    },
+
+    async getSubscriptionsByStatus(status: string) {
+      try {
+        return await findUserSubscriptionsByStatus(status as any);
+      } catch (error) {
+        star.logger?.error('Failed to get subscriptions by status:', error);
+        return [];
+      }
+    },
+
+    async getTrialSubscriptions() {
+      try {
+        return await findTrialUserSubscriptions();
+      } catch (error) {
+        star.logger?.error('Failed to get trial subscriptions:', error);
+        return [];
       }
     },
 
@@ -628,6 +649,22 @@ export function createMethods(star: Starlight) {
             overdueAmount: 0,
           },
         };
+      }
+    },
+
+    async getBillsByStatus(status: string) {
+      try {
+        if (status === 'pending') {
+          const [draftBills, sentBills] = await Promise.all([
+            findBillsByStatus('draft'),
+            findBillsByStatus('sent'),
+          ]);
+          return [...draftBills, ...sentBills];
+        }
+        return await findBillsByStatus(status);
+      } catch (error) {
+        star.logger?.error('Failed to get bills by status:', error);
+        return [];
       }
     },
 

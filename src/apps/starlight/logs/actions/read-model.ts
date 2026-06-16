@@ -8,6 +8,21 @@ import {
   flushDarwinLogCaptureNow,
 } from '../utils/darwin-log-capture';
 import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
+import { getLogServiceFilter } from '../utils/log-service-filter';
+
+const summarizeExplorerServices = (logs: any[]) => logs.reduce<Record<string, number>>((acc, log) => {
+  const service = String(log?.service || 'unknown');
+  acc[service] = (acc[service] || 0) + 1;
+  return acc;
+}, {});
+
+const flushDarwinCaptureInBackground = (star: Starlight) => {
+  void flushDarwinLogCaptureNow().catch((error) => {
+    star.logger?.warn('Darwin log capture background flush failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+};
 
 const toTraceSpan = (log: any) => ({
   id: log.id,
@@ -22,6 +37,18 @@ const toTraceSpan = (log: any) => ({
 });
 
 export default function readModel(star: Starlight) {
+  const logsNodeID = `logs-${process.env.NODE_ENV || 'development'}`;
+  const getDefaultDarwinExcludeServices = (originType?: string, service?: unknown) => {
+    if (!isDarwinLogRequest(originType)) return undefined;
+    if (typeof service === 'string' && service.trim()) return undefined;
+    return ['logs'];
+  };
+  const getDefaultDarwinExcludeNodeIDs = (originType?: string, service?: unknown) => {
+    if (!isDarwinLogRequest(originType)) return undefined;
+    if (typeof service === 'string' && service.trim()) return undefined;
+    return [logsNodeID];
+  };
+
   const deriveTimeRange = (params: any) => {
     if (params?.timeRange && typeof params.timeRange === 'string') return params.timeRange;
     const startTime = params?.startTime ? new Date(params.startTime).getTime() : 0;
@@ -38,7 +65,8 @@ export default function readModel(star: Starlight) {
   const normalizeDateParam = (value: unknown) => {
     if (!value) return undefined;
 
-    const normalized = new Date(value as string | number | Date);
+    const dateValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    const normalized = new Date(dateValue as string | number | Date);
     if (Number.isNaN(normalized.getTime())) return undefined;
 
     return normalized.toISOString();
@@ -67,16 +95,22 @@ export default function readModel(star: Starlight) {
             };
           }
           if (isDarwinLogRequest(originType)) {
-            await flushDarwinLogCaptureNow();
+            flushDarwinCaptureInBackground(star);
           }
+          const logService = getLogServiceFilter(ctx.params);
           const searchParams = {
             ...ctx.params,
+            service: logService,
             query: (ctx.params as any)?.query || (ctx.params as any)?.keyword,
+            startTime: normalizeDateParam((ctx.params as any)?.startTime),
+            endTime: normalizeDateParam((ctx.params as any)?.endTime),
             tenantId,
             apiKey: apiKey || 'tenant-authenticated',
             userId: (ctx.meta as any)?.userId,
             limit: Number((ctx.params as any)?.limit || (ctx.params as any)?.pageSize || 50),
             visibility: originType === 'darwin-app' ? 'admin' : undefined,
+            excludeServices: (ctx.params as any)?.excludeServices || getDefaultDarwinExcludeServices(originType, logService),
+            excludeNodeIDs: (ctx.params as any)?.excludeNodeIDs || getDefaultDarwinExcludeNodeIDs(originType, logService),
           };
           const validation = validateLogSearch(searchParams);
           if (!validation.valid) {
@@ -106,6 +140,19 @@ export default function readModel(star: Starlight) {
             apiKey,
             searchParams,
           });
+          if (isDarwinLogRequest(originType)) {
+            star.logger?.info('Darwin explorer search checkpoint', {
+              tenantId,
+              limit: searchParams.limit,
+              page: (ctx.params as any)?.page || 1,
+              excludeServices: searchParams.excludeServices,
+              excludeNodeIDs: searchParams.excludeNodeIDs,
+              returned: result.logs?.length || 0,
+              total: result.total || 0,
+              services: summarizeExplorerServices(result.logs || []),
+              hasGateway: Boolean(result.logs?.some((log: any) => log.service === 'gateway' || log.svc === 'gateway')),
+            });
+          }
 
           return {
             status: HttpStatusCode.OK,
@@ -170,8 +217,13 @@ export default function readModel(star: Starlight) {
               },
             };
           }
+          if (isDarwinLogRequest(originType)) {
+            flushDarwinCaptureInBackground(star);
+          }
+          const logService = getLogServiceFilter(ctx.params);
           const statsParams = {
             ...ctx.params,
+            service: logService,
             startTime: normalizeDateParam((ctx.params as any)?.startTime),
             endTime: normalizeDateParam((ctx.params as any)?.endTime),
             timeRange: deriveTimeRange(ctx.params),
@@ -179,6 +231,7 @@ export default function readModel(star: Starlight) {
             apiKey: apiKey || 'tenant-authenticated',
             originType,
             visibility: originType === 'darwin-app' ? 'admin' : undefined,
+            excludeNodeIDs: (ctx.params as any)?.excludeNodeIDs || getDefaultDarwinExcludeNodeIDs(originType, logService),
           } as any;
           const validation = validateLogStats(statsParams);
           if (!validation.valid) {
@@ -320,13 +373,26 @@ export default function readModel(star: Starlight) {
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const tenantId = (ctx.meta as any)?.tenantId;
-          const apiKey = (ctx.params as any)?.apiKey;
+          const originType = (ctx.params as any)?.originType;
+          const tenantId = resolveLogTenantId(ctx, originType);
+          const apiKey = (ctx.params as any)?.apiKey || (isDarwinLogRequest(originType) ? 'system-admin' : undefined);
           const queryParts = [] as string[];
           if ((ctx.params as any)?.service) queryParts.push(`service:"${(ctx.params as any).service}"`);
           if ((ctx.params as any)?.operation) queryParts.push(`message:"${(ctx.params as any).operation}"`);
           if ((ctx.params as any)?.traceId) queryParts.push(`traceId:"${(ctx.params as any).traceId}"`);
           const query = queryParts.join(' AND ') || '*';
+
+          if (!tenantId) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: 'tenantId is required',
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
 
           const result = await searchLogs(ctx, {
             tenantId,
@@ -335,12 +401,11 @@ export default function readModel(star: Starlight) {
               query,
               service: (ctx.params as any)?.service,
               traceId: (ctx.params as any)?.traceId,
-              startTime: (ctx.params as any)?.startTime
-                ? new Date((ctx.params as any).startTime).toISOString()
-                : undefined,
-              endTime: (ctx.params as any)?.endTime
-                ? new Date((ctx.params as any).endTime).toISOString()
-                : undefined,
+              startTime: normalizeDateParam((ctx.params as any)?.startTime),
+              endTime: normalizeDateParam((ctx.params as any)?.endTime),
+              limit: Number((ctx.params as any)?.limit || 100),
+              originType,
+              visibility: originType === 'darwin-app' ? 'admin' : undefined,
             } as any,
           });
 
@@ -388,9 +453,22 @@ export default function readModel(star: Starlight) {
       },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         try {
-          const tenantId = (ctx.meta as any)?.tenantId;
-          const apiKey = (ctx.params as any)?.apiKey;
+          const originType = (ctx.params as any)?.originType;
+          const tenantId = resolveLogTenantId(ctx, originType);
+          const apiKey = (ctx.params as any)?.apiKey || (isDarwinLogRequest(originType) ? 'system-admin' : undefined);
           const traceId = (ctx.params as any).traceId;
+
+          if (!tenantId) {
+            return {
+              status: HttpStatusCode.BAD_REQUEST,
+              data: {
+                content: null,
+                message: 'tenantId is required',
+                code: HttpResponseCode.ParamsError,
+                success: false,
+              },
+            };
+          }
 
           const result = await searchLogs(ctx, {
             tenantId,
@@ -400,6 +478,9 @@ export default function readModel(star: Starlight) {
               traceId,
               startTime: normalizeDateParam((ctx.params as any)?.startTime),
               endTime: normalizeDateParam((ctx.params as any)?.endTime),
+              limit: Number((ctx.params as any)?.limit || 200),
+              originType,
+              visibility: originType === 'darwin-app' ? 'admin' : undefined,
             } as any,
           });
 

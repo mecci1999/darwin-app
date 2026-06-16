@@ -2,6 +2,7 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 'typings';
 import { VideoState } from '../types';
 import { createVideoUpscaleTask, readTaskOutputAsDataUrl } from '../utils/video-upscale-worker';
+import { instrumentServiceActions } from '../../metrics/utils/action-metrics';
 
 const success = (content: any, message: string): HttpResponseItem => ({
   status: HttpStatusCode.OK,
@@ -24,7 +25,7 @@ const failure = (message: string, status = HttpStatusCode.BAD_REQUEST): HttpResp
 });
 
 export default function videoActions(star: Starlight, state: VideoState) {
-  return {
+  return instrumentServiceActions(star, 'video', {
     'v1.upscale.tasks': {
       metadata: { auth: true, roles: ['admin', 'user'] },
       timeout: 0,
@@ -68,5 +69,5 @@ export default function videoActions(star: Starlight, state: VideoState) {
         }
       },
     },
-  };
+  });
 }

@@ -5,10 +5,12 @@ import { HttpResponseCode, HttpResponseItem, HttpStatusCode, Starlight } from 't
 import { LogStreamEvent } from '../types';
 import { validateLogStream } from '../validators';
 import { isAdminContext, isDarwinLogRequest, resolveLogTenantId } from '../utils/access-control';
+import { getLogServiceFilter } from '../utils/log-service-filter';
 
 // 全局活跃流存储
 let _activeStreams: Map<string, any> | undefined;
 let _cleanupInterval: NodeJS.Timeout | undefined;
+const STREAM_DIAGNOSTIC_INTERVAL_MS = 10000;
 initializeCleanup();
 
 export default function stream(star: Starlight) {
@@ -18,15 +20,29 @@ export default function stream(star: Starlight) {
         auth: true,
         roles: ['admin', 'user'],
       },
+      timeout: 0,
 
       async handler(ctx: Context): Promise<HttpResponseItem> {
-        const { service, level, keywords, originType } = ctx.params;
+        const { level, keywords, originType, streamTraceId } = ctx.params;
+        const service = getLogServiceFilter(ctx.params);
         const apiKey = (ctx.meta as any)?.apiKey;
         const tenantId = resolveLogTenantId(ctx, originType);
+        const traceId = String(streamTraceId || `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
         try {
+          star.logger?.info('Log stream request received', {
+            traceId,
+            tenantId,
+            service,
+            level,
+            keywords: keywords ? '[present]' : undefined,
+            originType,
+            userId: (ctx.meta as any)?.user?.userId,
+          });
+
           // 验证流式传输参数
           if (isDarwinLogRequest(originType) && !isAdminContext(ctx)) {
+            star.logger?.warn('Log stream rejected: Darwin logs require admin', { traceId, tenantId, originType });
             return {
               status: HttpStatusCode.FORBIDDEN,
               data: {
@@ -40,6 +56,7 @@ export default function stream(star: Starlight) {
 
           const validation = validateLogStream({ service, level, keywords, tenantId, originType });
           if (!validation.valid) {
+            star.logger?.warn('Log stream rejected: validation failed', { traceId, errors: validation.errors });
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
@@ -52,6 +69,7 @@ export default function stream(star: Starlight) {
           }
 
           if (!tenantId) {
+            star.logger?.warn('Log stream rejected: missing tenantId', { traceId, originType });
             return {
               status: HttpStatusCode.BAD_REQUEST,
               data: {
@@ -77,11 +95,26 @@ export default function stream(star: Starlight) {
             'Access-Control-Allow-Headers': 'Cache-Control, Content-Type',
             Vary: 'Origin',
           };
+          star.logger?.info('Log stream response headers prepared', {
+            traceId,
+            contentType: (ctx.meta as any).$responseHeaders['Content-Type'],
+            requestOrigin: requestOrigin || null,
+          });
 
           // 创建流连接
           const streamId = generateStreamId(tenantId, apiKey?.id);
           const responseStream = new PassThrough();
-          const stream = createLogStream(streamId, { service, level, keywords, tenantId, originType, responseStream });
+          const stream = createLogStream(streamId, { service, level, keywords, tenantId, originType, responseStream, traceId, logger: star.logger });
+
+          responseStream.on('close', () => {
+            star.logger?.info('Log stream PassThrough close', { traceId, streamId, destroyed: responseStream.destroyed });
+          });
+          responseStream.on('end', () => {
+            star.logger?.info('Log stream PassThrough end', { traceId, streamId });
+          });
+          responseStream.on('error', (error) => {
+            star.logger?.error('Log stream PassThrough error', { traceId, streamId, error: error?.message || String(error) });
+          });
 
           // 发送连接成功事件
           const connectEvent: LogStreamEvent = {
@@ -90,13 +123,20 @@ export default function stream(star: Starlight) {
             timestamp: new Date().toISOString(),
           };
 
-          sendStreamEvent(responseStream, connectEvent);
+          sendStreamEvent(responseStream, connectEvent, traceId, 'connect');
+          star.logger?.info('Log stream initial connected event written', {
+            traceId,
+            streamId,
+            writableLength: responseStream.writableLength,
+            readableLength: responseStream.readableLength,
+          });
 
           // 注册流监听器
           registerStreamListeners(stream, responseStream, { service, level, keywords, tenantId, originType });
 
           // 记录流连接
           star.logger?.info('Log stream connected', {
+            traceId,
             streamId,
             tenantId,
             service,
@@ -107,7 +147,8 @@ export default function stream(star: Starlight) {
           // 保持连接活跃
           const heartbeatInterval = setInterval(() => {
             if (!responseStream.destroyed) {
-              sendHeartbeat(responseStream);
+              star.logger?.info('Log stream heartbeat tick', { traceId, streamId });
+              sendHeartbeat(responseStream, traceId);
             } else {
               clearInterval(heartbeatInterval);
               cleanupStream(streamId);
@@ -119,6 +160,7 @@ export default function stream(star: Starlight) {
             clearInterval(heartbeatInterval);
             cleanupStream(streamId);
             star.logger?.info('Log stream disconnected', {
+              traceId,
               streamId,
               tenantId,
             });
@@ -127,6 +169,7 @@ export default function stream(star: Starlight) {
           return responseStream as any;
         } catch (error: any) {
           star.logger?.error('Log stream creation failed', {
+            traceId,
             error: error.message,
             tenantId,
             service,
@@ -158,7 +201,7 @@ function generateStreamId(tenantId: string, apiKeyId?: string): string {
 // 创建日志流
 function createLogStream(
   streamId: string,
-    filters: { service?: string; level?: string; keywords?: string; tenantId: string; originType?: string; responseStream?: PassThrough },
+    filters: { service?: string; level?: string; keywords?: string; tenantId: string; originType?: string; responseStream?: PassThrough; traceId?: string; logger?: any },
 ) {
   const stream = new EventEmitter();
 
@@ -167,11 +210,31 @@ function createLogStream(
     _activeStreams = new Map();
   }
 
-  _activeStreams.set(streamId, {
+  const diagnostics = {
+    attempted: 0,
+    emitted: 0,
+    forwarded: 0,
+    filtered: 0,
+    written: 0,
+    bytes: 0,
+    lastLoggedAt: 0,
+  };
+
+  const streamInfo = {
     stream,
-    filters,
+    filters: { ...filters, diagnostics },
     createdAt: Date.now(),
     lastActivity: Date.now(),
+    diagnostics,
+  };
+
+  _activeStreams.set(streamId, streamInfo);
+  filters.logger?.info?.('Log stream registered', {
+    traceId: filters.traceId,
+    streamId,
+    tenantId: filters.tenantId,
+    originType: filters.originType,
+    activeStreams: _activeStreams.size,
   });
 
   return stream;
@@ -181,13 +244,26 @@ function createLogStream(
 function registerStreamListeners(stream: EventEmitter, responseStream: PassThrough, filters: any) {
   stream.on('broadcast', (event: LogStreamEvent) => {
     if (event?.type === 'log' && event.data && shouldForwardToStream(event.data, filters)) {
-      sendStreamEvent(responseStream, event);
+      const bytes = sendStreamEvent(responseStream, event, filters.traceId, 'broadcast');
+      filters.diagnostics.forwarded++;
+      if (bytes > 0) {
+        filters.diagnostics.written++;
+        filters.diagnostics.bytes += bytes;
+      }
       return;
     }
 
     if (event?.type === 'error') {
-      sendStreamEvent(responseStream, event);
+      const bytes = sendStreamEvent(responseStream, event, filters.traceId, 'error');
+      filters.diagnostics.forwarded++;
+      if (bytes > 0) {
+        filters.diagnostics.written++;
+        filters.diagnostics.bytes += bytes;
+      }
+      return;
     }
+
+    filters.diagnostics.filtered++;
   });
 }
 
@@ -227,26 +303,30 @@ function shouldForwardToStream(
 }
 
 // 发送流事件
-function sendStreamEvent(responseStream: PassThrough, event: LogStreamEvent) {
+function sendStreamEvent(responseStream: PassThrough, event: LogStreamEvent, traceId?: string, reason?: string): number {
   try {
     if (!responseStream.destroyed) {
       const eventData = `data: ${JSON.stringify(event)}\n\n`;
       responseStream.write(eventData);
+      return Buffer.byteLength(eventData);
+    } else {
+      console.warn('Log stream SSE event skipped because response stream is destroyed', { traceId, type: event.type });
     }
   } catch (error: any) {
-    console.log('Failed to send stream event', { error: error.message });
+    console.warn('Failed to send stream event', { traceId, reason, error: error.message });
   }
+  return 0;
 }
 
 // 发送心跳
-function sendHeartbeat(responseStream: PassThrough) {
+function sendHeartbeat(responseStream: PassThrough, traceId?: string) {
   const heartbeatEvent: LogStreamEvent = {
     type: 'connected',
     data: 'heartbeat',
     timestamp: new Date().toISOString(),
   };
 
-  sendStreamEvent(responseStream, heartbeatEvent);
+  sendStreamEvent(responseStream, heartbeatEvent, traceId, 'heartbeat');
 }
 
 // 清理流
@@ -255,7 +335,44 @@ function cleanupStream(streamId: string) {
     const streamInfo = _activeStreams.get(streamId);
     streamInfo.stream.removeAllListeners();
     _activeStreams.delete(streamId);
+    streamInfo.filters?.logger?.info?.('Log stream cleaned up', {
+      traceId: streamInfo.filters?.traceId,
+      streamId,
+      activeStreams: _activeStreams.size,
+      diagnostics: streamInfo.diagnostics,
+    });
   }
+}
+
+function shouldSkipSelfStreamLog(message: any) {
+  const service = String(message?.service || message?.svc || message?.mod || '').toLowerCase();
+  if (service !== 'logs') return false;
+  const text = String(message?.message || '');
+  return (
+    text.includes('Log stream') ||
+    text.includes('Darwin explorer search checkpoint') ||
+    text.includes('Darwin log search storage checkpoint')
+  );
+}
+
+function maybeLogStreamDiagnostics(streamId: string, streamInfo: any) {
+  const diagnostics = streamInfo.diagnostics;
+  if (!diagnostics) return;
+  const now = Date.now();
+  if (now - diagnostics.lastLoggedAt < STREAM_DIAGNOSTIC_INTERVAL_MS) return;
+  diagnostics.lastLoggedAt = now;
+  streamInfo.filters?.logger?.info?.('Log stream forwarding checkpoint', {
+    traceId: streamInfo.filters?.traceId,
+    streamId,
+    tenantId: streamInfo.filters?.tenantId,
+    originType: streamInfo.filters?.originType,
+    activeStreams: _activeStreams?.size || 0,
+    attempted: diagnostics.attempted,
+    forwarded: diagnostics.forwarded,
+    filtered: diagnostics.filtered,
+    written: diagnostics.written,
+    bytes: diagnostics.bytes,
+  });
 }
 
 // 创建流响应
@@ -318,7 +435,11 @@ function cleanupExpiredStreams() {
 
 // 广播消息到所有流
 export function broadcastToStreams(message: any, tenantId?: string) {
-  if (!_activeStreams) return;
+  if (!_activeStreams) {
+    return;
+  }
+
+  if (shouldSkipSelfStreamLog(message)) return;
 
   const event: LogStreamEvent = {
     type: 'log',
@@ -326,10 +447,17 @@ export function broadcastToStreams(message: any, tenantId?: string) {
     timestamp: new Date().toISOString(),
   };
 
+  let matched = 0;
   for (const [streamId, streamInfo] of _activeStreams) {
+    streamInfo.diagnostics.attempted++;
     if (!tenantId || streamInfo.filters.tenantId === tenantId) {
+      matched++;
+      streamInfo.diagnostics.emitted++;
       streamInfo.stream.emit('broadcast', event);
+    } else {
+      streamInfo.diagnostics.filtered++;
     }
+    maybeLogStreamDiagnostics(streamId, streamInfo);
   }
 }
 

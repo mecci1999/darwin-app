@@ -71,7 +71,7 @@ const buildServiceFilter = (serviceId?: string) => {
   if (!normalized) return '';
   const systemId = `system:${normalized}`;
   const nodePrefix = escapeFluxRegex(normalized);
-  return `|> filter(fn: (r) => (exists r.service and r.service == "${normalized}") or (exists r.serviceId and (r.serviceId == "${normalized}" or r.serviceId == "${systemId}")) or (exists r["service.name"] and r["service.name"] == "${normalized}") or (exists r["service.id"] and (r["service.id"] == "${normalized}" or r["service.id"] == "${systemId}")) or (exists r.nodeID and string(v: r.nodeID) =~ /^${nodePrefix}/) or (exists r.nodeId and string(v: r.nodeId) =~ /^${nodePrefix}/))`;
+  return `|> filter(fn: (r) => (exists r.target_service and r.target_service == "${normalized}") or (exists r.targetService and r.targetService == "${normalized}") or (exists r.destination_service and r.destination_service == "${normalized}") or (exists r.peer_service and r.peer_service == "${normalized}") or (exists r.service and r.service == "${normalized}") or (exists r.serviceId and (r.serviceId == "${normalized}" or r.serviceId == "${systemId}")) or (exists r["service.name"] and r["service.name"] == "${normalized}") or (exists r["service.id"] and (r["service.id"] == "${normalized}" or r["service.id"] == "${systemId}")) or (exists r.nodeID and string(v: r.nodeID) =~ /^${nodePrefix}/) or (exists r.nodeId and string(v: r.nodeId) =~ /^${nodePrefix}/))`;
 };
 
 const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2)) =>
@@ -95,6 +95,13 @@ const numberOrNull = (value: unknown, digits = 2) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return toFixed(value, digits);
 };
+
+const roundedNumberOrNull = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.round(value);
+};
+
+const qpsNumberOrNull = (value: unknown) => numberOrNull(value, 2);
 
 const buildSystemSeries = async (
   field: string,
@@ -442,6 +449,7 @@ const buildServiceDetailContent = async (
   const [
     servicesResult,
     instances,
+    alerts,
     cpuSeries,
     memorySeries,
     qpsSeries,
@@ -450,6 +458,7 @@ const buildServiceDetailContent = async (
   ] = await Promise.all([
     serviceContext.getServicesList({ page: 1, pageSize: 200, scope }),
     serviceContext.getInstancesList({ serviceId, scope }),
+    buildAlerts(serviceContext, { scope, serviceId }),
     buildSystemSeries('cpu_usage', timeRange || '-1h', interval, serviceId, star),
     buildSystemSeries('memory_usage', timeRange || '-1h', interval, serviceId, star, normalizeRssMemoryValue),
     buildQpsSeries(timeRange || '-1h', interval, serviceId, star),
@@ -468,6 +477,9 @@ const buildServiceDetailContent = async (
   const qpsAverage = getSeriesAverage(qpsSeries as any);
   const durationAverage = getSeriesAverage(durationSeries as any);
   const activeAverage = getSeriesAverage(activeRequestSeries as any);
+  const activeIncidentCount = Array.isArray(alerts)
+    ? alerts.filter((alert: any) => alert.status === 'active').length
+    : 0;
 
   return {
     identity: {
@@ -482,11 +494,14 @@ const buildServiceDetailContent = async (
     },
     summary: {
       instances: Array.isArray(instances) ? instances.length : Number(service.instances || 0),
-      qps: qpsAverage ?? numberOrNull(service.qps, 4) ?? 0,
-      responseTime: Math.round(
-        Number(durationAverage ?? service.latency ?? 0),
-      ),
-      errorRate: toFixed(Number(service.errorRate || 0), 2),
+      qps: qpsAverage ?? numberOrNull(service.qps, 4),
+      responseTime:
+        durationAverage !== null || typeof service.latency === 'number'
+          ? Math.round(Number(durationAverage ?? service.latency))
+          : null,
+      p95Latency: typeof service.latency === 'number' ? Math.round(Number(service.latency)) : null,
+      errorRate: numberOrNull(service.errorRate, 2),
+      activeIncidentCount,
       cpu: cpuAverage,
       memory: memoryAverage,
       activeConnections: activeAverage === null ? null : Math.round(Number(activeAverage)),
@@ -529,11 +544,17 @@ const buildCatalogServicesContent = async (
     scope,
     total: servicesResult?.total,
     page: servicesResult?.page,
-    ids: services.map((service: any) => service.id),
+    items: services.slice(0, 8).map((service: any) => ({
+      id: service.id,
+      name: service.name,
+      qps: service.qps,
+      p95Latency: service.latency,
+      errorRate: service.errorRate,
+      activeIncidentCount: activeIncidentMap.get(service.id) || 0,
+    })),
   });
 
-  return {
-    items: services.map((service: any) => ({
+  const items = services.map((service: any) => ({
       identity: {
         id: service.id,
         name: service.name,
@@ -547,12 +568,29 @@ const buildCatalogServicesContent = async (
         healthStatus: service.health,
       },
       instanceCount: Number(service.instances || 0),
-      qps: Math.round(Number(service.qps || 0)),
-      errorRate: toFixed(Number(service.errorRate || 0), 2),
-      p95Latency: Math.round(Number(service.latency || 0)),
+      qps: qpsNumberOrNull(service.qps),
+      errorRate: numberOrNull(service.errorRate, 2),
+      p95Latency: roundedNumberOrNull(service.latency),
       activeIncidentCount: activeIncidentMap.get(service.id) || 0,
+      metricStatus: service.metricStatus,
+      runtimeMetrics: service.runtimeMetrics,
       lastDeployAt: service.lastDeploy || null,
+    }));
+
+  serviceContext.logger?.info?.('metrics.catalog.services:response-items', {
+    scope,
+    items: items.slice(0, 8).map((item: any) => ({
+      id: item.identity?.id,
+      name: item.identity?.name,
+      qps: item.qps,
+      p95Latency: item.p95Latency,
+      errorRate: item.errorRate,
+      activeIncidentCount: item.activeIncidentCount,
     })),
+  });
+
+  return {
+    items,
     pagination: {
       page: Number(servicesResult?.page || params?.page || 1),
       pageSize: Number(params?.pageSize || 20),
@@ -660,10 +698,12 @@ const buildCatalogServiceQuickViewContent = async (
       healthStatus: service.health,
     },
     redSummary: {
-      qps: Math.round(Number(service.qps || 0)),
-      errorRate: toFixed(Number(service.errorRate || 0), 2),
-      p95Latency: Math.round(Number(service.latency || 0)),
+      qps: qpsNumberOrNull(service.qps),
+      errorRate: numberOrNull(service.errorRate, 2),
+      p95Latency: roundedNumberOrNull(service.latency),
     },
+    metricStatus: service.metricStatus,
+    runtimeMetrics: service.runtimeMetrics,
     activeIncidentCount: alerts.filter((alert: any) => alert.status === 'active').length,
     instanceCount: Number(service.instances || 0),
   };
@@ -772,9 +812,10 @@ const buildServiceRuntimeContent = async (
 const buildMetricsExplorerContent = async (
   ctx: Context,
   star: Starlight,
+  serviceContext: any,
   scope: 'tenant' | 'system',
 ) => {
-  const servicesResult = await (ctx as any).getServicesList({ page: 1, pageSize: 50, scope });
+  const servicesResult = await serviceContext.getServicesList({ page: 1, pageSize: 50, scope });
   const services = Array.isArray(servicesResult?.services) ? servicesResult.services : [];
   const timeRange = ctx.params?.timeRange || '-6h';
   if (scope !== 'system') {
@@ -1425,7 +1466,7 @@ const realtime = (star: Starlight) => ({
           return createSystemScopeForbidden();
         }
         const scope = normalizeMetricsScope(ctx.params?.scope);
-        const content = await buildMetricsExplorerContent(ctx, star, scope);
+        const content = await buildMetricsExplorerContent(ctx, star, this as any, scope);
 
         return {
           status: 200,

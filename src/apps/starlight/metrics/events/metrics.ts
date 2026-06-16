@@ -10,7 +10,7 @@ import {
   SYSTEM_VISIBILITY_SCOPE,
   buildSystemServiceId,
   resolveSystemServiceIdentity
-} from '../utils'
+} from '../utils/system-telemetry'
 
 export const queueGatewayTopologyMetric = (ctx: any) => {
   const { metricsState } = ctx.service as { metricsState: MetricsState }
@@ -21,24 +21,8 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
   const isStartPhase = payload.phase === 'start'
 
   if (!targetService || sourceService === targetService) {
-    ctx.service.logger.info('Metrics topology observed skipped', {
-      sourceService,
-      targetService,
-      reason: !targetService ? 'missing_target_service' : 'self_edge'
-    })
     return
   }
-
-  ctx.service.logger.info('Metrics topology observed received', {
-    sourceService,
-    targetService,
-    version: payload.version,
-    action: payload.action,
-    status: payload.status,
-    durationMs: payload.durationMs,
-    phase: payload.phase,
-    method: payload.method
-  })
 
   const edgeKey = `${sourceService}=>${targetService}`
   const observedEdges = metricsState.cache.topologyObservedEdges || new Map<string, any>()
@@ -67,23 +51,7 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
   observedEdges.set(edgeKey, existing)
   metricsState.cache.topologyObservedEdges = observedEdges
 
-  ctx.service.logger.info('Metrics topology observed cached', {
-    edgeKey,
-    from: existing.from,
-    to: existing.to,
-    count: existing.count,
-    errors: existing.errors,
-    p99: existing.p99,
-    status: existing.status,
-    phase: payload.phase,
-    observedEdgeCacheSize: observedEdges.size
-  })
-
   if (isStartPhase) {
-    ctx.service.logger.info('Metrics topology observed start cached without counting', {
-      edgeKey,
-      observedEdgeCacheSize: observedEdges.size
-    })
     return
   }
 
@@ -110,6 +78,18 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     status: payload.status === 'error' ? '500' : '200'
   }
 
+  const gatewayIngressTags = {
+    ...baseTags,
+    source: 'gateway-ingress',
+    service: 'gateway',
+    serviceId: buildSystemServiceId('gateway'),
+    target_service: 'gateway',
+    targetService: 'gateway',
+    destination_service: 'gateway',
+    peer_service: 'gateway',
+    downstream_service: targetService
+  }
+
   const data = [
     {
       measurement: 'http_requests_total',
@@ -117,16 +97,24 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
       fields: { value: 1, count: 1 },
       timestamp
     },
-    ...(isStartPhase
-      ? []
-      : [
-          {
-            measurement: 'http_request_duration_ms',
-            tags: { ...baseTags, phase: 'finish', unit: 'ms' },
-            fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
-            timestamp
-          }
-        ])
+    {
+      measurement: 'http_request_duration_ms',
+      tags: { ...baseTags, phase: 'finish', unit: 'ms' },
+      fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
+      timestamp
+    },
+    {
+      measurement: 'http_requests_total',
+      tags: gatewayIngressTags,
+      fields: { value: 1, count: 1 },
+      timestamp
+    },
+    {
+      measurement: 'http_request_duration_ms',
+      tags: { ...gatewayIngressTags, phase: 'finish', unit: 'ms' },
+      fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
+      timestamp
+    }
   ]
 
   metricsState.processingQueue.push({
@@ -137,11 +125,6 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     retryCount: 0
   })
 
-  ctx.service.logger.info('Metrics topology metric queued', {
-    edgeKey,
-    queueSize: metricsState.processingQueue.length,
-    measurements: data.map((item) => item.measurement)
-  })
 }
 
 const resolveServiceNameFromNodeId = (nodeID?: string) => {
@@ -277,21 +260,24 @@ export default {
         const { tenantId, data } = ctx.params
         const { metricsState } = ctx.service
 
-        const enrichedData = {
-          ...data,
-          tenantId,
-          timestamp: Date.now(),
-          tags: {
-            ...(data?.tags || {}),
-            tenantId: data?.tags?.tenantId || tenantId
-          },
-          serviceId: data?.serviceId || data?.tags?.serviceId || ctx.service.fullName
-        }
+        const dataItems = Array.isArray(data) ? data : [data]
+        const enrichedData = dataItems
+          .filter(Boolean)
+          .map((item: any) => ({
+            ...item,
+            tenantId,
+            timestamp: item?.timestamp || Date.now(),
+            tags: {
+              ...(item?.tags || {}),
+              tenantId: item?.tags?.tenantId || tenantId
+            },
+            serviceId: item?.serviceId || item?.tags?.serviceId || ctx.service.fullName
+          }))
 
         metricsState.processingQueue.push({
           id: `${tenantId}-${Date.now()}`,
-          format: data.format || 'custom',
-          data: [enrichedData],
+          format: Array.isArray(data) ? 'custom' : data.format || 'custom',
+          data: enrichedData,
           timestamp: Date.now(),
           retryCount: 0
         })

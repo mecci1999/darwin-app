@@ -6,11 +6,13 @@ import stats from './stats';
 import exportLogs from './export';
 import exceptionAnalysis from './exception-analysis';
 import captureDarwin from './capture-darwin';
+import debugDiagnostics from './debug-diagnostics';
 // import trends from './trends';
 // import reports from './reports';
 // import exportStatus from './export-status';
 import { Starlight } from 'typings';
 import stream from './stream';
+import { instrumentServiceActions } from '../../metrics/utils/action-metrics';
 // import streamManagement from './stream-management';
 // import apiKeys from './api-keys';
 // import apiKeyValidation from './api-key-validation';
@@ -37,6 +39,7 @@ const logsAction = (star: Starlight) => {
   const exportAction = exportLogs(star);
   const exceptionAnalysisAction = exceptionAnalysis(star);
   const captureDarwinAction = captureDarwin(star);
+  const debugDiagnosticsAction = debugDiagnostics(star);
   // const trendsAction = trends(star);
   // const reportsAction = reports(star);
   // const exportStatusAction = exportStatus(star);
@@ -55,7 +58,7 @@ const logsAction = (star: Starlight) => {
   // const dashboardsAction = dashboards(star);
   // const widgetsAction = widgets(star);
 
-  return {
+  return instrumentServiceActions(star, 'logs', {
     ...ingestAction,
     ...batchIngestAction,
     ...readModelAction,
@@ -64,6 +67,7 @@ const logsAction = (star: Starlight) => {
     ...exportAction,
     ...exceptionAnalysisAction,
     ...captureDarwinAction,
+    ...debugDiagnosticsAction,
     // ...trendsAction,
     // ...reportsAction,
     // ...exportStatusAction,
@@ -81,7 +85,7 @@ const logsAction = (star: Starlight) => {
     // ...alertRulesAction,
     // ...dashboardsAction,
     // ...widgetsAction,
-  };
+  });
 };
 
 export default logsAction;

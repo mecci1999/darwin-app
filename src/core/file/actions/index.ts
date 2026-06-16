@@ -15,6 +15,7 @@ import { generateUserId } from '../../../utils';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
 import * as mime from 'mime-types';
+import { instrumentServiceActions } from '../../../apps/starlight/metrics/utils/action-metrics';
 
 /**
  * 文件上传微服务动作集合
@@ -50,7 +51,7 @@ export default function fileActions(star: Starlight) {
     },
   });
 
-  return {
+  return instrumentServiceActions(star, 'file', {
     'v1.uploadFile': {
       metadata: {
         auth: true,
@@ -328,7 +329,7 @@ export default function fileActions(star: Starlight) {
         }
       },
     },
-  };
+  });
 }
 
 /**

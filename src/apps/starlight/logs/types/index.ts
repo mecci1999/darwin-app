@@ -256,6 +256,8 @@ export interface LogSearchParams {
   sessionId?: string;
   requestId?: string;
   hostname?: string;
+  excludeNodeIDs?: string[];
+  excludeServices?: string[];
   page?: number;
   pageSize?: number;
   limit?: number;
@@ -298,6 +300,7 @@ export interface LogStatsParams {
   source?: LogSource;
   query?: string;
   hostname?: string;
+  excludeNodeIDs?: string[];
   startTime?: string | number;
   endTime?: string | number;
   timeRange: string; // '1h', '24h', '7d', '30d'
@@ -454,6 +457,7 @@ export interface LogsState {
     dataProcessor: NodeJS.Timeout | null;
     quotaChecker: NodeJS.Timeout | null;
     batchProcessor: NodeJS.Timeout | null;
+    elasticsearchReconnect?: NodeJS.Timeout | null;
     streamCleaner?: NodeJS.Timeout | null;
   };
   cache: {

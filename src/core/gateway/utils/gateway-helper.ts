@@ -15,6 +15,40 @@ import { AuthTokens, GatewayState } from '../types';
  * 包含所有网关相关的工具方法
  */
 export class GatewayHelper {
+  private static readHeaderValue(req: IncomingRequest, name: string): string | undefined {
+    const headers = req.headers || {};
+    const value = headers[name] || headers[name.toLowerCase()];
+    if (Array.isArray(value)) return value[0] ? String(value[0]) : undefined;
+    return value ? String(value) : undefined;
+  }
+
+  private static normalizeSdkIngestParams(ctx: Context, req: IncomingRequest) {
+    const params = (req.$params || {}) as Record<string, unknown>;
+    const apiKey =
+      this.readHeaderValue(req, 'x-api-key') ||
+      this.readHeaderValue(req, 'x-app-key') ||
+      (typeof params.apiKey === 'string' ? params.apiKey : undefined);
+
+    if (!apiKey) return false;
+
+    const tenantId =
+      this.readHeaderValue(req, 'x-tenant-id') ||
+      this.readHeaderValue(req, 'x-starlight-tenant') ||
+      (typeof params.tenantId === 'string' ? params.tenantId : undefined);
+
+    params.apiKey = apiKey;
+    if (tenantId) params.tenantId = tenantId;
+    req.$params = params;
+
+    const meta = ctx.meta as Record<string, unknown>;
+    meta.sdkAuth = {
+      type: 'apiKey',
+      tenantId,
+    };
+
+    return true;
+  }
+
   /**
    * 检查IP是否在黑名单中
    */
@@ -118,6 +152,10 @@ export class GatewayHelper {
     authorizeFn: (ctx: Context, token: string) => Promise<void>,
   ) {
     if (!action?.action?.metadata?.auth) {
+      return;
+    }
+
+    if (action.action.metadata.allowApiKeyAuth && this.normalizeSdkIngestParams(ctx, req)) {
       return;
     }
 

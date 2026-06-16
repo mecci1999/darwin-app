@@ -9,6 +9,7 @@ import recordUserLogout from './recordUserLogout';
 import uploadAvatar from './uploadAvatar';
 
 import manageApplications from './manageApplications';
+import { instrumentServiceActions } from '../../../apps/starlight/metrics/utils/action-metrics';
 
 /**
  * 用户微服务的动作
@@ -25,7 +26,7 @@ const userActions = (star: Starlight) => {
 
   const manageApplicationsAction = manageApplications(star);
 
-  return {
+  return instrumentServiceActions(star, 'user', {
     ...createUserAction,
     ...getUserInfoAction,
     ...updateUserAction,
@@ -36,7 +37,7 @@ const userActions = (star: Starlight) => {
     ...uploadAvatarAction,
 
     ...manageApplicationsAction,
-  };
+  });
 };
 
 export default userActions;

@@ -12,10 +12,63 @@ import {
 import { AggregationsCalendarInterval } from '@elastic/elasticsearch/lib/api/types';
 import type { MappingProperty } from '@elastic/elasticsearch/lib/api/types';
 
+const READ_ONLY_BULK_WARNING_INTERVAL_MS = 60 * 1000;
+const DARWIN_FRAMEWORK_SERVICES = new Set(['star', 'transit', 'transporter', 'registry', 'cacher']);
+const readOnlyBulkWarningAtByIndex = new Map<string, number>();
+
+export function isElasticsearchReadOnlyBlockError(error: any): boolean {
+  const errorType = error?.meta?.body?.error?.type || error?.type;
+  const reason = String(error?.meta?.body?.error?.reason || error?.reason || error?.message || '');
+
+  return errorType === 'cluster_block_exception' && reason.includes('read-only-allow-delete');
+}
+
+function summarizeBulkErrorItems(errorItems: Array<Record<string, any>>) {
+  const byErrorType = errorItems.reduce<Record<string, number>>((acc, item) => {
+    const key = String(item.errorType || 'unknown');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const firstError = errorItems[0];
+
+  return {
+    failedCount: errorItems.length,
+    status: firstError?.status,
+    firstErrorType: firstError?.errorType,
+    firstReason: firstError?.reason,
+    byErrorType,
+  };
+}
+
+function shouldLogReadOnlyBulkWarning(indexName: string): boolean {
+  const lastLoggedAt = readOnlyBulkWarningAtByIndex.get(indexName) || 0;
+  const now = Date.now();
+  if (now - lastLoggedAt < READ_ONLY_BULK_WARNING_INTERVAL_MS) return false;
+  readOnlyBulkWarningAtByIndex.set(indexName, now);
+  return true;
+}
+
+export function summarizeElasticsearchError(error: any) {
+  const esError = error?.meta?.body?.error;
+  const rootCause = Array.isArray(esError?.root_cause) ? esError.root_cause[0] : undefined;
+
+  return {
+    name: error?.name,
+    statusCode: error?.meta?.statusCode,
+    type: esError?.type || error?.type,
+    reason: esError?.reason || error?.reason || error?.message,
+    causedByType: esError?.caused_by?.type,
+    causedByReason: esError?.caused_by?.reason,
+    rootCauseType: rootCause?.type,
+    rootCauseReason: rootCause?.reason,
+  };
+}
+
 export class ElasticsearchClient {
   private client: Client;
   private indexName: string;
   private indexInitialized = false;
+  private mappingProperties: Record<string, MappingProperty> = {};
 
   constructor(config: { node: string; username?: string; password?: string; index: string }) {
     this.client = new Client({
@@ -100,10 +153,12 @@ export class ElasticsearchClient {
               properties,
             },
           });
+          this.mappingProperties = properties;
           console.log(`索引 ${this.indexName} 创建成功`);
         } catch (createError: any) {
           if (createError.meta?.body?.error?.type === 'resource_already_exists_exception') {
             console.log(`索引 ${this.indexName} 已存在`);
+            await this.refreshMappingProperties();
           } else {
             throw createError;
           }
@@ -111,10 +166,17 @@ export class ElasticsearchClient {
       } else {
         const appendOnlyProperties = await this.getAppendOnlyProperties(properties);
         if (Object.keys(appendOnlyProperties).length > 0) {
-          await this.client.indices.putMapping({
-            index: this.indexName,
-            properties: appendOnlyProperties,
-          });
+          try {
+            await this.client.indices.putMapping({
+              index: this.indexName,
+              properties: appendOnlyProperties,
+            });
+          } catch (mappingError) {
+            if (!isElasticsearchReadOnlyBlockError(mappingError)) {
+              throw mappingError;
+            }
+            console.warn(`索引 ${this.indexName} 当前为 read-only-allow-delete，跳过非必要 mapping 更新`);
+          }
         }
       }
       this.indexInitialized = true;
@@ -130,10 +192,17 @@ export class ElasticsearchClient {
     const mapping = await this.client.indices.getMapping({ index: this.indexName });
     const indexMapping = mapping[this.indexName];
     const existingProperties = indexMapping?.mappings?.properties || {};
+    this.mappingProperties = existingProperties as Record<string, MappingProperty>;
 
     return Object.fromEntries(
       Object.entries(desiredProperties).filter(([field]) => !Object.prototype.hasOwnProperty.call(existingProperties, field)),
     );
+  }
+
+  private async refreshMappingProperties(): Promise<void> {
+    const mapping = await this.client.indices.getMapping({ index: this.indexName });
+    const indexMapping = mapping[this.indexName];
+    this.mappingProperties = (indexMapping?.mappings?.properties || {}) as Record<string, MappingProperty>;
   }
 
   private async ensureIndexInitialized(): Promise<void> {
@@ -146,7 +215,7 @@ export class ElasticsearchClient {
   }
 
   // 批量存储日志
-  async bulkIndex(logs: StoredLog[]): Promise<{
+  async bulkIndex(logs: StoredLog[], options?: { refresh?: boolean | 'wait_for' }): Promise<{
     succeededLogs: StoredLog[];
     failedLogs: StoredLog[];
     errorItems: Array<Record<string, any>>;
@@ -166,6 +235,7 @@ export class ElasticsearchClient {
       const response = await this.client.bulk({
         index: this.indexName,
         body,
+        refresh: options?.refresh,
       });
 
       const failedLogIds = new Set<string>();
@@ -195,7 +265,11 @@ export class ElasticsearchClient {
       const succeededLogs = logs.filter((log) => !failedLogIds.has(log.id));
 
       if (response.errors) {
-        console.error('批量索引部分失败:', errorItems);
+        const summary = summarizeBulkErrorItems(errorItems);
+        const readOnlyBlocked = errorItems.some(isElasticsearchReadOnlyBlockError);
+        if (!readOnlyBlocked || shouldLogReadOnlyBulkWarning(this.indexName)) {
+          console.error('批量索引部分失败:', summary);
+        }
       }
 
       return {
@@ -222,6 +296,7 @@ export class ElasticsearchClient {
         query,
         from,
         size,
+        track_total_hits: true,
         sort: [
           {
             [params.sortBy || 'timestamp']: {
@@ -239,61 +314,62 @@ export class ElasticsearchClient {
 
       return { logs, total };
     } catch (error) {
-      console.error('搜索日志失败:', error);
+      console.error('搜索日志失败:', summarizeElasticsearchError(error));
       throw error;
     }
   }
 
+  getIndexName(): string {
+    return this.indexName;
+  }
+
   private resolveAggregationField(field?: string): string {
     const targetField = field || 'level';
-    const keywordCompatibleFields = new Set([
-      'id',
-      'level',
-      'service',
-      'source',
-      'hostname',
-      'containerId',
-      'originType',
-      'visibility',
-      'nodeID',
-      'namespace',
-      'mod',
-      'svc',
-      'version',
-      'userId',
-      'sessionId',
-      'traceId',
-      'apiKeyId',
-      'tenantId',
-      'message'
-    ]);
 
     if (targetField.includes('.')) return targetField;
-    if (keywordCompatibleFields.has(targetField)) return `${targetField}.keyword`;
+    const mapping = this.mappingProperties[targetField] as any;
+    if (mapping?.type === 'text' && mapping?.fields?.keyword) return `${targetField}.keyword`;
+    if (targetField === 'message') return 'message.keyword';
 
     return targetField;
   }
 
-  private resolveExactMatchField(field: string): string {
-    const keywordCompatibleFields = new Set([
-      'id',
-      'level',
-      'service',
-      'source',
-      'hostname',
-      'containerId',
-      'originType',
-      'visibility',
-      'nodeID',
-      'namespace',
-      'mod',
-      'svc',
-      'tenantId',
-      'message',
-    ]);
+  private resolveStatsRuntimeField(field?: string): string {
+    const targetField = field || 'level';
+    if (targetField === 'hour' || targetField === 'day') return targetField;
+    return `stats_${targetField}`;
+  }
 
+  private buildStatsRuntimeMappings(params: LogStatsParams): Record<string, any> {
+    const fields = new Set(['level', 'service', params.groupBy || 'level']);
+    fields.delete('hour');
+    fields.delete('day');
+
+    return Array.from(fields).reduce<Record<string, any>>((mappings, field) => {
+      const serviceSource = `def service = params._source['service']; def nodeID = params._source['nodeID']; if (service != null && params.frameworkServices.contains(service.toString()) && nodeID != null) { def suffix = '-' + params.environment; def value = nodeID.toString(); if (value.endsWith(suffix)) { emit(value.substring(0, value.length() - suffix.length())); } else { emit(value); } } else if (service != null) { emit(service.toString()); }`;
+      mappings[`stats_${field}`] = {
+        type: 'keyword',
+        script: {
+          source: field === 'service'
+            ? serviceSource
+            : `def value = params._source['${field}']; if (value != null) emit(value.toString());`,
+          params: field === 'service'
+            ? {
+                frameworkServices: Array.from(DARWIN_FRAMEWORK_SERVICES),
+                environment: process.env.NODE_ENV || 'development',
+              }
+            : undefined,
+        },
+      };
+      return mappings;
+    }, {});
+  }
+
+  private resolveExactMatchField(field: string): string {
     if (field.includes('.')) return field;
-    if (keywordCompatibleFields.has(field)) return `${field}.keyword`;
+    const mapping = this.mappingProperties[field] as any;
+    if (mapping?.type === 'text' && mapping?.fields?.keyword) return `${field}.keyword`;
+    if (field === 'message') return 'message.keyword';
 
     return field;
   }
@@ -318,33 +394,30 @@ export class ElasticsearchClient {
       const response = await this.client.search({
         index: this.indexName,
         query: query.query,
+        runtime_mappings: this.buildStatsRuntimeMappings(params),
+        track_total_hits: true,
         size: 0,
         aggs: {
           levels: {
             terms: {
-              field: this.resolveAggregationField('level'),
+              field: this.resolveStatsRuntimeField('level'),
               size: 20,
             },
           },
           services: {
             terms: {
-              field: this.resolveAggregationField('service'),
+              field: this.resolveStatsRuntimeField('service'),
               size: 10,
             },
           },
           breakdown: {
             terms: {
-              field: this.resolveAggregationField(params.groupBy || 'level'),
+              field: this.resolveStatsRuntimeField(params.groupBy || 'level'),
               size: 100,
             },
           },
         },
       });
-
-      const total =
-        typeof response.hits.total === 'number'
-          ? response.hits.total
-          : response.hits.total?.value || 0;
 
       const breakdown: Record<string, number> = {};
       const buckets = (response.aggregations?.breakdown as any)?.buckets || [];
@@ -365,9 +438,18 @@ export class ElasticsearchClient {
         serviceBreakdown[bucket.key] = bucket.doc_count;
       });
 
+      const hitTotal =
+        typeof response.hits.total === 'number'
+          ? response.hits.total
+          : response.hits.total?.value || 0;
+      const breakdownTotal = Object.values(breakdown).reduce((sum, count) => sum + count, 0);
+      const levelTotal = Object.values(levelBreakdown).reduce((sum, count) => sum + count, 0);
+      const serviceTotal = Object.values(serviceBreakdown).reduce((sum, count) => sum + count, 0);
+      const total = Math.max(hitTotal, breakdownTotal, levelTotal, serviceTotal);
+
       return { total, breakdown, levelBreakdown, serviceBreakdown };
     } catch (error) {
-      console.error('获取统计失败:', error);
+      console.error('获取统计失败:', summarizeElasticsearchError(error));
       throw error;
     }
   }
@@ -706,7 +788,7 @@ export class ElasticsearchClient {
   }
 
   // 构建搜索查询
-  private buildSearchQuery(params: LogSearchParams): any {
+  buildSearchQuery(params: LogSearchParams): any {
     const must: any[] = [];
 
     // 文本搜索
@@ -725,8 +807,24 @@ export class ElasticsearchClient {
     if (params.service) {
       must.push({ term: { [this.resolveExactMatchField('service')]: params.service } });
     }
+    if (params.excludeServices && params.excludeServices.length > 0) {
+      must.push({
+        bool: {
+          must_not: [
+            { terms: { [this.resolveExactMatchField('service')]: params.excludeServices } },
+          ],
+        },
+      });
+    }
     if (params.level) {
-      must.push({ term: { [this.resolveExactMatchField('level')]: params.level } });
+      if (Array.isArray(params.level)) {
+        must.push({ terms: { [this.resolveExactMatchField('level')]: params.level } });
+      } else {
+        must.push({ term: { [this.resolveExactMatchField('level')]: params.level } });
+      }
+    }
+    if (params.levels && params.levels.length > 0) {
+      must.push({ terms: { [this.resolveExactMatchField('level')]: params.levels } });
     }
     if (params.source) {
       must.push({ term: { [this.resolveExactMatchField('source')]: params.source } });
@@ -739,6 +837,15 @@ export class ElasticsearchClient {
     }
     if (params.hostname) {
       must.push({ term: { [this.resolveExactMatchField('hostname')]: params.hostname } });
+    }
+    if (params.excludeNodeIDs && params.excludeNodeIDs.length > 0) {
+      must.push({
+        bool: {
+          must_not: [
+            { terms: { [this.resolveExactMatchField('nodeID')]: params.excludeNodeIDs } },
+          ],
+        },
+      });
     }
     if (params.filters) {
       Object.entries(params.filters).forEach(([field, value]) => {
@@ -793,6 +900,15 @@ export class ElasticsearchClient {
     }
     if (params.hostname) {
       must.push({ term: { [this.resolveExactMatchField('hostname')]: params.hostname } });
+    }
+    if (params.excludeNodeIDs && params.excludeNodeIDs.length > 0) {
+      must.push({
+        bool: {
+          must_not: [
+            { terms: { [this.resolveExactMatchField('nodeID')]: params.excludeNodeIDs } },
+          ],
+        },
+      });
     }
     if (params.filters) {
       Object.entries(params.filters).forEach(([field, value]) => {

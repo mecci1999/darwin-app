@@ -239,6 +239,16 @@ const createWebSocketManager = (
     };
     star.localBus?.on('$message.new', messageListener);
     eventListeners.set('$message.new', messageListener);
+
+    const logsListener = (log: any) => {
+      broadcastToChannel('logs', {
+        type: 'logs',
+        data: log,
+        timestamp: Date.now(),
+      });
+    };
+    star.localBus?.on('logs', logsListener);
+    eventListeners.set('logs', logsListener);
   };
 
   const initWebSocketServer = () => {
@@ -398,27 +408,14 @@ const gatewayMethods: any = (star: Star) => ({
       return Promise.reject(new UserNotLoginError());
     }
 
-    const authorizeStartedAt = Date.now();
     try {
       const cachedAuth = authCache.get(token);
       if (cachedAuth && cachedAuth.expiresAt > Date.now()) {
-        const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, cachedAuth.user);
-
-        star.logger?.info('Gateway authorize timing', {
-          userId: (authorizedUser as any).userId,
-          tenantId: tenantId ? String(tenantId) : undefined,
-          isAdmin: Boolean((authorizedUser as any).isAdmin),
-          cacheHit: true,
-          resolveTokenDurationMs: 0,
-          userLookupDurationMs: 0,
-          totalDurationMs: Date.now() - authorizeStartedAt,
-        });
+        applyAuthorizedUser(ctx, cachedAuth.user);
         return;
       }
 
-      const resolveTokenStartedAt = Date.now();
       const user = await ctx.call('auth.resolveToken', { token });
-      const resolveTokenDurationMs = Date.now() - resolveTokenStartedAt;
       if (!user) {
         return Promise.reject(new UnAuthorizedError());
       }
@@ -440,17 +437,7 @@ const gatewayMethods: any = (star: Star) => ({
         ),
       });
 
-      const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, user);
-
-      star.logger?.info('Gateway authorize timing', {
-        userId: (authorizedUser as any).userId,
-        tenantId: tenantId ? String(tenantId) : undefined,
-        isAdmin: Boolean((authorizedUser as any).isAdmin),
-        cacheHit: false,
-        resolveTokenDurationMs,
-        userLookupDurationMs: 0,
-        totalDurationMs: Date.now() - authorizeStartedAt,
-      });
+      applyAuthorizedUser(ctx, user);
     } catch (err: any) {
       if (err?.code === HttpResponseCode.REFRESH_TOKEN) {
         return Promise.reject(new TokenExpiredError());
@@ -465,13 +452,15 @@ const gatewayMethods: any = (star: Star) => ({
 
       if (canUseStaleAuth) {
         const { authorizedUser, tenantId } = applyAuthorizedUser(ctx, cachedAuth.user);
-        star.logger?.warn('Gateway authorize used stale cached auth after transient auth service error', {
-          userId: (authorizedUser as any).userId,
-          tenantId: tenantId ? String(tenantId) : undefined,
-          errorType: err?.type,
-          errorCode: err?.code,
-          totalDurationMs: Date.now() - authorizeStartedAt,
-        });
+        star.logger?.warn(
+          'Gateway authorize used stale cached auth after transient auth service error',
+          {
+            userId: (authorizedUser as any).userId,
+            tenantId: tenantId ? String(tenantId) : undefined,
+            errorType: err?.type,
+            errorCode: err?.code,
+          },
+        );
         return;
       }
       star.logger?.error('gateway_app authorize error~', 'error:', err);

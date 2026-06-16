@@ -2,7 +2,7 @@
  * Elasticsearch连接管理器
  * 在微服务启动时初始化连接，提供全局ES客户端实例
  */
-import { ElasticsearchClient } from './elasticsearch';
+import { ElasticsearchClient, summarizeElasticsearchError } from './elasticsearch';
 import { Context } from 'node-universe';
 
 class ElasticsearchManager {
@@ -25,34 +25,63 @@ class ElasticsearchManager {
    * 初始化Elasticsearch连接
    * 在微服务启动时调用
    */
-  async initialize(config: { node: string; password?: string; username?: string }): Promise<void> {
+  async initialize(config: { node: string; password?: string; username?: string }, options?: { initializeIndex?: boolean }): Promise<void> {
     if (this.isInitialized) {
       return;
     }
 
+    this.baseConfig = {
+      node: config.node,
+      username: config.username,
+      password: config.password,
+    };
+
+    // 创建ES客户端实例。即使首次索引初始化失败，也保留配置，便于后续请求或定时任务自动重试。
+    this.esClient = new ElasticsearchClient({
+      node: config.node,
+      username: config.username,
+      password: config.password,
+      index: 'logs', // 默认索引前缀
+    });
+
     try {
-      this.baseConfig = {
-        node: config.node,
-        username: config.username,
-        password: config.password,
-      };
-
-      // 创建ES客户端实例
-      this.esClient = new ElasticsearchClient({
-        node: config.node,
-        username: config.username,
-        password: config.password,
-        index: 'logs', // 默认索引前缀
-      });
-
-      // 初始化索引
-      await this.esClient.initializeIndex();
+      if (options?.initializeIndex !== false) {
+        await this.esClient.initializeIndex();
+      }
 
       this.isInitialized = true;
       console.log('Elasticsearch connection initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize Elasticsearch connection:', error);
+      console.error('Failed to initialize Elasticsearch connection:', summarizeElasticsearchError(error));
       throw error;
+    }
+  }
+
+  configure(config: { node: string; password?: string; username?: string }): void {
+    this.baseConfig = {
+      node: config.node,
+      username: config.username,
+      password: config.password,
+    };
+
+    this.esClient = new ElasticsearchClient({
+      node: config.node,
+      username: config.username,
+      password: config.password,
+      index: 'logs',
+    });
+  }
+
+  async ensureConnected(): Promise<boolean> {
+    if (this.isInitialized) return true;
+    if (!this.baseConfig) return false;
+
+    try {
+      await this.initialize(this.baseConfig);
+      return true;
+    } catch (error) {
+      console.warn('Elasticsearch reconnect attempt failed:', summarizeElasticsearchError(error));
+      return false;
     }
   }
 

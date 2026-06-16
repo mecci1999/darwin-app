@@ -60,7 +60,7 @@ export class AuthUtils {
         if (rsaData.publicKey && rsaData.privateKey) {
           state.rsaKeys = rsaData;
           state.rsaLoadedAt = Date.now();
-          logger?.info('RSA密钥对已存在，跳过生成', rsaData.privateKey);
+          logger?.info('RSA密钥对已存在，跳过生成');
           return;
         }
       }

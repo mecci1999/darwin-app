@@ -9,12 +9,74 @@ import { generateBatchId } from '../utils/log-utils';
 import { validateLogBatchIngest } from '../validators';
 import { ingestLogBatch } from '../methods/log-ingestion';
 import { LogFormat } from '../types';
+import { getDebugDiagnosticsState } from '../utils/debug-diagnostics';
+
+function createBatchIngestFailureResponse(
+  errorMessage: string,
+  content: {
+    batchId: string;
+    processed: number;
+    failed: number;
+    errors: string[];
+    processingTime: number;
+    timestamp: string;
+  },
+): HttpResponseItem {
+  const normalizedMessage = errorMessage.toLowerCase();
+
+  if (errorMessage.includes('配额') || normalizedMessage.includes('quota')) {
+    return {
+      status: HttpStatusCode.TOO_MANY_REQUESTS,
+      data: {
+        content,
+        message: '配额已超限',
+        code: HttpResponseCode.TooManyRequests,
+        success: false,
+      },
+    };
+  }
+
+  if (errorMessage.includes('权限') || normalizedMessage.includes('permission')) {
+    return {
+      status: HttpStatusCode.FORBIDDEN,
+      data: {
+        content,
+        message: '权限不足',
+        code: HttpResponseCode.NoPermissionError,
+        success: false,
+      },
+    };
+  }
+
+  if (errorMessage.includes('API密钥') || normalizedMessage.includes('api key')) {
+    return {
+      status: HttpStatusCode.UNAUTHORIZED,
+      data: {
+        content,
+        message: 'API密钥无效或已过期',
+        code: HttpResponseCode.ERR_INVALID_TOKEN,
+        success: false,
+      },
+    };
+  }
+
+  return {
+    status: HttpStatusCode.BAD_REQUEST,
+    data: {
+      content,
+      message: '批量日志摄取失败',
+      code: HttpResponseCode.ServiceActionFaild,
+      success: false,
+    },
+  };
+}
 
 export default function batchIngest(star: Starlight) {
   return {
     'v1.batch-ingest': {
       metadata: {
         auth: true,
+        allowApiKeyAuth: true,
         roles: ['admin', 'user'],
       },
 
@@ -38,12 +100,37 @@ export default function batchIngest(star: Starlight) {
           }
 
           const resolvedBatchId = batchId || generateBatchId();
+          const debugDiagnosticsEnabled = getDebugDiagnosticsState().enabled;
+          const filteredLogs = debugDiagnosticsEnabled ? logs : logs.filter((log: any) => log?.level !== 'debug');
+          const ignoredDebugLogs = logs.length - filteredLogs.length;
+
+          if (filteredLogs.length === 0) {
+            const processingTime = Date.now() - startTime;
+            return {
+              status: HttpStatusCode.OK,
+              data: {
+                content: {
+                  batchId: resolvedBatchId,
+                  processed: 0,
+                  failed: 0,
+                  ignored: ignoredDebugLogs,
+                  errors: [],
+                  processingTime,
+                  timestamp: new Date().toISOString(),
+                },
+                message: 'Debug logs ignored because diagnostics are disabled',
+                code: HttpResponseCode.Success,
+                success: true,
+              },
+            };
+          }
+
           const result = await ingestLogBatch(ctx, {
             apiKey,
             tenantId,
             userId,
             batch: {
-              logs,
+              logs: filteredLogs,
               batchId: resolvedBatchId,
               tenantId,
               timestamp: Date.now(),
@@ -55,22 +142,15 @@ export default function batchIngest(star: Starlight) {
           const processingTime = Date.now() - startTime;
 
           if (!result.success) {
-            return {
-              status: HttpStatusCode.BAD_REQUEST,
-              data: {
-                content: {
-                  batchId: result.batchId || resolvedBatchId,
-                  processed: result.processed,
-                  failed: result.failed,
-                  errors: result.errors || [],
-                  processingTime,
-                  timestamp: new Date().toISOString(),
-                },
-                message: '批量日志摄取失败',
-                code: HttpResponseCode.ServiceActionFaild,
-                success: false,
-              },
-            };
+            const errors = result.errors || [];
+            return createBatchIngestFailureResponse(errors[0] || '批量日志摄取失败', {
+              batchId: result.batchId || resolvedBatchId,
+              processed: result.processed,
+              failed: result.failed,
+              errors,
+              processingTime,
+              timestamp: new Date().toISOString(),
+            });
           }
 
           // 记录日志
@@ -90,6 +170,7 @@ export default function batchIngest(star: Starlight) {
                 batchId: result.batchId || resolvedBatchId,
                 processed: result.processed,
                 failed: result.failed,
+                ignored: ignoredDebugLogs,
                 errors: result.errors,
                 processingTime,
                 timestamp: new Date().toISOString(),

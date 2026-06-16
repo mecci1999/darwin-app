@@ -1,7 +1,10 @@
-import { LogLevel, LogSource, StoredLog } from '../types';
+import { LogLevel, LogSearchParams, LogSource, LogStatsParams, StoredLog } from '../types';
 import { LogProcessor } from './log-processor';
 import { elasticsearchManager } from './elasticsearch-manager';
+import { isElasticsearchReadOnlyBlockError } from './elasticsearch';
 import { broadcastToStreams } from '../actions/stream';
+import { sanitizeLogMessageText } from './log-message-sanitize';
+import { getDebugDiagnosticsState } from './debug-diagnostics';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -10,12 +13,17 @@ const FLUSH_INTERVAL_MS = 1000;
 const MAX_BATCH_SIZE = 100;
 const FORWARD_BATCH_SIZE = 20;
 const FORWARD_FLUSH_MS = 200;
+const FORWARD_UNAVAILABLE_FALLBACK_MS = 5000;
 const MAX_FALLBACK_REPLAY_BYTES = 1024 * 1024;
 const MAX_STORED_MESSAGE_CHARS = 64 * 1024;
+const READ_ONLY_REPLAY_BACKOFF_MS = 60 * 1000;
+const FORWARD_FAILURE_WARNING_INTERVAL_MS = 30 * 1000;
+const FORWARD_DIAGNOSTIC_INTERVAL_MS = 10 * 1000;
 const FALLBACK_DIR = path.resolve(process.cwd(), 'logs/darwin-capture-fallback');
 const FALLBACK_FILE = path.join(FALLBACK_DIR, `${SYSTEM_TENANT_ID}.jsonl`);
 const SKIP_FORWARD_MODULES = new Set(['transit', 'transporter', 'registry']);
 const SKIP_GATEWAY_BROADCAST_MODULES = new Set(['transit', 'transporter', 'registry', 'star']);
+const DARWIN_FRAMEWORK_MODULES = new Set(['star', 'transit', 'transporter', 'registry', 'cacher']);
 
 type LoggerBindings = {
   nodeID?: string;
@@ -30,10 +38,13 @@ type CaptureState = {
   queue: StoredLog[];
   timer?: NodeJS.Timeout;
   flushing: boolean;
+  flushPromise?: Promise<void>;
   enabled: boolean;
   replaying: boolean;
   broadcastingToGateway: boolean;
   gatewayBroadcast?: (log: StoredLog) => void;
+  nextReplayAt: number;
+  lastReplayBlockWarningAt: number;
 };
 
 export type DarwinLogRecord = {
@@ -45,13 +56,48 @@ export type DarwinLogRecord = {
 const state: CaptureState = {
   queue: [],
   flushing: false,
+  flushPromise: undefined,
   enabled: false,
   replaying: false,
   broadcastingToGateway: false,
   gatewayBroadcast: undefined,
+  nextReplayAt: 0,
+  lastReplayBlockWarningAt: 0,
 };
 
 const processor = new LogProcessor();
+let lastForwardFailureWarningAt = 0;
+
+const forwardDiagnosticState = new Map<string, number>();
+
+function isForwardDiagnosticsEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.DARWIN_LOG_FORWARD_DIAGNOSTICS || '').trim().toLowerCase());
+}
+
+function isDarwinDebugCaptureEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.DARWIN_CAPTURE_DEBUG_LOGS || '').trim().toLowerCase());
+}
+
+function isGatewayForwardRecord(record: DarwinLogRecord | undefined) {
+  const bindings = record?.bindings || {};
+  return String(bindings.svc || bindings.mod || '').toLowerCase() === 'gateway';
+}
+
+function isGatewayExplorerRecord(record: DarwinLogRecord | undefined) {
+  if (!isGatewayForwardRecord(record)) return false;
+  const args = Array.isArray(record?.args) ? record.args : [];
+  return args.some((arg) => typeof arg === 'string' && arg.includes('/api/logs/v1/explorer/'));
+}
+
+function logGatewayForwardDiagnostic(key: string, message: string, details: Record<string, unknown>) {
+  if (!isForwardDiagnosticsEnabled()) return;
+
+  const now = Date.now();
+  const lastLoggedAt = forwardDiagnosticState.get(key) || 0;
+  if (now - lastLoggedAt < FORWARD_DIAGNOSTIC_INTERVAL_MS) return;
+  forwardDiagnosticState.set(key, now);
+  console.info(message, details);
+}
 
 function formatLogArg(value: any): string {
   if (value instanceof Error) {
@@ -78,27 +124,12 @@ function formatLogArg(value: any): string {
 }
 
 function normalizeMessage(args: any[]): { message: string; metadata: Record<string, any> } {
-  const message = args.map(formatLogArg).join(' ').trim();
+  const message = sanitizeLogMessageText(args.map(formatLogArg).join(' '));
 
   return {
     message,
     metadata: {},
   };
-}
-
-function toSafeValue(value: any): any {
-  if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack };
-  }
-
-  if (value === undefined) return null;
-
-  try {
-    JSON.stringify(value);
-    return value;
-  } catch {
-    return String(value);
-  }
 }
 
 function toLevel(level: string): LogLevel {
@@ -107,6 +138,7 @@ function toLevel(level: string): LogLevel {
 }
 
 function shouldCaptureLog(level: LogLevel): boolean {
+  if (level === LogLevel.DEBUG && !isDarwinDebugCaptureEnabled() && !getDebugDiagnosticsState().enabled) return false;
   return Object.values(LogLevel).includes(level);
 }
 
@@ -123,8 +155,44 @@ function shouldIgnoreForwardedGatewayLog(args: any[], bindings: LoggerBindings):
   });
 }
 
+function isFrameworkDebugNoise(args: any[], bindings: LoggerBindings): boolean {
+  const moduleName = getBindingModuleName(bindings);
+  if (!DARWIN_FRAMEWORK_MODULES.has(moduleName)) return false;
+
+  return args.some((arg) => {
+    if (typeof arg !== 'string') return false;
+    return (
+      /^Emit 'metrics\.raw' event/.test(arg) ||
+      /^Emit '\$metrics\.snapshot' event/.test(arg) ||
+      /^<= Request 'logs\.v1\.capture-darwin' .*received from '.*' node\.$/.test(arg)
+    );
+  });
+}
+
 function getBindingModuleName(bindings: LoggerBindings): string {
   return String(bindings.mod || bindings.svc || '').toLowerCase();
+}
+
+function getServiceNameFromNodeID(nodeID?: string): string | undefined {
+  const normalizedNodeID = String(nodeID || '').trim();
+  if (!normalizedNodeID) return undefined;
+
+  const environmentSuffix = `-${process.env.NODE_ENV || 'development'}`;
+  if (normalizedNodeID.endsWith(environmentSuffix)) {
+    return normalizedNodeID.slice(0, -environmentSuffix.length);
+  }
+
+  return normalizedNodeID;
+}
+
+function resolveDarwinServiceName(bindings: LoggerBindings): string {
+  const svc = String(bindings.svc || '').trim();
+  if (svc) return svc;
+
+  const moduleName = getBindingModuleName(bindings);
+  if (moduleName && !DARWIN_FRAMEWORK_MODULES.has(moduleName)) return moduleName;
+
+  return getServiceNameFromNodeID(bindings.nodeID) || moduleName || 'darwin-app';
 }
 
 function shouldIgnoreForwardToLogs(args: any[], bindings: LoggerBindings): boolean {
@@ -169,6 +237,7 @@ function shouldIgnoreDuringGatewayBroadcast(args: any[]): boolean {
 
 function buildStoredLog(level: string, args: any[], bindings: LoggerBindings): StoredLog | null {
   if (shouldIgnoreForwardedGatewayLog(args, bindings)) return null;
+  if (isFrameworkDebugNoise(args, bindings)) return null;
   if (state.broadcastingToGateway && shouldIgnoreDuringGatewayBroadcast(args)) return null;
 
   const normalized = normalizeMessage(args);
@@ -185,7 +254,7 @@ function buildStoredLog(level: string, args: any[], bindings: LoggerBindings): S
       source: LogSource.SYSTEM,
       originType: 'darwin-app',
       visibility: 'admin',
-      service: bindings.svc || bindings.mod || 'darwin-app',
+      service: resolveDarwinServiceName(bindings),
       nodeID: bindings.nodeID,
       namespace: bindings.namespace,
       mod: bindings.mod,
@@ -271,6 +340,96 @@ async function appendFallbackLogs(logs: StoredLog[], reason: string, errorItems?
   await fs.appendFile(FALLBACK_FILE, `${lines}\n`, 'utf8');
 }
 
+function recordsToStoredLogs(records: DarwinLogRecord[]): StoredLog[] {
+  return records
+    .map((record) => buildStoredLog(
+      typeof record.level === 'string' ? record.level : 'info',
+      Array.isArray(record.args) ? record.args : [],
+      record.bindings && typeof record.bindings === 'object' ? record.bindings : {},
+    ))
+    .filter((log): log is StoredLog => Boolean(log));
+}
+
+function summarizeForwardError(error: unknown) {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message };
+  }
+  return { message: String(error) };
+}
+
+function warnForwardFailure(message: string, details: Record<string, unknown>) {
+  const now = Date.now();
+  if (now - lastForwardFailureWarningAt < FORWARD_FAILURE_WARNING_INTERVAL_MS) return;
+  lastForwardFailureWarningAt = now;
+  console.warn(message, details);
+}
+
+function logForwardDiagnostic(key: string, message: string, details: Record<string, unknown>) {
+  if (!isForwardDiagnosticsEnabled()) return;
+
+  const now = Date.now();
+  const lastLoggedAt = forwardDiagnosticState.get(key) || 0;
+  if (now - lastLoggedAt < FORWARD_DIAGNOSTIC_INTERVAL_MS) return;
+  forwardDiagnosticState.set(key, now);
+  console.info(message, details);
+}
+
+function readForwardAcceptedCount(result: unknown, fallback: number) {
+  const payload = result as any;
+  const candidates = [
+    payload?.data?.content?.accepted,
+    payload?.content?.accepted,
+    payload?.accepted,
+    payload?.data?.data?.content?.accepted,
+  ];
+  const accepted = candidates.map(Number).find((value) => Number.isFinite(value));
+  return accepted ?? fallback;
+}
+
+function summarizeForwardRecord(record: DarwinLogRecord | undefined) {
+  if (!record) return null;
+  const bindings = record.bindings || {};
+  const firstArg = Array.isArray(record.args) ? record.args[0] : undefined;
+  return {
+    level: record.level,
+    nodeID: bindings.nodeID,
+    namespace: bindings.namespace,
+    mod: bindings.mod,
+    svc: bindings.svc,
+    message: typeof firstArg === 'string' ? firstArg.slice(0, 120) : firstArg === undefined ? undefined : String(firstArg).slice(0, 120),
+  };
+}
+
+async function persistForwardedRecordsToFallback(records: DarwinLogRecord[], reason: string, error?: unknown) {
+  const logs = recordsToStoredLogs(records);
+  if (logs.length === 0) return;
+  await appendFallbackLogs(logs, reason);
+  warnForwardFailure('Darwin log forwarding fell back to local capture file', {
+    reason,
+    records: records.length,
+    storedLogs: logs.length,
+    fallbackFile: FALLBACK_FILE,
+    error: error ? summarizeForwardError(error) : undefined,
+  });
+}
+
+function summarizeFallbackBulkFailure(failedCount: number, errorItems: Array<Record<string, any>>) {
+  const byErrorType = errorItems.reduce<Record<string, number>>((acc, item) => {
+    const key = String(item.errorType || 'unknown');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const firstError = errorItems[0];
+
+  return {
+    failedCount,
+    status: firstError?.status,
+    firstErrorType: firstError?.errorType,
+    firstReason: firstError?.reason,
+    byErrorType,
+  };
+}
+
 async function readFallbackEntries(): Promise<Array<{ log: StoredLog }>> {
   try {
     const content = await fs.readFile(FALLBACK_FILE, 'utf8');
@@ -287,6 +446,150 @@ async function readFallbackEntries(): Promise<Array<{ log: StoredLog }>> {
   }
 }
 
+function toTimestamp(value: string | number | Date | undefined): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const dateValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+  const timestamp = new Date(dateValue as string | number | Date).getTime();
+  return Number.isNaN(timestamp) ? undefined : timestamp;
+}
+
+type FallbackQueryParams = {
+  tenantId?: string;
+  service?: string;
+  level?: LogSearchParams['level'];
+  source?: LogSearchParams['source'];
+  originType?: LogSearchParams['originType'];
+  visibility?: LogSearchParams['visibility'];
+  hostname?: string;
+  excludeNodeIDs?: string[];
+  excludeServices?: string[];
+  levels?: LogSearchParams['levels'];
+  filters?: Record<string, unknown>;
+  query?: string;
+  startTime?: string | number;
+  endTime?: string | number;
+};
+
+function readLogField(log: StoredLog, field: string): unknown {
+  return Object.prototype.hasOwnProperty.call(log, field) ? log[field as keyof StoredLog] : undefined;
+}
+
+function fallbackLogMatches(log: StoredLog, params: FallbackQueryParams): boolean {
+  if (params.tenantId && log.tenantId !== params.tenantId) return false;
+  if (params.service && log.service !== params.service) return false;
+  if (params.excludeServices?.includes(String(log.service || ''))) return false;
+  if (params.level) {
+    const levels = Array.isArray(params.level) ? params.level : [params.level];
+    if (!levels.includes(log.level)) return false;
+  }
+  if (params.levels?.length) {
+    if (!params.levels.includes(log.level)) return false;
+  }
+  if (params.source) {
+    const sources = Array.isArray(params.source) ? params.source : [params.source];
+    const logSource = log.source;
+    if (!logSource) return false;
+    if (!sources.includes(logSource)) return false;
+  }
+  if (params.originType && log.originType !== params.originType) return false;
+  if (params.visibility && log.visibility !== params.visibility) return false;
+  if (params.hostname && log.hostname !== params.hostname) return false;
+  if (params.excludeNodeIDs?.includes(String(log.nodeID || ''))) return false;
+
+  if (params.filters) {
+    for (const [field, value] of Object.entries(params.filters)) {
+      if (readLogField(log, field) !== value) return false;
+    }
+  }
+
+  const query = String(params.query || '').trim().toLowerCase();
+  if (query && query !== '*') {
+    const searchable = [log.message, log.service, log.source, log.hostname, log.nodeID, log.namespace, log.mod, log.svc]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    if (!searchable.includes(query)) return false;
+  }
+
+  const logTime = toTimestamp(log.timestamp);
+  if (!logTime) return false;
+
+  const startTime = toTimestamp(params.startTime);
+  if (startTime && logTime < startTime) return false;
+
+  const endTime = toTimestamp(params.endTime);
+  if (endTime && logTime > endTime) return false;
+
+  return true;
+}
+
+function sortFallbackLogs(logs: StoredLog[], sortBy = 'timestamp', sortOrder: 'asc' | 'desc' = 'desc') {
+  return logs.sort((left, right) => {
+    const leftValue = readLogField(left, sortBy);
+    const rightValue = readLogField(right, sortBy);
+    const leftComparable = sortBy === 'timestamp' ? toTimestamp(left.timestamp) || 0 : String(leftValue || '');
+    const rightComparable = sortBy === 'timestamp' ? toTimestamp(right.timestamp) || 0 : String(rightValue || '');
+
+    if (leftComparable < rightComparable) return sortOrder === 'asc' ? -1 : 1;
+    if (leftComparable > rightComparable) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+export async function searchDarwinFallbackLogs(params: LogSearchParams): Promise<{ logs: StoredLog[]; total: number }> {
+  const entries = await readFallbackEntries();
+  const matchedLogs = entries
+    .map((entry) => entry.log)
+    .filter((log) => fallbackLogMatches(log, params));
+
+  sortFallbackLogs(matchedLogs, params.sortBy || 'timestamp', params.sortOrder || 'desc');
+
+  const page = Math.max(1, params.page || 1);
+  const limit = Math.max(1, params.pageSize || params.limit || 50);
+  const offset = (page - 1) * limit;
+
+  return {
+    logs: matchedLogs.slice(offset, offset + limit),
+    total: matchedLogs.length,
+  };
+}
+
+export async function getDarwinFallbackStats(params: LogStatsParams): Promise<{
+  total: number;
+  breakdown: Record<string, number>;
+  levelBreakdown: Record<string, number>;
+  serviceBreakdown: Record<string, number>;
+}> {
+  const entries = await readFallbackEntries();
+  const logs = entries
+    .map((entry) => entry.log)
+    .filter((log) => fallbackLogMatches(log, params));
+
+  const breakdown: Record<string, number> = {};
+  const levelBreakdown: Record<string, number> = {};
+  const serviceBreakdown: Record<string, number> = {};
+  const groupBy = params.groupBy || 'level';
+
+  logs.forEach((log) => {
+    const groupKey = groupBy === 'hour'
+      ? new Date(log.timestamp).toISOString().slice(0, 13)
+      : groupBy === 'day'
+        ? new Date(log.timestamp).toISOString().slice(0, 10)
+        : String(readLogField(log, groupBy) || 'unknown');
+
+    breakdown[groupKey] = (breakdown[groupKey] || 0) + 1;
+    levelBreakdown[log.level] = (levelBreakdown[log.level] || 0) + 1;
+    serviceBreakdown[log.service || 'unknown'] = (serviceBreakdown[log.service || 'unknown'] || 0) + 1;
+  });
+
+  return {
+    total: logs.length,
+    breakdown,
+    levelBreakdown,
+    serviceBreakdown,
+  };
+}
+
 async function writeFallbackEntries(entries: Array<{ log: StoredLog }>) {
   await ensureFallbackDir();
   if (entries.length === 0) {
@@ -300,6 +603,8 @@ async function writeFallbackEntries(entries: Array<{ log: StoredLog }>) {
 
 async function replayFallbackLogs() {
   if (state.replaying) return;
+  if (Date.now() < state.nextReplayAt) return;
+  if (!elasticsearchManager.isConnected() && !(await elasticsearchManager.ensureConnected())) return;
   state.replaying = true;
 
   try {
@@ -320,7 +625,17 @@ async function replayFallbackLogs() {
     await writeFallbackEntries(remainingEntries);
 
     if (result.failedLogs.length > 0) {
-      console.error('Darwin fallback replay partial failure:', result.errorItems);
+      const summary = summarizeFallbackBulkFailure(result.failedLogs.length, result.errorItems);
+      const readOnlyBlocked = result.errorItems.some(isElasticsearchReadOnlyBlockError);
+      if (readOnlyBlocked) {
+        state.nextReplayAt = Date.now() + READ_ONLY_REPLAY_BACKOFF_MS;
+        if (Date.now() - state.lastReplayBlockWarningAt >= READ_ONLY_REPLAY_BACKOFF_MS) {
+          console.warn('Darwin fallback replay paused while Elasticsearch index is read-only:', summary);
+          state.lastReplayBlockWarningAt = Date.now();
+        }
+      } else {
+        console.error('Darwin fallback replay partial failure:', summary);
+      }
     }
   } catch (error) {
     console.error('Failed to replay Darwin fallback logs', error);
@@ -329,8 +644,9 @@ async function replayFallbackLogs() {
   }
 }
 
-export function enqueueDarwinLogRecord(record: unknown): boolean {
-  if (!state.enabled || !record || typeof record !== 'object') return false;
+function enqueueDarwinLogRecordInternal(record: unknown, options: { requireEnabled: boolean }): boolean {
+  if (options.requireEnabled && !state.enabled) return false;
+  if (!record || typeof record !== 'object') return false;
 
   const nextRecord = record as DarwinLogRecord;
   const log = buildStoredLog(
@@ -351,6 +667,14 @@ export function enqueueDarwinLogRecord(record: unknown): boolean {
   return true;
 }
 
+export function enqueueDarwinLogRecord(record: unknown): boolean {
+  return enqueueDarwinLogRecordInternal(record, { requireEnabled: true });
+}
+
+export function enqueueForwardedDarwinLogRecord(record: unknown): boolean {
+  return enqueueDarwinLogRecordInternal(record, { requireEnabled: false });
+}
+
 export function enqueueDarwinLogRecords(records: unknown[]): number {
   let accepted = 0;
   for (const record of records) {
@@ -361,14 +685,28 @@ export function enqueueDarwinLogRecords(records: unknown[]): number {
   return accepted;
 }
 
-async function flushQueue() {
-  if (state.flushing || state.queue.length === 0) return;
+export function enqueueForwardedDarwinLogRecords(records: unknown[]): number {
+  let accepted = 0;
+  for (const record of records) {
+    if (enqueueForwardedDarwinLogRecord(record)) {
+      accepted += 1;
+    }
+  }
+  return accepted;
+}
+
+async function flushQueueOnce(options?: { refresh?: boolean | 'wait_for' }) {
+  if (state.queue.length === 0) return;
   state.flushing = true;
 
   const batch = state.queue.splice(0, MAX_BATCH_SIZE);
   try {
+    if (!elasticsearchManager.isConnected() && !(await elasticsearchManager.ensureConnected())) {
+      await appendFallbackLogs(batch, 'elasticsearch_unavailable');
+      return;
+    }
     const esClient = elasticsearchManager.getClient(SYSTEM_TENANT_ID);
-    const result = await esClient.bulkIndex(batch);
+    const result = await esClient.bulkIndex(batch, { refresh: options?.refresh });
 
     if (result.failedLogs.length > 0) {
       await appendFallbackLogs(result.failedLogs, 'partial_bulk_failure', result.errorItems);
@@ -381,8 +719,32 @@ async function flushQueue() {
   }
 }
 
+async function flushQueue(options?: { refresh?: boolean | 'wait_for'; drain?: boolean }) {
+  if (state.flushPromise) {
+    await state.flushPromise;
+  }
+
+  if (state.queue.length === 0) return;
+
+  state.flushPromise = (async () => {
+    do {
+      await flushQueueOnce({ refresh: options?.refresh });
+    } while (options?.drain && state.queue.length > 0);
+  })();
+
+  try {
+    await state.flushPromise;
+  } finally {
+    state.flushPromise = undefined;
+  }
+}
+
 export async function flushDarwinLogCaptureNow() {
   await flushQueue();
+}
+
+export async function flushDarwinLogCaptureForSearch() {
+  await flushQueue({ refresh: 'wait_for', drain: true });
 }
 
 export function createDarwinLogCaptureMiddleware() {
@@ -403,20 +765,97 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
   let forwarding: Promise<void> = Promise.resolve();
   let pendingRecords: DarwinLogRecord[] = [];
   let flushTimer: NodeJS.Timeout | undefined;
+  let unavailableSince = 0;
 
   const flushPending = (star: {
     call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
     registry?: { actions?: { list?: (options?: any) => Array<{ name: string; available?: boolean }> } };
+    started?: boolean;
   }) => {
     if (typeof star.call !== 'function') return;
-    if (!hasAvailableAction(star, serviceName)) return;
     if (pendingRecords.length === 0) return;
 
-    const records = pendingRecords.splice(0, FORWARD_BATCH_SIZE);
+    if (star.started === false) {
+      logForwardDiagnostic('darwin-forward-star-not-started', 'Darwin log forwarding waiting for Star startup', {
+        serviceName,
+        pendingRecords: pendingRecords.length,
+        sample: summarizeForwardRecord(pendingRecords[0]),
+      });
+      if (!flushTimer) {
+        flushTimer = setTimeout(() => {
+          flushTimer = undefined;
+          flushPending(star);
+        }, FORWARD_FLUSH_MS);
+      }
+      return;
+    }
+
+    if (!hasAvailableAction(star, serviceName)) {
+      if (!unavailableSince) unavailableSince = Date.now();
+      logForwardDiagnostic('darwin-forward-action-unavailable', 'Darwin log forwarding waiting for capture action', {
+        serviceName,
+        pendingRecords: pendingRecords.length,
+        sample: summarizeForwardRecord(pendingRecords[0]),
+      });
+      if (Date.now() - unavailableSince >= FORWARD_UNAVAILABLE_FALLBACK_MS) {
+        const records = pendingRecords.splice(0, pendingRecords.length);
+        unavailableSince = 0;
+        forwarding = forwarding
+          .catch(() => undefined)
+          .then(() => persistForwardedRecordsToFallback(records, 'capture_action_unavailable'));
+        return;
+      }
+      if (!flushTimer) {
+        flushTimer = setTimeout(() => {
+          flushTimer = undefined;
+          flushPending(star);
+        }, FORWARD_FLUSH_MS);
+      }
+      return;
+    }
+    unavailableSince = 0;
+
+      const records = pendingRecords.splice(0, FORWARD_BATCH_SIZE);
+      if (records.some(isGatewayExplorerRecord)) {
+        logGatewayForwardDiagnostic('darwin-forward-gateway-flush', 'Darwin gateway log forwarding flushing records', {
+          serviceName,
+          records: records.length,
+          gatewayExplorerRecords: records.filter(isGatewayExplorerRecord).length,
+          remaining: pendingRecords.length,
+          sample: summarizeForwardRecord(records.find(isGatewayExplorerRecord)),
+        });
+      }
+      logForwardDiagnostic('darwin-forward-flush', 'Darwin log forwarding flushing records', {
+        serviceName,
+        records: records.length,
+      remaining: pendingRecords.length,
+      sample: summarizeForwardRecord(records[0]),
+    });
     forwarding = forwarding
       .catch(() => undefined)
-      .then(() => star.call!(serviceName, { records }).then(() => undefined))
-      .catch(() => undefined)
+      .then(async () => {
+        const result = await star.call!(serviceName, { records });
+        const accepted = readForwardAcceptedCount(result, records.length);
+        if (records.some(isGatewayExplorerRecord)) {
+          logGatewayForwardDiagnostic('darwin-forward-gateway-result', 'Darwin gateway log forwarding capture result', {
+            serviceName,
+            records: records.length,
+            gatewayExplorerRecords: records.filter(isGatewayExplorerRecord).length,
+            accepted,
+            sample: summarizeForwardRecord(records.find(isGatewayExplorerRecord)),
+          });
+        }
+        logForwardDiagnostic('darwin-forward-result', 'Darwin log forwarding capture result', {
+          serviceName,
+          records: records.length,
+          accepted,
+          sample: summarizeForwardRecord(records[0]),
+        });
+        if (accepted <= 0) {
+          await persistForwardedRecordsToFallback(records, 'capture_action_accepted_zero');
+        }
+      })
+      .catch((error) => persistForwardedRecordsToFallback(records, 'forward_call_failure', error))
       .finally(() => {
         if (pendingRecords.length > 0 && !flushTimer) {
           flushTimer = setTimeout(() => {
@@ -430,11 +869,11 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
   return function darwinLogForwardMiddleware(star: {
     call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
     registry?: { actions?: { list?: (options?: any) => Array<{ name: string; available?: boolean }> } };
+    started?: boolean;
   }) {
     return {
       newLogEntry(...entry: unknown[]) {
         if (typeof star.call !== 'function') return;
-        if (!hasAvailableAction(star, serviceName)) return;
 
         const [type, args, bindings] = entry;
         const nextBindings = bindings && typeof bindings === 'object' ? bindings as LoggerBindings : {};
@@ -470,6 +909,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
 export function registerDarwinLogForwarding(star: {
   call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
   middlewares?: { add?: (middleware: unknown) => void } | null;
+  started?: boolean;
 }) {
   star.middlewares?.add?.(createDarwinLogForwardMiddleware()(star));
 }

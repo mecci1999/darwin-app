@@ -4,6 +4,85 @@ import { validators } from '../validators';
 
 const billing = (star: Starlight) => {
   return {
+    'v1.billing.analytics': {
+      metadata: {
+        auth: true,
+        roles: ['admin'],
+      },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        try {
+          const adminUserId = (ctx.meta as any).user?.userId;
+
+          if (!adminUserId) {
+            return {
+              status: 401,
+              data: {
+                code: HttpResponseCode.UserNotLoginError,
+                content: null,
+                message: '管理员未认证',
+                success: false,
+              },
+            };
+          }
+
+          const [paidBills, pendingBills, overdueBills, activeSubscriptions, trialSubscriptions] =
+            await Promise.all([
+              (this as any).getBillsByStatus?.('paid') || [],
+              (this as any).getBillsByStatus?.('sent') || [],
+              (this as any).getBillsByStatus?.('overdue') || [],
+              (this as any).getSubscriptionsByStatus?.('active') || [],
+              (this as any).getTrialSubscriptions?.() || [],
+            ]);
+
+          const sumBills = (bills: any[]) =>
+            bills.reduce((sum, bill) => sum + Number(bill.total ?? bill.amount ?? 0), 0);
+          const planCounts = activeSubscriptions.reduce((counts: Record<string, number>, subscription: any) => {
+            const planName = subscription.planName || 'unknown';
+            counts[planName] = (counts[planName] || 0) + 1;
+            return counts;
+          }, {});
+
+          return {
+            status: 200,
+            data: {
+              code: HttpResponseCode.Success,
+              content: {
+                summary: {
+                  activeSubscriptions: activeSubscriptions.length,
+                  trialUsers: trialSubscriptions.length,
+                  paidRevenue: sumBills(paidBills),
+                  pendingRevenue: sumBills(pendingBills),
+                  overdueRevenue: sumBills(overdueBills),
+                  paidBills: paidBills.length,
+                  pendingBills: pendingBills.length,
+                  overdueBills: overdueBills.length,
+                },
+                planDistribution: Object.entries(planCounts).map(([planName, count]) => ({
+                  planName,
+                  count,
+                })),
+                currency: paidBills[0]?.currency || pendingBills[0]?.currency || overdueBills[0]?.currency || 'CNY',
+                generatedAt: new Date().toISOString(),
+              },
+              message: '获取计费经营概览成功',
+              success: true,
+            },
+          };
+        } catch (error) {
+          star.logger?.error('Get billing analytics failed:', error);
+          return {
+            status: 500,
+            data: {
+              code: HttpResponseCode.ServiceActionFaild,
+              content: null,
+              message: '获取计费经营概览失败',
+              success: false,
+            },
+          };
+        }
+      },
+    },
+
     // 获取账单列表
     'v1.billing.list': {
       metadata: {

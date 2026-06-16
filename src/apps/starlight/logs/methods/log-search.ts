@@ -13,12 +13,13 @@ import {
   ApiPermission,
   StoredLog,
 } from '../types';
-import { ElasticsearchClient } from '../utils/elasticsearch';
+import { ElasticsearchClient, summarizeElasticsearchError } from '../utils/elasticsearch';
 import { elasticsearchManager } from '../utils/elasticsearch-manager';
 import { ApiKeyManager } from '../utils/api-key-manager';
 import { QuotaChecker } from '../utils/quota-checker';
 import { LogUtils } from '../utils/log-utils';
 import { SYSTEM_LOG_TENANT_ID } from '../utils/access-control';
+import { searchDarwinFallbackLogs } from '../utils/darwin-log-capture';
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -26,6 +27,31 @@ import {
   SUPPORTED_LOG_LEVELS,
   SUPPORTED_LOG_SOURCES,
 } from '../constants';
+
+const DARWIN_FRAMEWORK_SERVICES = new Set(['star', 'transit', 'transporter', 'registry', 'cacher']);
+
+function getServiceNameFromNodeID(nodeID?: string): string | undefined {
+  const normalizedNodeID = String(nodeID || '').trim();
+  if (!normalizedNodeID) return undefined;
+
+  const environmentSuffix = `-${process.env.NODE_ENV || 'development'}`;
+  if (normalizedNodeID.endsWith(environmentSuffix)) {
+    return normalizedNodeID.slice(0, -environmentSuffix.length);
+  }
+
+  return normalizedNodeID;
+}
+
+function getDisplayService(log: StoredLog): string | undefined {
+  const service = String(log.service || '').trim();
+  if (service && !DARWIN_FRAMEWORK_SERVICES.has(service.toLowerCase())) return service;
+
+  if (log.originType === 'darwin-app') {
+    return getServiceNameFromNodeID(log.nodeID) || service || log.svc || log.mod;
+  }
+
+  return service || log.svc || log.mod;
+}
 
 /**
  * 搜索日志
@@ -39,24 +65,14 @@ export async function searchLogs(
     userId?: string;
   },
 ): Promise<LogSearchResult> {
-  const totalStartedAt = Date.now();
   try {
     const { apiKey, searchParams, tenantId, userId } = params;
 
     const isSystemDarwinSearch = tenantId === SYSTEM_LOG_TENANT_ID && searchParams.originType === 'darwin-app';
     const quotaChecker = new QuotaChecker();
 
-    let validateApiKeyDurationMs = 0;
-    let checkQuotaDurationMs = 0;
-    let validateParamsDurationMs = 0;
-    let esSearchDurationMs = 0;
-    let updateQuotaDurationMs = 0;
-    let emitDurationMs = 0;
-
     if (!isSystemDarwinSearch && apiKey) {
-      const validateApiKeyStartedAt = Date.now();
       const validatedKey = await ApiKeyManager.getInstance().validateApiKey(apiKey);
-      validateApiKeyDurationMs = Date.now() - validateApiKeyStartedAt;
       if (!validatedKey) {
         throw new Error('Invalid API key');
       }
@@ -73,42 +89,89 @@ export async function searchLogs(
         throw new Error('Insufficient permissions for log search');
       }
 
-      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
-      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
       }
     } else if (!isSystemDarwinSearch) {
-      const checkQuotaStartedAt = Date.now();
       const quotaCheck = await quotaChecker.checkSearchQuota(tenantId);
-      checkQuotaDurationMs = Date.now() - checkQuotaStartedAt;
       if (!quotaCheck.allowed) {
         throw new Error(`Search quota exceeded: ${quotaCheck.reason || 'Quota limit reached'}`);
       }
     }
 
-    const validateParamsStartedAt = Date.now();
     const validationResult = LogUtils.validateSearchParams(searchParams);
-    validateParamsDurationMs = Date.now() - validateParamsStartedAt;
     if (!validationResult.valid) {
       throw new Error(`Invalid search parameters: ${validationResult.errors.join(', ')}`);
     }
 
     const normalizedParams = normalizeSearchParams(searchParams);
 
-    const esSearchStartedAt = Date.now();
-    const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
-    const searchResult = await esClient.searchLogs(normalizedParams);
-    esSearchDurationMs = Date.now() - esSearchStartedAt;
+    let searchResult: { logs: StoredLog[]; total: number } | undefined;
+    let searchLayer: 'elasticsearch' | 'fallback' | 'merged' = 'elasticsearch';
+    try {
+      if (!elasticsearchManager.isConnected()) {
+        const connected = await elasticsearchManager.ensureConnected();
+        if (!connected && isSystemDarwinSearch) {
+          searchResult = await searchDarwinFallbackLogs(normalizedParams);
+          searchLayer = 'fallback';
+        } else if (!connected) {
+          throw new Error('Elasticsearch client not initialized. Call initialize() first.');
+        }
+      }
 
-    if (!isSystemDarwinSearch) {
-      const updateQuotaStartedAt = Date.now();
-      await quotaChecker.updateSearchUsage(tenantId);
-      updateQuotaDurationMs = Date.now() - updateQuotaStartedAt;
+      if (!searchResult) {
+        const esClient = elasticsearchManager.getClientFromContext(ctx, tenantId);
+        const esResult = await esClient.searchLogs(normalizedParams);
+        if (isSystemDarwinSearch) {
+          const fallbackResult = await searchDarwinFallbackLogs(buildFallbackMergeParams(normalizedParams));
+          ctx.service?.logger?.info('Darwin log search storage checkpoint', {
+            tenantId,
+            index: typeof (esClient as any).getIndexName === 'function' ? (esClient as any).getIndexName() : undefined,
+            normalizedParams: {
+              page: normalizedParams.page,
+              pageSize: normalizedParams.pageSize,
+              limit: normalizedParams.limit,
+              sortBy: normalizedParams.sortBy,
+              sortOrder: normalizedParams.sortOrder,
+              originType: normalizedParams.originType,
+              visibility: normalizedParams.visibility,
+              service: normalizedParams.service,
+              level: normalizedParams.level,
+              levels: normalizedParams.levels,
+              excludeServices: normalizedParams.excludeServices,
+              excludeNodeIDs: normalizedParams.excludeNodeIDs,
+              startTime: normalizedParams.startTime,
+              endTime: normalizedParams.endTime,
+              query: normalizedParams.query,
+            },
+            esTotal: esResult.total,
+            esReturned: esResult.logs.length,
+            esServices: summarizeStoredLogServices(esResult.logs),
+            fallbackTotal: fallbackResult.total,
+            fallbackReturned: fallbackResult.logs.length,
+          });
+          searchResult = mergeDarwinSearchResults(esResult, fallbackResult, normalizedParams);
+          searchLayer = fallbackResult.total > 0 ? 'merged' : 'elasticsearch';
+        } else {
+          searchResult = esResult;
+        }
+      }
+    } catch (error) {
+      if (!isSystemDarwinSearch) throw error;
+      ctx.service?.logger?.warn('Falling back to Darwin log capture file for search:', summarizeElasticsearchError(error));
+      searchResult = await searchDarwinFallbackLogs(normalizedParams);
+      searchLayer = 'fallback';
     }
 
-    const emitStartedAt = Date.now();
+    if (!searchResult) {
+      searchResult = { logs: [], total: 0 };
+    }
+
+    if (!isSystemDarwinSearch) {
+      await quotaChecker.updateSearchUsage(tenantId);
+    }
+
     await ctx.emit('logs.searched', {
       tenantId,
       userId,
@@ -116,7 +179,6 @@ export async function searchLogs(
       resultCount: searchResult.total,
       timestamp: Date.now(),
     });
-    emitDurationMs = Date.now() - emitStartedAt;
 
     const result: LogSearchResult = {
       logs: (searchResult.logs || []).map(
@@ -125,7 +187,7 @@ export async function searchLogs(
           level: log.level,
           message: log.message,
           timestamp: log.timestamp,
-          service: log.service,
+          service: getDisplayService(log),
           hostname: log.hostname,
           containerId: log.containerId,
           source: log.source || LogSource.SERVER,
@@ -152,27 +214,77 @@ export async function searchLogs(
       suggestions: undefined,
     };
 
-    ctx.service?.logger?.info('Log search timing', {
-      tenantId,
-      originType: normalizedParams.originType,
-      query: normalizedParams.query,
-      page: normalizedParams.page,
-      pageSize: normalizedParams.pageSize || normalizedParams.limit,
-      resultCount: searchResult.total || 0,
-      validateApiKeyDurationMs,
-      checkQuotaDurationMs,
-      validateParamsDurationMs,
-      esSearchDurationMs,
-      updateQuotaDurationMs,
-      emitDurationMs,
-      totalDurationMs: Date.now() - totalStartedAt,
-    });
-
     return result;
   } catch (error) {
-    ctx.service?.logger?.error('Failed to search logs:', error);
+    ctx.service?.logger?.error('Failed to search logs:', summarizeElasticsearchError(error));
     throw error;
   }
+}
+
+function summarizeStoredLogServices(logs: StoredLog[]): Record<string, number> {
+  return logs.reduce<Record<string, number>>((acc, log) => {
+    const service = String(getDisplayService(log) || log.service || 'unknown');
+    acc[service] = (acc[service] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function getSearchLimit(params: LogSearchParams): number {
+  return Math.max(1, Number(params.limit || params.pageSize || DEFAULT_PAGE_SIZE));
+}
+
+function getSearchPage(params: LogSearchParams): number {
+  return Math.max(1, Number(params.page || 1));
+}
+
+function buildFallbackMergeParams(params: LogSearchParams): LogSearchParams {
+  const page = getSearchPage(params);
+  const limit = getSearchLimit(params);
+
+  return {
+    ...params,
+    page: 1,
+    pageSize: page * limit,
+    limit: page * limit,
+  };
+}
+
+function getStoredLogTimestamp(log: StoredLog): number {
+  const timestamp = new Date(log.timestamp).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortStoredLogs(logs: StoredLog[], sortBy = 'timestamp', sortOrder: 'asc' | 'desc' = 'desc'): StoredLog[] {
+  return [...logs].sort((left, right) => {
+    const leftValue = sortBy === 'timestamp' ? getStoredLogTimestamp(left) : String(left[sortBy as keyof StoredLog] || '');
+    const rightValue = sortBy === 'timestamp' ? getStoredLogTimestamp(right) : String(right[sortBy as keyof StoredLog] || '');
+
+    if (leftValue < rightValue) return sortOrder === 'asc' ? -1 : 1;
+    if (leftValue > rightValue) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+function mergeDarwinSearchResults(
+  esResult: { logs: StoredLog[]; total: number },
+  fallbackResult: { logs: StoredLog[]; total: number },
+  params: LogSearchParams,
+): { logs: StoredLog[]; total: number } {
+  if (fallbackResult.logs.length === 0) return esResult;
+
+  const byId = new Map<string, StoredLog>();
+  for (const log of esResult.logs) byId.set(log.id, log);
+  for (const log of fallbackResult.logs) byId.set(log.id, log);
+
+  const page = getSearchPage(params);
+  const limit = getSearchLimit(params);
+  const offset = (page - 1) * limit;
+  const sortedLogs = sortStoredLogs(Array.from(byId.values()), params.sortBy || 'timestamp', params.sortOrder || 'desc');
+
+  return {
+    logs: sortedLogs.slice(offset, offset + limit),
+    total: Math.max(esResult.total, esResult.logs.length) + fallbackResult.logs.filter((log) => !esResult.logs.some((esLog) => esLog.id === log.id)).length,
+  };
 }
 
 /**

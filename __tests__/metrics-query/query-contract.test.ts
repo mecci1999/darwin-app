@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, calculateMemoryUsagePercent, normalizeRssMemoryValue } from '../../src/apps/starlight/metrics/utils/memory-units';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
@@ -27,6 +26,9 @@ describe('metrics-query query contract helpers', () => {
 
   it('derives safe aggregation intervals from time ranges', () => {
     expect(resolveInterval('-1h')).toBe('150s');
+    expect(parseRangeSeconds(resolveInterval('-1h'))).toBe(150);
+    expect(Math.floor(parseRangeSeconds('-1h') / parseRangeSeconds(resolveInterval('-1h')))).toBe(24);
+    expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg']);
     expect(resolveInterval('-1d')).toBe('1h');
   });
 

@@ -371,15 +371,6 @@ const topology = (star: Starlight) => ({
         }
         const scope = normalizeMetricsScope(ctx.params?.scope);
 
-        star.logger?.info('metrics.topology.request', {
-          type,
-          timeRange: ctx.params?.timeRange,
-          serviceId: ctx.params?.serviceId,
-          userId: (ctx.meta as any)?.user?.userId,
-          isAdmin: Boolean((ctx.meta as any)?.user?.isAdmin || (ctx.meta as any)?.adminMetrics),
-          scope,
-        });
-
         if (type === 'observed') {
           queueGatewayTopologyMetric(ctx);
           return {

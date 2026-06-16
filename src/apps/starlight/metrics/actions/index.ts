@@ -9,6 +9,7 @@ import topology from './topology';
 import layout from './layout';
 
 import { InfluxDBHandler } from '../utils/influxdb-handler';
+import { instrumentServiceActions } from '../utils/action-metrics';
 
 const metricsActions = (star: Starlight) => {
   const ingestAction = ingest(star);
@@ -19,7 +20,7 @@ const metricsActions = (star: Starlight) => {
   const realtimeAction = realtime(star);
   const layoutAction = layout(star);
 
-  return {
+  return instrumentServiceActions(star, 'metrics', {
     ...ingestAction,
     ...queryAction,
     ...schemaAction,
@@ -27,7 +28,7 @@ const metricsActions = (star: Starlight) => {
     ...topologyAction,
     ...realtimeAction,
     ...layoutAction,
-  };
+  });
 };
 
 export default metricsActions;

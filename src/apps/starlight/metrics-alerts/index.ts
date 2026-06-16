@@ -5,6 +5,7 @@ import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import alerts, { evaluateAlertRules } from '../metrics/actions/alerts';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
+import { instrumentServiceActions } from '../metrics/utils/action-metrics';
 import '../../../utils/loadEnv';
 import {
   INFLUXDB_BUCKET,
@@ -141,7 +142,7 @@ function createMetricsAlertsService() {
         );
       },
     },
-    actions: alerts(star),
+    actions: instrumentServiceActions(star, APP_NAME, alerts(star)),
   });
 
   return { star, alertsService };

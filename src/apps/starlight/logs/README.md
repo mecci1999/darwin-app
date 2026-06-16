@@ -67,25 +67,117 @@ logs/
 ## 📋 API 接口
 
 ### 日志摄取
-```typescript
-// 单条日志摄取
-POST /v1.ingest
-{
-  "message": "日志消息",
-  "level": "info",
-  "service": "api-server",
-  "timestamp": "2024-01-01T00:00:00Z",
-  "metadata": { ... }
-}
 
-// 批量日志摄取
-POST /v1.batchIngest
+外部 Java、Go、Node.js SDK 统一通过网关 HTTP JSON 接入，不需要依赖 Node-Universe 内部 RPC。
+
+认证头：
+```http
+Content-Type: application/json
+X-Api-Key: <logs api key>
+X-Tenant-Id: <tenant id>
+```
+
+也兼容旧调用方式：将 `apiKey` 和 `tenantId` 放在 JSON body 中。SDK 场景优先使用 Header，避免每条日志重复携带固定认证字段。
+
+```http
+POST /api/logs/v1/ingest
+```
+
+```json
+{
+  "log": {
+    "message": "日志消息",
+    "level": "info",
+    "source": "server",
+    "service": "api-server",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "metadata": {}
+  },
+  "format": "json"
+}
+```
+
+```http
+POST /api/logs/v1/batch-ingest
+```
+
+```json
 {
   "logs": [
-    { "message": "日志1", "level": "info" },
-    { "message": "日志2", "level": "error" }
-  ]
+    { "message": "日志1", "level": "info", "source": "server" },
+    { "message": "日志2", "level": "error", "source": "server" }
+  ],
+  "format": "json",
+  "batchId": "optional-batch-id"
 }
+```
+
+批量限制：单次最多 1000 条日志。日志级别必须是 `trace`、`debug`、`info`、`warn`、`error`、`fatal` 之一；`source` 可选值为 `server`、`client`、`mobile`、`iot`、`system`。
+
+内部 action 名分别是 `logs.v1.ingest` 和 `logs.v1.batch-ingest`，外部 SDK 不应直接依赖内部 action 名。
+
+### SDK 接入示例
+
+#### Node.js
+```js
+await fetch(`${baseUrl}/api/logs/v1/ingest`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Api-Key': apiKey,
+    'X-Tenant-Id': tenantId,
+  },
+  body: JSON.stringify({
+    log: {
+      message: 'order created',
+      level: 'info',
+      source: 'server',
+      service: 'order-service',
+      metadata: { orderId: 'ord_123' },
+    },
+  }),
+});
+```
+
+#### Go
+```go
+payload := strings.NewReader(`{
+  "log": {
+    "message": "order created",
+    "level": "info",
+    "source": "server",
+    "service": "order-service"
+  }
+}`)
+
+req, _ := http.NewRequest("POST", baseURL+"/api/logs/v1/ingest", payload)
+req.Header.Set("Content-Type", "application/json")
+req.Header.Set("X-Api-Key", apiKey)
+req.Header.Set("X-Tenant-Id", tenantId)
+resp, err := http.DefaultClient.Do(req)
+```
+
+#### Java
+```java
+HttpRequest request = HttpRequest.newBuilder()
+  .uri(URI.create(baseUrl + "/api/logs/v1/ingest"))
+  .header("Content-Type", "application/json")
+  .header("X-Api-Key", apiKey)
+  .header("X-Tenant-Id", tenantId)
+  .POST(HttpRequest.BodyPublishers.ofString("""
+    {
+      "log": {
+        "message": "order created",
+        "level": "info",
+        "source": "server",
+        "service": "order-service"
+      }
+    }
+  """))
+  .build();
+
+HttpResponse<String> response = HttpClient.newHttpClient()
+  .send(request, HttpResponse.BodyHandlers.ofString());
 ```
 
 ### 日志搜索
