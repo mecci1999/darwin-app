@@ -19,6 +19,7 @@ import * as quotaApi from './apis/quota';
 import * as subscriptionApi from './apis/subscription';
 import * as userApi from './apis/user';
 import * as userLayoutApi from './apis/userLayout';
+import * as microAppApi from './apis/microApp';
 
 /**
  * 数据库服务配置接口
@@ -127,6 +128,10 @@ export class DatabaseService {
             DataBaseTableNames.BillItem,
             DataBaseTableNames.UserBillingAddress,
             DataBaseTableNames.BillingReminderSetting,
+            DataBaseTableNames.MicroApp,
+            DataBaseTableNames.MicroAppVersion,
+            DataBaseTableNames.MicroAppAuditLog,
+            DataBaseTableNames.MicroAppInstall,
           ],
         },
       );
@@ -205,6 +210,10 @@ export class DatabaseService {
             DataBaseTableNames.BillItem,
             DataBaseTableNames.UserBillingAddress,
             DataBaseTableNames.BillingReminderSetting,
+            DataBaseTableNames.MicroApp,
+            DataBaseTableNames.MicroAppVersion,
+            DataBaseTableNames.MicroAppAuditLog,
+            DataBaseTableNames.MicroAppInstall,
           ],
         },
       );
@@ -283,6 +292,10 @@ export class DatabaseService {
       saveOrUpdateUserLayout: userLayoutApi.saveOrUpdateUserLayout,
       findUserLayout: userLayoutApi.findUserLayout,
     };
+  }
+
+  get microApp() {
+    return microAppApi;
   }
 
   /**

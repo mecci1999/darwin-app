@@ -1,6 +1,10 @@
 import { DEFAULT_LOG_CATEGORY_ENABLED, GATEWAY_PORT, isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { UniverseWeb } from 'node-universe-gateway';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import * as path from 'path';
+import * as mime from 'mime-types';
 import { IPNotPermissionAccess } from 'error';
 import {
   GatewayResponse,
@@ -35,6 +39,48 @@ import { GatewayHelper, WebSocketHandler } from './utils';
 
 const GATEWAY_SERVICE_WAIT_TIMEOUT_MS = Number(process.env.GATEWAY_SERVICE_WAIT_TIMEOUT_MS || 20000);
 const GATEWAY_SERVICE_WAIT_INTERVAL_MS = Number(process.env.GATEWAY_SERVICE_WAIT_INTERVAL_MS || 500);
+const UPLOADS_PUBLIC_PREFIX = '/uploads/';
+const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+
+const tryServeUploadedAsset = async (req: IncomingRequest, res: GatewayResponse) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+
+  const pathname = new URL(String(req.url || ''), 'http://localhost').pathname;
+  if (!pathname.startsWith(UPLOADS_PUBLIC_PREFIX)) return false;
+
+  const relativePath = decodeURIComponent(pathname.slice(UPLOADS_PUBLIC_PREFIX.length));
+  const requestedPath = path.resolve(UPLOADS_DIR, relativePath);
+  if (!requestedPath.startsWith(`${UPLOADS_DIR}${path.sep}`)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return true;
+  }
+
+  try {
+    const fileStat = await stat(requestedPath);
+    if (!fileStat.isFile()) {
+      res.writeHead(404);
+      res.end('Not Found');
+      return true;
+    }
+
+    const contentType = mime.lookup(requestedPath) || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(fileStat.size));
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    res.writeHead(200);
+    if (req.method === 'HEAD') {
+      res.end();
+      return true;
+    }
+    createReadStream(requestedPath).pipe(res);
+    return true;
+  } catch {
+    res.writeHead(404);
+    res.end('Not Found');
+    return true;
+  }
+};
 
 const waitForRegisteredService = async (star: Starlight, service: string) => {
   const hasService = () => star.registry?.services?.list?.().some((item: any) => item.name === service);
@@ -887,7 +933,14 @@ async function initializeGatewayService() {
       // ),
     },
 
-    methods: gatewayMethods(star),
+    methods: {
+      ...gatewayMethods(star),
+
+      async httpHandler(req: IncomingRequest, res: GatewayResponse, next?: () => void) {
+        if (await tryServeUploadedAsset(req, res)) return;
+        return UniverseWeb.methods.httpHandler.call(this, req, res, next);
+      },
+    },
 
     async created() {
       // 在 created 生命周期中手动初始化数据库连接

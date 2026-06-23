@@ -23,6 +23,10 @@ export enum DataBaseTableNames {
   BillItem = 'BillItem',
   UserBillingAddress = 'UserBillingAddress',
   BillingReminderSetting = 'BillingReminderSetting',
+  MicroApp = 'MicroApp',
+  MicroAppVersion = 'MicroAppVersion',
+  MicroAppAuditLog = 'MicroAppAuditLog',
+  MicroAppInstall = 'MicroAppInstall',
 }
 
 /**

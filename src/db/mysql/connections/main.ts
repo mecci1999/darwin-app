@@ -17,7 +17,11 @@ class MainDatabaseConnection {
    */
   public async getModel<T extends Model>(modelName: string): Promise<Sequelize.ModelCtor<T>> {
     const connection = await this.getConnection();
-    return connection.models[modelName] as Sequelize.ModelCtor<T>;
+    const model = connection.models[modelName] as Sequelize.ModelCtor<T> | undefined;
+    if (!model) {
+      throw new Error(`Database model '${modelName}' is not registered on mainConnection`);
+    }
+    return model;
   }
 
   public getConnection(): Promise<Sequelize.Sequelize> {
@@ -54,6 +58,10 @@ class MainDatabaseConnection {
         DataBaseTableNames.BillItem,
         DataBaseTableNames.UserBillingAddress,
         DataBaseTableNames.BillingReminderSetting,
+        DataBaseTableNames.MicroApp,
+        DataBaseTableNames.MicroAppVersion,
+        DataBaseTableNames.MicroAppAuditLog,
+        DataBaseTableNames.MicroAppInstall,
       ],
     });
   }
