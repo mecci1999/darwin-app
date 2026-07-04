@@ -40,7 +40,10 @@ export const resolveInterval = (timeRange: string, buckets = 24) => {
   return formatInterval(intervalSeconds);
 };
 
-export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: unknown) => 'tenant' | 'system') => {
+export const validateQuerySpec = (
+  query: any,
+  normalizeMetricsScope: (value?: unknown) => 'tenant' | 'system',
+) => {
   const issues: string[] = [];
   const normalizedScope = normalizeMetricsScope(query?.scope);
   const sourceKind = query?.sourceKind || 'auto';
@@ -62,7 +65,12 @@ export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: un
     issues.push('aggregation is invalid');
   }
   const allowedAggregations = getAllowedAggregationsForMetric(metricRef, visualization);
-  if (metricRef && aggregation && allowedAggregations.length > 0 && !allowedAggregations.includes(String(aggregation))) {
+  if (
+    metricRef &&
+    aggregation &&
+    allowedAggregations.length > 0 &&
+    !allowedAggregations.includes(String(aggregation))
+  ) {
     issues.push('aggregation is unsupported for this metric');
   }
   if (!isVisualizationSupportedForMetric(metricRef, query?.visualizationHint)) {
@@ -86,13 +94,22 @@ export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: un
       }
       const numeratorAggregation = calculation?.numerator?.aggregation;
       const denominatorAggregation = calculation?.denominator?.aggregation;
-      if (numeratorAggregation && !['latest', 'avg', 'sum', 'max', 'p95'].includes(String(numeratorAggregation))) {
+      if (
+        numeratorAggregation &&
+        !['latest', 'avg', 'sum', 'max', 'p95'].includes(String(numeratorAggregation))
+      ) {
         issues.push('calculation.numerator.aggregation is invalid');
       }
-      if (denominatorAggregation && !['latest', 'avg', 'sum', 'max', 'p95'].includes(String(denominatorAggregation))) {
+      if (
+        denominatorAggregation &&
+        !['latest', 'avg', 'sum', 'max', 'p95'].includes(String(denominatorAggregation))
+      ) {
         issues.push('calculation.denominator.aggregation is invalid');
       }
-      if (calculation.scale !== undefined && (!Number.isFinite(Number(calculation.scale)) || Number(calculation.scale) <= 0)) {
+      if (
+        calculation.scale !== undefined &&
+        (!Number.isFinite(Number(calculation.scale)) || Number(calculation.scale) <= 0)
+      ) {
         issues.push('calculation.scale must be a positive number');
       }
     }
@@ -109,13 +126,21 @@ export const validateQuerySpec = (query: any, normalizeMetricsScope: (value?: un
       if (compare.enabled !== undefined && typeof compare.enabled !== 'boolean') {
         issues.push('compare.enabled is invalid');
       }
-      if (!['previous-period', 'previous-day', 'previous-week'].includes(String(compare.mode || ''))) {
+      if (
+        !['previous-period', 'previous-day', 'previous-week'].includes(String(compare.mode || ''))
+      ) {
         issues.push('compare.mode is invalid');
       }
-      if (compare.display !== undefined && !['relative', 'absolute', 'both'].includes(String(compare.display))) {
+      if (
+        compare.display !== undefined &&
+        !['relative', 'absolute', 'both'].includes(String(compare.display))
+      ) {
         issues.push('compare.display is invalid');
       }
-      if (compare.directionality !== undefined && !['increase_better', 'decrease_better', 'neutral'].includes(String(compare.directionality))) {
+      if (
+        compare.directionality !== undefined &&
+        !['increase_better', 'decrease_better', 'neutral'].includes(String(compare.directionality))
+      ) {
         issues.push('compare.directionality is invalid');
       }
     } else {
@@ -150,6 +175,7 @@ const SYSTEM_RAW_METRIC_REFS = new Set([
   'universe.request.error.total',
   'universe.request.time',
   'http_requests_total',
+  'gateway.request.url.total',
   'http_request_duration_ms',
   'http_request_duration',
   'rpc_requests_total',
@@ -163,6 +189,7 @@ export const isRawSystemMetricRef = (metricRef: string) => SYSTEM_RAW_METRIC_REF
 
 export const resolveQueryResultKind = (metricRef: string) => {
   if (metricRef?.startsWith('custom.')) return 'timeseries';
+  if (metricRef === 'gateway.request.url.total') return 'distribution';
   if (isRawSystemMetricRef(metricRef)) return 'timeseries';
   if (!metricRef) return 'unknown';
   if (metricRef === 'instance.cpu.usage' || metricRef === 'instance.memory.usage') return 'table';
@@ -182,10 +209,17 @@ export const resolveQueryResultKind = (metricRef: string) => {
   return 'unknown';
 };
 
-export const getAllowedAggregationsForMetric = (metricRef: string, visualizationHint?: string | null) => {
+export const getAllowedAggregationsForMetric = (
+  metricRef: string,
+  visualizationHint?: string | null,
+) => {
   const visualization = visualizationHint || 'line';
 
-  if (metricRef === 'service.cpu.usage' || metricRef === 'service.memory.usage' || metricRef === 'service.memory.usage.percent') {
+  if (
+    metricRef === 'service.cpu.usage' ||
+    metricRef === 'service.memory.usage' ||
+    metricRef === 'service.memory.usage.percent'
+  ) {
     return visualization === 'number' || visualization === 'donut'
       ? ['latest', 'avg', 'max']
       : ['avg', 'max'];
@@ -196,10 +230,10 @@ export const getAllowedAggregationsForMetric = (metricRef: string, visualization
   }
 
   if (metricRef === 'service.response.time' || metricRef === 'service.error.rate') {
-    return visualization === 'number' ? ['latest', 'avg'] : ['avg'];
+    return visualization === 'number' ? ['latest', 'avg', 'max'] : ['avg', 'max'];
   }
 
-  if (metricRef === 'service.request.stats') {
+  if (metricRef === 'service.request.stats' || metricRef === 'gateway.request.url.total') {
     return ['sum'];
   }
 
@@ -214,11 +248,15 @@ export const getAllowedAggregationsForMetric = (metricRef: string, visualization
   return [];
 };
 
-export const isVisualizationSupportedForMetric = (metricRef: string, visualizationHint?: string | null) => {
+export const isVisualizationSupportedForMetric = (
+  metricRef: string,
+  visualizationHint?: string | null,
+) => {
   const resultKind = resolveQueryResultKind(metricRef);
   const visualization = visualizationHint || 'line';
 
-  if (resultKind === 'timeseries') return TIMESTRING_VISUALIZATIONS.has(visualization) || NUMBER_VISUALIZATIONS.has(visualization);
+  if (resultKind === 'timeseries')
+    return TIMESTRING_VISUALIZATIONS.has(visualization) || NUMBER_VISUALIZATIONS.has(visualization);
   if (resultKind === 'distribution') return DISTRIBUTION_VISUALIZATIONS.has(visualization);
   if (resultKind === 'table') return TABLE_VISUALIZATIONS.has(visualization);
   return false;
@@ -380,6 +418,22 @@ const METRIC_SCHEMA_BASE: SupportedMetricSchemaItem[] = [
     allowedAggregations: ['latest', 'avg', 'max'],
     recommendedVisualizations: ['line', 'number', 'bar'],
     labelNames: ['service', 'source_service', 'target_service', 'method', 'status', 'route'],
+    sampleLabels: {},
+    sampleCount: 0,
+    lastSeenAt: null,
+    sourceServices: [],
+  },
+  {
+    name: 'gateway.request.url.total',
+    description: 'Darwin 网关按接口请求 URL 统计的 HTTP 请求次数',
+    type: 'counter',
+    unit: 'count',
+    scope: ['tenant', 'system'],
+    sourceKind: 'auto',
+    subjectKinds: ['system', 'service'],
+    allowedAggregations: ['sum'],
+    recommendedVisualizations: ['bar', 'donut'],
+    labelNames: ['url', 'path', 'method', 'status', 'target_service', 'downstream_service'],
     sampleLabels: {},
     sampleCount: 0,
     lastSeenAt: null,
@@ -589,10 +643,20 @@ export const buildSupportedMetricSchema = (params?: {
 
   return METRIC_SCHEMA_BASE.filter((item) => {
     if (scope && !item.scope.includes(scope)) return false;
-    if (sourceKind && sourceKind !== 'auto' && item.sourceKind !== 'auto' && item.sourceKind !== sourceKind && item.sourceKind !== 'mixed') {
+    if (
+      sourceKind &&
+      sourceKind !== 'auto' &&
+      item.sourceKind !== 'auto' &&
+      item.sourceKind !== sourceKind &&
+      item.sourceKind !== 'mixed'
+    ) {
       return false;
     }
-    if (params?.serviceId && item.sourceServices.length > 0 && !item.sourceServices.includes(params.serviceId)) {
+    if (
+      params?.serviceId &&
+      item.sourceServices.length > 0 &&
+      !item.sourceServices.includes(params.serviceId)
+    ) {
       return false;
     }
     return true;

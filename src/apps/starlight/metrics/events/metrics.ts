@@ -1,7 +1,7 @@
 /**
  * 指标数据相关事件处理器
  */
-import { MetricsState } from '../types'
+import { MetricsState } from '../types';
 import {
   CANONICAL_SYSTEM_METRICS_EVENT,
   LEGACY_SYSTEM_METRICS_EVENTS,
@@ -9,23 +9,24 @@ import {
   SYSTEM_TENANT_ID,
   SYSTEM_VISIBILITY_SCOPE,
   buildSystemServiceId,
-  resolveSystemServiceIdentity
-} from '../utils/system-telemetry'
+  resolveSystemServiceIdentity,
+} from '../utils/system-telemetry';
 
 export const queueGatewayTopologyMetric = (ctx: any) => {
-  const { metricsState } = ctx.service as { metricsState: MetricsState }
-  const payload = ctx.params || {}
-  const sourceService = String(payload.sourceService || 'gateway')
-  const targetService = String(payload.targetService || '')
-  const timestamp = payload.timestamp || Date.now()
-  const isStartPhase = payload.phase === 'start'
+  const { metricsState } = ctx.service as { metricsState: MetricsState };
+  const payload = ctx.params || {};
+  const sourceService = String(payload.sourceService || 'gateway');
+  const targetService = String(payload.targetService || '');
+  const timestamp = payload.timestamp || Date.now();
+  const requestUrl = String(payload.requestUrl || payload.url || payload.path || '').trim();
+  const isStartPhase = payload.phase === 'start';
 
   if (!targetService || sourceService === targetService) {
-    return
+    return;
   }
 
-  const edgeKey = `${sourceService}=>${targetService}`
-  const observedEdges = metricsState.cache.topologyObservedEdges || new Map<string, any>()
+  const edgeKey = `${sourceService}=>${targetService}`;
+  const observedEdges = metricsState.cache.topologyObservedEdges || new Map<string, any>();
   const existing = observedEdges.get(edgeKey) || {
     from: sourceService,
     to: targetService,
@@ -34,25 +35,30 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     count: 0,
     errors: 0,
     totalDurationMs: 0,
-    source: 'gateway-routing'
-  }
+    source: 'gateway-routing',
+  };
   if (!isStartPhase) {
-    existing.count += 1
-    existing.errors += payload.status === 'error' ? 1 : 0
-    existing.totalDurationMs += Number(payload.durationMs || 0)
+    existing.count += 1;
+    existing.errors += payload.status === 'error' ? 1 : 0;
+    existing.totalDurationMs += Number(payload.durationMs || 0);
   }
-  existing.lastSeenAt = timestamp
-  existing.action = payload.action
-  existing.qps = existing.count / 60
-  existing.errorRate = existing.count > 0 ? existing.errors / existing.count : 0
-  existing.p99 = existing.count > 0 ? Math.round(existing.totalDurationMs / existing.count) : 0
-  existing.successRate = Math.max(0, 1 - existing.errorRate)
-  existing.status = existing.errorRate >= 0.05 || existing.p99 >= 1000 ? 'critical' : existing.errorRate >= 0.01 || existing.p99 >= 500 ? 'warning' : 'healthy'
-  observedEdges.set(edgeKey, existing)
-  metricsState.cache.topologyObservedEdges = observedEdges
+  existing.lastSeenAt = timestamp;
+  existing.action = payload.action;
+  existing.qps = existing.count / 60;
+  existing.errorRate = existing.count > 0 ? existing.errors / existing.count : 0;
+  existing.p99 = existing.count > 0 ? Math.round(existing.totalDurationMs / existing.count) : 0;
+  existing.successRate = Math.max(0, 1 - existing.errorRate);
+  existing.status =
+    existing.errorRate >= 0.05 || existing.p99 >= 1000
+      ? 'critical'
+      : existing.errorRate >= 0.01 || existing.p99 >= 500
+        ? 'warning'
+        : 'healthy';
+  observedEdges.set(edgeKey, existing);
+  metricsState.cache.topologyObservedEdges = observedEdges;
 
   if (isStartPhase) {
-    return
+    return;
   }
 
   const baseTags = {
@@ -74,9 +80,11 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     region: '华东-1',
     route: `${payload.version || 'v1'}.${payload.action || ''}`,
     action: String(payload.action || ''),
+    url: requestUrl,
+    path: requestUrl,
     method: String(payload.method || 'HTTP'),
-    status: payload.status === 'error' ? '500' : '200'
-  }
+    status: payload.status === 'error' ? '500' : '200',
+  };
 
   const gatewayIngressTags = {
     ...baseTags,
@@ -87,84 +95,87 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     targetService: 'gateway',
     destination_service: 'gateway',
     peer_service: 'gateway',
-    downstream_service: targetService
-  }
+    downstream_service: targetService,
+  };
 
   const data = [
     {
       measurement: 'http_requests_total',
       tags: baseTags,
       fields: { value: 1, count: 1 },
-      timestamp
+      timestamp,
     },
     {
       measurement: 'http_request_duration_ms',
       tags: { ...baseTags, phase: 'finish', unit: 'ms' },
       fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
-      timestamp
+      timestamp,
     },
     {
       measurement: 'http_requests_total',
       tags: gatewayIngressTags,
       fields: { value: 1, count: 1 },
-      timestamp
+      timestamp,
     },
     {
       measurement: 'http_request_duration_ms',
       tags: { ...gatewayIngressTags, phase: 'finish', unit: 'ms' },
       fields: { value: Number(payload.durationMs || 0), duration: Number(payload.durationMs || 0) },
-      timestamp
-    }
-  ]
+      timestamp,
+    },
+  ];
 
   metricsState.processingQueue.push({
     id: `${SYSTEM_TENANT_ID}-gateway-topology-${targetService}-${timestamp}`,
     format: 'system',
     data,
     timestamp,
-    retryCount: 0
-  })
-
-}
+    retryCount: 0,
+  });
+};
 
 const resolveServiceNameFromNodeId = (nodeID?: string) => {
-  const normalized = String(nodeID || '').trim()
-  if (!normalized) return 'unknown'
-  const segments = normalized.split('-')
-  if (segments.length <= 1) return normalized
-  return segments.slice(0, -1).join('-') || normalized
-}
+  const normalized = String(nodeID || '').trim();
+  if (!normalized) return 'unknown';
+  const segments = normalized.split('-');
+  if (segments.length <= 1) return normalized;
+  return segments.slice(0, -1).join('-') || normalized;
+};
 
 const buildSystemMetricsPayload = (ctx: any) => {
-  const payload = ctx.params || {}
+  const payload = ctx.params || {};
   if (Array.isArray(payload)) {
     return {
       nodeID: ctx.nodeID || ctx.caller || 'unknown',
       metrics: payload,
-      emittedAt: Date.now()
-    }
+      emittedAt: Date.now(),
+    };
   }
   return {
     nodeID: payload.nodeID || payload.nodeId || ctx.nodeID || ctx.caller || 'unknown',
-    metrics: Array.isArray(payload.metrics) ? payload.metrics : Array.isArray(payload.list) ? payload.list : [],
-    emittedAt: payload.emittedAt || payload.timestamp || Date.now()
-  }
-}
+    metrics: Array.isArray(payload.metrics)
+      ? payload.metrics
+      : Array.isArray(payload.list)
+        ? payload.list
+        : [],
+    emittedAt: payload.emittedAt || payload.timestamp || Date.now(),
+  };
+};
 
 const queueSystemMetricsBatch = (ctx: any) => {
-  const { metricsState } = ctx.service as { metricsState: MetricsState }
-  const { nodeID, metrics, emittedAt } = buildSystemMetricsPayload(ctx)
+  const { metricsState } = ctx.service as { metricsState: MetricsState };
+  const { nodeID, metrics, emittedAt } = buildSystemMetricsPayload(ctx);
 
   if (!Array.isArray(metrics) || metrics.length === 0) {
-    return
+    return;
   }
 
-  const serviceName = resolveServiceNameFromNodeId(nodeID)
-  const identity = resolveSystemServiceIdentity(serviceName)
+  const serviceName = resolveServiceNameFromNodeId(nodeID);
+  const identity = resolveSystemServiceIdentity(serviceName);
 
   const enrichedData = metrics.flatMap((metric: any) => {
-    const values = Array.isArray(metric.values) ? metric.values : []
-    if (values.length === 0) return []
+    const values = Array.isArray(metric.values) ? metric.values : [];
+    if (values.length === 0) return [];
 
     return values
       .map((entry: any) => {
@@ -175,9 +186,16 @@ const queueSystemMetricsBatch = (ctx: any) => {
               ? entry.lastValue
               : typeof entry?.count === 'number'
                 ? entry.count
-                : null
+                : null;
 
-        if (entryValue === null) return null
+        if (entryValue === null) return null;
+
+        const fields: Record<string, number> = {
+          value: entryValue,
+        };
+        if (typeof entry?.rate === 'number' && Number.isFinite(entry.rate)) {
+          fields.rate = entry.rate;
+        }
 
         return {
           measurement: metric.name,
@@ -199,19 +217,17 @@ const queueSystemMetricsBatch = (ctx: any) => {
             region: identity.region,
             runtime: identity.runtime,
             tags: identity.tags.join(','),
-            ...(entry?.labels || {})
+            ...(entry?.labels || {}),
           },
-          fields: {
-            value: entryValue
-          },
-          timestamp: entry?.timestamp || emittedAt || Date.now()
-        }
+          fields,
+          timestamp: entry?.timestamp || emittedAt || Date.now(),
+        };
       })
-      .filter(Boolean)
-  })
+      .filter(Boolean);
+  });
 
   if (enrichedData.length === 0) {
-    return
+    return;
   }
 
   metricsState.processingQueue.push({
@@ -219,123 +235,125 @@ const queueSystemMetricsBatch = (ctx: any) => {
     format: 'system',
     data: enrichedData,
     timestamp: emittedAt || Date.now(),
-    retryCount: 0
-  })
+    retryCount: 0,
+  });
 
-  ctx.service.logger.debug(`System metrics received from node: ${nodeID}`)
-}
+  ctx.service.logger.debug(`System metrics received from node: ${nodeID}`);
+};
 
 const createSystemMetricsHandler = (eventName: string) => ({
   async handler(ctx: any) {
     try {
-      queueSystemMetricsBatch(ctx)
+      queueSystemMetricsBatch(ctx);
     } catch (error) {
-      ctx.service.logger.error(`Failed to handle ${eventName} event:`, error)
+      ctx.service.logger.error(`Failed to handle ${eventName} event:`, error);
     }
-  }
-})
+  },
+});
 
 const systemMetricsHandlers = Object.fromEntries(
   [CANONICAL_SYSTEM_METRICS_EVENT, ...LEGACY_SYSTEM_METRICS_EVENTS].map((eventName) => [
     eventName,
-    createSystemMetricsHandler(eventName)
-  ])
-)
+    createSystemMetricsHandler(eventName),
+  ]),
+);
 
 export default {
   'metrics.topology.observed': {
     async handler(ctx: any) {
       try {
-        queueGatewayTopologyMetric(ctx)
+        queueGatewayTopologyMetric(ctx);
       } catch (error) {
-        ctx.service.logger.error('Failed to handle metrics.topology.observed event:', error)
+        ctx.service.logger.error('Failed to handle metrics.topology.observed event:', error);
       }
-    }
+    },
   },
 
   // 处理原始指标数据（支持多租户）
   'metrics.raw': {
     async handler(ctx: any) {
       try {
-        const { tenantId, data } = ctx.params
-        const { metricsState } = ctx.service
+        const { tenantId, data } = ctx.params;
+        const { metricsState } = ctx.service;
 
-        const dataItems = Array.isArray(data) ? data : [data]
-        const enrichedData = dataItems
-          .filter(Boolean)
-          .map((item: any) => ({
-            ...item,
-            tenantId,
-            timestamp: item?.timestamp || Date.now(),
-            tags: {
-              ...(item?.tags || {}),
-              tenantId: item?.tags?.tenantId || tenantId
-            },
-            serviceId: item?.serviceId || item?.tags?.serviceId || ctx.service.fullName
-          }))
+        const dataItems = Array.isArray(data) ? data : [data];
+        const enrichedData = dataItems.filter(Boolean).map((item: any) => ({
+          ...item,
+          tenantId,
+          timestamp: item?.timestamp || Date.now(),
+          tags: {
+            ...(item?.tags || {}),
+            tenantId: item?.tags?.tenantId || tenantId,
+          },
+          serviceId: item?.serviceId || item?.tags?.serviceId || ctx.service.fullName,
+        }));
 
         metricsState.processingQueue.push({
           id: `${tenantId}-${Date.now()}`,
           format: Array.isArray(data) ? 'custom' : data.format || 'custom',
           data: enrichedData,
           timestamp: Date.now(),
-          retryCount: 0
-        })
+          retryCount: 0,
+        });
 
-        ctx.service.logger.debug(`Raw metrics processed for tenant: ${tenantId}`)
+        ctx.service.logger.debug(`Raw metrics processed for tenant: ${tenantId}`);
       } catch (error) {
-        ctx.service.logger.error('Failed to handle metrics.raw event:', error)
+        ctx.service.logger.error('Failed to handle metrics.raw event:', error);
       }
-    }
+    },
   },
 
   // 处理指标处理完成事件
   'metrics-processed': {
     async handler(ctx: any) {
       try {
-        const { tenantId, batchId, count } = ctx.params
-        const { metricsState } = ctx.service
+        const { tenantId, batchId, count } = ctx.params;
+        const { metricsState } = ctx.service;
 
-        const tenantKey = `tenant:${tenantId}`
-        const currentStats = metricsState.cache.metrics.get(tenantKey) || { processed: 0 }
-        currentStats.processed += count || 1
-        currentStats.lastProcessed = Date.now()
-        metricsState.cache.metrics.set(tenantKey, currentStats)
+        const tenantKey = `tenant:${tenantId}`;
+        const currentStats = metricsState.cache.metrics.get(tenantKey) || { processed: 0 };
+        currentStats.processed += count || 1;
+        currentStats.lastProcessed = Date.now();
+        metricsState.cache.metrics.set(tenantKey, currentStats);
 
-        metricsState.stats.processed += count || 1
-        metricsState.stats.lastProcessed = Date.now()
+        metricsState.stats.processed += count || 1;
+        metricsState.stats.lastProcessed = Date.now();
 
-        ctx.service.logger.debug(`Metrics batch processed for tenant: ${tenantId}, batch: ${batchId}`)
+        ctx.service.logger.debug(
+          `Metrics batch processed for tenant: ${tenantId}, batch: ${batchId}`,
+        );
       } catch (error) {
-        ctx.service.logger.error('Failed to handle metrics.processed event:', error)
+        ctx.service.logger.error('Failed to handle metrics.processed event:', error);
       }
-    }
+    },
   },
 
   // 处理指标聚合事件
   'metrics.aggregate': {
     async handler(ctx: any) {
       try {
-        const { tenantId, timeRange, aggregationType } = ctx.params
-        const { metricsState } = ctx.service
+        const { tenantId, timeRange, aggregationType } = ctx.params;
+        const { metricsState } = ctx.service;
 
-        const aggregationKey = `agg:${tenantId}:${timeRange}:${aggregationType}`
+        const aggregationKey = `agg:${tenantId}:${timeRange}:${aggregationType}`;
         const aggregationResult = {
           tenantId,
           timeRange,
           aggregationType,
           result: {},
-          timestamp: Date.now()
-        }
+          timestamp: Date.now(),
+        };
 
-        metricsState.cache.aggregations.set(aggregationKey, aggregationResult)
+        metricsState.cache.aggregations.set(aggregationKey, aggregationResult);
 
-        ctx.service.logger.debug(`Metrics aggregated for tenant: ${tenantId}, type: ${aggregationType}`)
+        ctx.service.logger.debug(
+          `Metrics aggregated for tenant: ${tenantId}, type: ${aggregationType}`,
+        );
       } catch (error) {
-        ctx.service.logger.error('Failed to handle metrics.aggregate event:', error)
+        ctx.service.logger.error('Failed to handle metrics.aggregate event:', error);
       }
-    }
+    },
   },
 
-  ...systemMetricsHandlers
-}
+  ...systemMetricsHandlers,
+};

@@ -1,4 +1,9 @@
-import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, calculateMemoryUsagePercent, normalizeRssMemoryValue } from '../../src/apps/starlight/metrics/utils/memory-units';
+import {
+  MEMORY_USAGE_PERCENT_UNIT,
+  MEMORY_USAGE_UNIT,
+  calculateMemoryUsagePercent,
+  normalizeRssMemoryValue,
+} from '../../src/apps/starlight/metrics/utils/memory-units';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
   RESPONSE_DURATION_FIELD_FILTER,
@@ -15,7 +20,10 @@ import {
   resolveQueryResultKind,
   validateQuerySpec,
 } from '../../src/apps/starlight/metrics-query/utils/query-contract';
-import { buildRequestStatsDistributionItems } from '../../src/apps/starlight/metrics-query/utils/request-stats';
+import {
+  buildGatewayRequestUrlDistributionItems,
+  buildRequestStatsDistributionItems,
+} from '../../src/apps/starlight/metrics-query/utils/request-stats';
 
 describe('metrics-query query contract helpers', () => {
   it('parses relative time ranges into seconds', () => {
@@ -27,7 +35,9 @@ describe('metrics-query query contract helpers', () => {
   it('derives safe aggregation intervals from time ranges', () => {
     expect(resolveInterval('-1h')).toBe('150s');
     expect(parseRangeSeconds(resolveInterval('-1h'))).toBe(150);
-    expect(Math.floor(parseRangeSeconds('-1h') / parseRangeSeconds(resolveInterval('-1h')))).toBe(24);
+    expect(Math.floor(parseRangeSeconds('-1h') / parseRangeSeconds(resolveInterval('-1h')))).toBe(
+      24,
+    );
     expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg']);
     expect(resolveInterval('-1d')).toBe('1h');
   });
@@ -41,7 +51,7 @@ describe('metrics-query query contract helpers', () => {
         metricRef: 'service.cpu.usage',
         aggregation: 'avg',
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(true);
@@ -66,7 +76,7 @@ describe('metrics-query query contract helpers', () => {
           unit: '%',
         },
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(true);
@@ -91,7 +101,7 @@ describe('metrics-query query contract helpers', () => {
           scale: 0,
         },
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(false);
@@ -109,7 +119,7 @@ describe('metrics-query query contract helpers', () => {
         metricRef: '',
         aggregation: 'bad',
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(false);
@@ -128,7 +138,7 @@ describe('metrics-query query contract helpers', () => {
         metricRef: 'service.cpu.usage',
         aggregation: 'avg',
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(false);
@@ -144,7 +154,7 @@ describe('metrics-query query contract helpers', () => {
         metricRef: 'service.qps',
         aggregation: 'p95',
       },
-      (value) => (value === 'system' ? 'system' : 'tenant')
+      (value) => (value === 'system' ? 'system' : 'tenant'),
     );
 
     expect(result.valid).toBe(false);
@@ -152,7 +162,8 @@ describe('metrics-query query contract helpers', () => {
   });
 
   it('accepts structured compare only for number query cards', () => {
-    const normalizeScope = (value: unknown) => (value === 'system' ? 'system' : 'tenant') as 'tenant' | 'system';
+    const normalizeScope = (value: unknown) =>
+      (value === 'system' ? 'system' : 'tenant') as 'tenant' | 'system';
     const numberResult = validateQuerySpec(
       {
         scope: 'tenant',
@@ -168,7 +179,7 @@ describe('metrics-query query contract helpers', () => {
           directionality: 'decrease_better',
         },
       },
-      normalizeScope
+      normalizeScope,
     );
     const lineResult = validateQuerySpec(
       {
@@ -180,7 +191,7 @@ describe('metrics-query query contract helpers', () => {
         visualizationHint: 'line',
         compare: { enabled: true, mode: 'previous-period' },
       },
-      normalizeScope
+      normalizeScope,
     );
 
     expect(numberResult.valid).toBe(true);
@@ -193,18 +204,23 @@ describe('metrics-query query contract helpers', () => {
     expect(getAllowedAggregationsForMetric('service.qps', 'line')).toEqual(['sum']);
     expect(getAllowedAggregationsForMetric('service.qps', 'number')).toEqual(['latest']);
     expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg']);
-    expect(getAllowedAggregationsForMetric('service.response.time', 'number')).toEqual(['latest', 'avg']);
+    expect(getAllowedAggregationsForMetric('service.response.time', 'number')).toEqual([
+      'latest',
+      'avg',
+    ]);
   });
 
   it('exposes a consistent metric result-kind and visualization matrix', () => {
     expect(resolveQueryResultKind('service.cpu.usage')).toBe('timeseries');
     expect(resolveQueryResultKind('service.request.stats')).toBe('distribution');
+    expect(resolveQueryResultKind('gateway.request.url.total')).toBe('distribution');
     expect(resolveQueryResultKind('instance.cpu.usage')).toBe('table');
 
     expect(isVisualizationSupportedForMetric('service.cpu.usage', 'number')).toBe(true);
     expect(isVisualizationSupportedForMetric('service.cpu.usage', 'donut')).toBe(true);
     expect(isVisualizationSupportedForMetric('service.cpu.usage', 'table')).toBe(false);
     expect(isVisualizationSupportedForMetric('service.request.stats', 'donut')).toBe(true);
+    expect(isVisualizationSupportedForMetric('gateway.request.url.total', 'bar')).toBe(true);
     expect(isVisualizationSupportedForMetric('instance.cpu.usage', 'table')).toBe(true);
     expect(isVisualizationSupportedForMetric('instance.cpu.usage', 'line')).toBe(false);
   });
@@ -225,13 +241,16 @@ describe('metrics-query query contract helpers', () => {
     const items = buildSupportedMetricSchema({ scope: 'system', sourceKind: 'darwin-event' });
 
     expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.unit).toBe('%');
-    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.subjectKinds).toContain('service');
+    expect(
+      items.find((item) => item.name === 'process.memory.heap.utilization')?.subjectKinds,
+    ).toContain('service');
   });
 
   it('builds schema items from the same supported query contract', () => {
     const items = buildSupportedMetricSchema({ scope: 'tenant' });
 
     expect(items.map((item) => item.name)).toEqual([
+      'gateway.request.url.total',
       'service.cpu.usage',
       'service.memory.usage',
       'service.memory.usage.percent',
@@ -240,11 +259,30 @@ describe('metrics-query query contract helpers', () => {
       'service.error.rate',
       'service.request.stats',
     ]);
-    expect(items.find((item) => item.name === 'service.memory.usage')?.unit).toBe(MEMORY_USAGE_UNIT);
-    expect(items.find((item) => item.name === 'service.memory.usage.percent')?.unit).toBe(MEMORY_USAGE_PERCENT_UNIT);
-    expect(items.find((item) => item.name === 'service.memory.usage.percent')?.recommendedVisualizations).toContain('donut');
-    expect(items.find((item) => item.name === 'service.qps')?.allowedAggregations).toEqual(['latest', 'sum']);
-    expect(items.find((item) => item.name === 'service.request.stats')?.recommendedVisualizations).toEqual(['bar', 'donut']);
+    expect(items.find((item) => item.name === 'service.memory.usage')?.unit).toBe(
+      MEMORY_USAGE_UNIT,
+    );
+    expect(items.find((item) => item.name === 'service.memory.usage.percent')?.unit).toBe(
+      MEMORY_USAGE_PERCENT_UNIT,
+    );
+    expect(
+      items.find((item) => item.name === 'service.memory.usage.percent')?.recommendedVisualizations,
+    ).toContain('donut');
+    expect(items.find((item) => item.name === 'service.qps')?.allowedAggregations).toEqual([
+      'latest',
+      'sum',
+    ]);
+    expect(
+      items.find((item) => item.name === 'service.request.stats')?.recommendedVisualizations,
+    ).toEqual(['bar', 'donut']);
+    expect(items.find((item) => item.name === 'gateway.request.url.total')?.labelNames).toEqual([
+      'url',
+      'path',
+      'method',
+      'status',
+      'target_service',
+      'downstream_service',
+    ]);
     expect(items.find((item) => item.name === 'service.request.stats')?.labelNames).toEqual([
       'service',
       'target_service',
@@ -259,7 +297,9 @@ describe('metrics-query query contract helpers', () => {
     expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('http_request_duration');
     expect(RESPONSE_DURATION_MEASUREMENT_FILTER).toContain('messaging_duration_ms');
     expect(RESPONSE_DURATION_FIELD_FILTER).toContain('response_time');
-    expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r["_measurement"] == "http_request_duration"');
+    expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain(
+      'r["_measurement"] == "http_request_duration"',
+    );
     expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('r.unit == "s"');
     expect(RESPONSE_DURATION_MS_NORMALIZATION_FLUX).toContain('* 1000.0');
     expect(RESPONSE_DURATION_COMPLETED_REQUEST_FILTER).toContain('r.phase != "start"');
@@ -280,16 +320,36 @@ describe('metrics-query query contract helpers', () => {
 
     expect(items.map((item) => item.name)).toContain('process.memory.heap.utilization');
     expect(items.map((item) => item.name)).toContain('os.memory.utilization');
-    expect(items.find((item) => item.name === 'os.cpu.utilization')?.description).toBe('Node-Universe 采集的系统 CPU 平均使用率');
-    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.description).toBe('Node-Universe 采集的进程堆内存使用率');
-    expect(items.find((item) => item.name === 'os.memory.utilization')?.description).toBe('Node-Universe 采集的系统内存使用率');
-    expect(items.some((item) => /Darwin raw|Service CPU usage|request count/.test(item.description))).toBe(false);
+    expect(items.find((item) => item.name === 'os.cpu.utilization')?.description).toBe(
+      'Node-Universe 采集的系统 CPU 平均使用率',
+    );
+    expect(items.find((item) => item.name === 'process.memory.heap.utilization')?.description).toBe(
+      'Node-Universe 采集的进程堆内存使用率',
+    );
+    expect(items.find((item) => item.name === 'os.memory.utilization')?.description).toBe(
+      'Node-Universe 采集的系统内存使用率',
+    );
+    expect(
+      items.some((item) => /Darwin raw|Service CPU usage|request count/.test(item.description)),
+    ).toBe(false);
   });
 
   it('builds request distribution labels from request targets instead of dates', () => {
     const items = buildRequestStatsDistributionItems([
-      { _field: 'value', _value: 4, stat_target: 'metrics-query', stat_route: 'v2.query.cards', stat_method: 'POST' },
-      { _field: 'count', _value: 4, stat_target: 'metrics-query', stat_route: 'v2.query.cards', stat_method: 'POST' },
+      {
+        _field: 'value',
+        _value: 4,
+        stat_target: 'metrics-query',
+        stat_route: 'v2.query.cards',
+        stat_method: 'POST',
+      },
+      {
+        _field: 'count',
+        _value: 4,
+        stat_target: 'metrics-query',
+        stat_route: 'v2.query.cards',
+        stat_method: 'POST',
+      },
       { _field: 'value', _value: 9, service: 'gateway', action: 'v1.health' },
       { _field: 'total', _value: 99, service: 'gateway', action: 'v1.health' },
       { _field: 'value', _value: 2, stat_target: 'logs', stat_route: 'v1.search' },
@@ -299,6 +359,20 @@ describe('metrics-query query contract helpers', () => {
       { name: 'gateway · v1.health', value: 9 },
       { name: 'metrics-query · POST v2.query.cards', value: 4 },
       { name: 'logs · v1.search', value: 2 },
+    ]);
+  });
+
+  it('builds gateway request URL distribution labels from URL and method tags', () => {
+    const items = buildGatewayRequestUrlDistributionItems([
+      { _value: 12, request_url: '/api/metrics/v2/query/cards', request_method: 'POST' },
+      { _value: 4, url: '/api/logs/v1/search', method: 'GET' },
+      { _value: 2, path: '/api/metrics/v2/query/cards', method: 'POST' },
+      { _value: 99, request_url: '', method: 'GET' },
+    ]);
+
+    expect(items).toEqual([
+      { name: 'POST /api/metrics/v2/query/cards', value: 14 },
+      { name: 'GET /api/logs/v1/search', value: 4 },
     ]);
   });
 });

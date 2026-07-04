@@ -46,6 +46,7 @@ describe('gateway topology metrics event', () => {
       durationMs: 291,
       phase: 'finish',
       method: 'GET',
+      requestUrl: '/api/metrics/v1/catalog/services',
       timestamp: 1718175238580,
     });
 
@@ -53,38 +54,45 @@ describe('gateway topology metrics event', () => {
 
     const batch = ctx.service.metricsState.processingQueue[0];
     expect(batch.data).toHaveLength(4);
-    expect(batch.data).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        measurement: 'http_requests_total',
-        tags: expect.objectContaining({ service: 'gateway', target_service: 'metrics' }),
-        fields: { value: 1, count: 1 },
-      }),
-      expect.objectContaining({
-        measurement: 'http_request_duration_ms',
-        tags: expect.objectContaining({ service: 'gateway', target_service: 'metrics' }),
-        fields: { value: 291, duration: 291 },
-      }),
-      expect.objectContaining({
-        measurement: 'http_requests_total',
-        tags: expect.objectContaining({
-          source: 'gateway-ingress',
-          service: 'gateway',
-          target_service: 'gateway',
-          downstream_service: 'metrics',
+    expect(batch.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          measurement: 'http_requests_total',
+          tags: expect.objectContaining({
+            service: 'gateway',
+            target_service: 'metrics',
+            url: '/api/metrics/v1/catalog/services',
+            path: '/api/metrics/v1/catalog/services',
+          }),
+          fields: { value: 1, count: 1 },
         }),
-        fields: { value: 1, count: 1 },
-      }),
-      expect.objectContaining({
-        measurement: 'http_request_duration_ms',
-        tags: expect.objectContaining({
-          source: 'gateway-ingress',
-          service: 'gateway',
-          target_service: 'gateway',
-          downstream_service: 'metrics',
+        expect.objectContaining({
+          measurement: 'http_request_duration_ms',
+          tags: expect.objectContaining({ service: 'gateway', target_service: 'metrics' }),
+          fields: { value: 291, duration: 291 },
         }),
-        fields: { value: 291, duration: 291 },
-      }),
-    ]));
+        expect.objectContaining({
+          measurement: 'http_requests_total',
+          tags: expect.objectContaining({
+            source: 'gateway-ingress',
+            service: 'gateway',
+            target_service: 'gateway',
+            downstream_service: 'metrics',
+          }),
+          fields: { value: 1, count: 1 },
+        }),
+        expect.objectContaining({
+          measurement: 'http_request_duration_ms',
+          tags: expect.objectContaining({
+            source: 'gateway-ingress',
+            service: 'gateway',
+            target_service: 'gateway',
+            downstream_service: 'metrics',
+          }),
+          fields: { value: 291, duration: 291 },
+        }),
+      ]),
+    );
   });
 
   it('does not queue metrics for the start phase', () => {

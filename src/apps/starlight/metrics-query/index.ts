@@ -24,12 +24,25 @@ import {
   RESPONSE_DURATION_MS_NORMALIZATION_FLUX,
   isProtocolDurationMetricRef,
 } from '../metrics/utils/duration-metrics';
-import { MEMORY_USAGE_PERCENT_UNIT, MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
+import {
+  MEMORY_USAGE_PERCENT_UNIT,
+  MEMORY_USAGE_UNIT,
+  normalizeRssMemoryValue,
+} from '../metrics/utils/memory-units';
 import { assertSystemScopeAllowed, normalizeMetricsScope } from '../metrics/utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { instrumentServiceActions } from '../metrics/utils/action-metrics';
-import { buildSupportedMetricSchema, isRawSystemMetricRef, parseRangeSeconds, resolveInterval, validateQuerySpec } from './utils/query-contract';
-import { buildRequestStatsDistributionItems } from './utils/request-stats';
+import {
+  buildSupportedMetricSchema,
+  isRawSystemMetricRef,
+  parseRangeSeconds,
+  resolveInterval,
+  validateQuerySpec,
+} from './utils/query-contract';
+import {
+  buildGatewayRequestUrlDistributionItems,
+  buildRequestStatsDistributionItems,
+} from './utils/request-stats';
 
 const APP_NAME = 'metrics-query';
 const QUERY_CACHE_TTL_MS = 30 * 1000;
@@ -43,10 +56,20 @@ const resolveCompareConfig = (compare: any) => {
   if (!compare) return null;
   if (typeof compare === 'string') {
     if (compare === 'previous-period') {
-      return { enabled: true, mode: 'previous-period', display: 'relative', directionality: 'neutral' };
+      return {
+        enabled: true,
+        mode: 'previous-period',
+        display: 'relative',
+        directionality: 'neutral',
+      };
     }
     if (compare === 'same-period') {
-      return { enabled: true, mode: 'previous-day', display: 'relative', directionality: 'neutral' };
+      return {
+        enabled: true,
+        mode: 'previous-day',
+        display: 'relative',
+        directionality: 'neutral',
+      };
     }
     return null;
   }
@@ -104,7 +127,8 @@ const buildNumberCompare = (params: {
     };
   }
   const absoluteDelta = toFixed(current - baseline, 2);
-  const relativeDelta = baseline === 0 ? null : toFixed((absoluteDelta / Math.abs(baseline)) * 100, 2);
+  const relativeDelta =
+    baseline === 0 ? null : toFixed((absoluteDelta / Math.abs(baseline)) * 100, 2);
   const direction = Math.abs(absoluteDelta) < 0.000001 ? 'flat' : absoluteDelta > 0 ? 'up' : 'down';
   return {
     baselineValue: toFixed(baseline, 2),
@@ -120,10 +144,15 @@ const buildNumberCompare = (params: {
 const normalizeSeries = (
   rows: any[],
   normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2),
-  options?: { preserveEmptyWindows?: boolean }
+  options?: { preserveEmptyWindows?: boolean },
 ) =>
   rows
-    .filter((row) => row?._time && row?._value !== undefined && (options?.preserveEmptyWindows || row?._value !== null))
+    .filter(
+      (row) =>
+        row?._time &&
+        row?._value !== undefined &&
+        (options?.preserveEmptyWindows || row?._value !== null),
+    )
     .map((row) => ({
       timestamp: new Date(row._time).getTime(),
       value: row._value === null ? null : normalizeValue(row._value),
@@ -143,7 +172,9 @@ const normalizeServiceId = (serviceId?: string) =>
 
 const buildServiceFilter = (serviceId?: string) => {
   const normalizedServiceId = normalizeServiceId(serviceId);
-  return normalizedServiceId ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")` : '';
+  return normalizedServiceId
+    ? `|> filter(fn: (r) => r["service"] == "${normalizedServiceId}")`
+    : '';
 };
 
 const buildProtocolServiceFilter = (serviceId?: string) => {
@@ -158,7 +189,8 @@ const PROTOCOL_REQUEST_TOTAL_MEASUREMENTS = new Set([
   'messaging_requests_total',
 ]);
 
-const isProtocolRequestTotalMetricRef = (metricRef: string) => PROTOCOL_REQUEST_TOTAL_MEASUREMENTS.has(metricRef);
+const isProtocolRequestTotalMetricRef = (metricRef: string) =>
+  PROTOCOL_REQUEST_TOTAL_MEASUREMENTS.has(metricRef);
 
 const queryTimeseries = async (params: {
   measurementFilter: string;
@@ -176,7 +208,9 @@ const queryTimeseries = async (params: {
   createEmpty?: boolean;
 }) => {
   const bucket = getBucketNameOrThrow();
-  const seriesAggregateFn = params.seriesAggregateFn || (params.aggregateFn === 'sum' ? 'sum' : params.aggregateFn === 'max' ? 'max' : 'mean');
+  const seriesAggregateFn =
+    params.seriesAggregateFn ||
+    (params.aggregateFn === 'sum' ? 'sum' : params.aggregateFn === 'max' ? 'max' : 'mean');
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
@@ -215,21 +249,32 @@ const queryRawSystemMetricSeries = async (params: {
   serviceId?: string;
   star: Starlight;
 }) => {
-  const aggregateFn = params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : params.aggregation === 'sum' ? 'sum' : 'mean';
+  const aggregateFn =
+    params.aggregation === 'latest'
+      ? 'last'
+      : params.aggregation === 'max'
+        ? 'max'
+        : params.aggregation === 'sum'
+          ? 'sum'
+          : 'mean';
   return queryTimeseries({
     measurementFilter: `r["_measurement"] == "${params.metricRef}"`,
-    fieldFilter: 'r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "time" or r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "memory_total"',
+    fieldFilter:
+      'r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total" or r["_field"] == "duration" or r["_field"] == "latency" or r["_field"] == "time" or r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "memory_total"',
     aggregateFn,
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
-    serviceFilter: isProtocolRequestTotalMetricRef(params.metricRef) ? buildProtocolServiceFilter(params.serviceId) : undefined,
+    serviceFilter: isProtocolRequestTotalMetricRef(params.metricRef)
+      ? buildProtocolServiceFilter(params.serviceId)
+      : undefined,
     star: params.star,
-    normalizeValue: params.metricRef === 'process.memory.rss' || params.metricRef === 'os.memory.total'
-      ? normalizeRssMemoryValue
-      : params.metricRef.includes('utilization')
-        ? normalizeUtilizationValue
-        : undefined,
+    normalizeValue:
+      params.metricRef === 'process.memory.rss' || params.metricRef === 'os.memory.total'
+        ? normalizeRssMemoryValue
+        : params.metricRef.includes('utilization')
+          ? normalizeUtilizationValue
+          : undefined,
   });
 };
 
@@ -244,7 +289,8 @@ const queryExactProtocolDurationSeries = async (params: {
   return queryTimeseries({
     measurementFilter: `r["_measurement"] == "${params.metricRef}"`,
     fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
-    aggregateFn: params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+    aggregateFn:
+      params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
@@ -264,7 +310,8 @@ const queryProtocolDurationSeries = async (params: {
   return queryTimeseries({
     measurementFilter: RESPONSE_DURATION_MEASUREMENT_FILTER,
     fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
-    aggregateFn: params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+    aggregateFn:
+      params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
@@ -274,7 +321,12 @@ const queryProtocolDurationSeries = async (params: {
   });
 };
 
-const queryLatestDurationWithFallback = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+const queryLatestDurationWithFallback = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
   const series = await queryProtocolDurationSeries({
     aggregation: 'latest',
     timeRange: params.timeRange,
@@ -329,14 +381,22 @@ const queryRawRequestErrorSeries = async (params: {
     InfluxDBHandler.queryMetrics(errorQuery, params.star).catch(() => []),
   ]);
   const totalSeries = normalizeSeries(totalRows);
-  const errorValueByTimestamp = new Map(normalizeSeries(errorRows).map((point) => [point.timestamp, point.value]));
+  const errorValueByTimestamp = new Map(
+    normalizeSeries(errorRows).map((point) => [point.timestamp, point.value]),
+  );
   return totalSeries.map((point) => ({
     timestamp: point.timestamp,
     value: errorValueByTimestamp.get(point.timestamp) || 0,
   }));
 };
 
-const queryMemoryUsagePercentSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight; aggregateFn: 'mean' | 'max' | 'last' }) => {
+const queryMemoryUsagePercentSeries = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+  aggregateFn: 'mean' | 'max' | 'last';
+}) => {
   return queryTimeseries({
     measurementFilter: 'r["_measurement"] == "process.memory.heap.utilization"',
     fieldFilter: 'r["_field"] == "value"',
@@ -354,18 +414,19 @@ const queryRequestRateSeries = async (params: {
   timeRange: string;
   stop?: string;
   serviceId?: string;
+  serviceFilter?: string;
   star: Starlight;
 }) => {
   const bucket = getBucketNameOrThrow();
   const every = resolveInterval(params.timeRange);
   const intervalSeconds = Math.max(1, parseRangeSeconds(every));
-  const serviceFilter = buildServiceFilter(params.serviceId);
+  const serviceFilter = params.serviceFilter ?? buildServiceFilter(params.serviceId);
   const fluxQuery = `
       from(bucket: "${bucket}")
       |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
       |> filter(fn: (r) => ${params.measurementFilter})
       ${serviceFilter}
-      |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+      |> filter(fn: (r) => r["_field"] == "value")
       |> aggregateWindow(every: ${every}, fn: sum, createEmpty: true)
       |> fill(value: 0.0)
       |> group(columns: ["_time"])
@@ -376,26 +437,75 @@ const queryRequestRateSeries = async (params: {
   return normalizeSeries(rows, (value) => toFixed(Number(value || 0) / intervalSeconds, 2));
 };
 
-const queryServiceQpsSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+const queryNodeUniverseRequestRateSeries = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
+  const bucket = getBucketNameOrThrow();
+  const every = resolveInterval(params.timeRange);
+  const intervalSeconds = Math.max(1, parseRangeSeconds(every));
+  const serviceFilter = buildServiceFilter(params.serviceId);
+  const rateQuery = `
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_field"] == "rate")
+      |> aggregateWindow(every: ${every}, fn: mean, createEmpty: false)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
+  `;
+  const rateRows = await InfluxDBHandler.queryMetrics(rateQuery, params.star);
+  if (rateRows.length > 0) {
+    return normalizeSeries(rateRows, (value) => toFixed(Number(value || 0) / 60, 2));
+  }
+
+  const counterDeltaQuery = `
+      from(bucket: "${bucket}")
+      |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
+      |> filter(fn: (r) => r["_measurement"] == "universe.request.total")
+      ${serviceFilter}
+      |> filter(fn: (r) => r["_field"] == "value")
+      |> aggregateWindow(every: ${every}, fn: last, createEmpty: false)
+      |> difference(nonNegative: true)
+      |> group(columns: ["_time"])
+      |> sum(column: "_value")
+      |> sort(columns: ["_time"])
+  `;
+  const counterDeltaRows = await InfluxDBHandler.queryMetrics(counterDeltaQuery, params.star);
+  return normalizeSeries(counterDeltaRows, (value) =>
+    toFixed(Number(value || 0) / intervalSeconds, 2),
+  );
+};
+
+export const queryServiceQpsSeries = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
   const protocolSeries = await queryRequestRateSeries({
-    measurementFilter: 'r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total"',
+    measurementFilter:
+      'r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total"',
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
+    serviceFilter: buildProtocolServiceFilter(params.serviceId),
     star: params.star,
   });
 
   if (protocolSeries.length > 0) return protocolSeries;
 
-  return queryRequestRateSeries({
-    measurementFilter: 'r["_measurement"] == "universe.request.total"',
+  return queryNodeUniverseRequestRateSeries({
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
     star: params.star,
   });
 };
-
 
 const buildMetricSeriesForCalculation = async (params: {
   metricRef: string;
@@ -405,7 +515,14 @@ const buildMetricSeriesForCalculation = async (params: {
   serviceId?: string;
   star: Starlight;
 }) => {
-  const aggregateFn = params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : params.aggregation === 'sum' ? 'sum' : 'mean';
+  const aggregateFn =
+    params.aggregation === 'latest'
+      ? 'last'
+      : params.aggregation === 'max'
+        ? 'max'
+        : params.aggregation === 'sum'
+          ? 'sum'
+          : 'mean';
   if (params.metricRef === 'process.memory.rss' || params.metricRef === 'service.memory.usage') {
     return queryTimeseries({
       measurementFilter: 'r["_measurement"] == "process.memory.rss"',
@@ -421,7 +538,8 @@ const buildMetricSeriesForCalculation = async (params: {
   if (params.metricRef === 'os.memory.total') {
     return queryTimeseries({
       measurementFilter: 'r["_measurement"] == "os.memory.total"',
-      fieldFilter: 'r["_field"] == "memory_total" or r["_field"] == "total" or r["_field"] == "value"',
+      fieldFilter:
+        'r["_field"] == "memory_total" or r["_field"] == "total" or r["_field"] == "value"',
       aggregateFn: params.aggregation === 'max' ? 'max' : 'last',
       timeRange: params.timeRange,
       stop: params.stop,
@@ -432,7 +550,13 @@ const buildMetricSeriesForCalculation = async (params: {
   return [];
 };
 
-const queryRatioCalculationSeries = async (params: { query: any; timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+const queryRatioCalculationSeries = async (params: {
+  query: any;
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
   const calculation = params.query?.calculation;
   const [numeratorSeries, denominatorSeries] = await Promise.all([
     buildMetricSeriesForCalculation({
@@ -465,7 +589,12 @@ const queryRatioCalculationSeries = async (params: { query: any; timeRange: stri
     .filter((point) => Number.isFinite(point.value));
 };
 
-const queryErrorRateSeries = async (params: { timeRange: string; stop?: string; serviceId?: string; star: Starlight }) => {
+const queryErrorRateSeries = async (params: {
+  timeRange: string;
+  stop?: string;
+  serviceId?: string;
+  star: Starlight;
+}) => {
   const bucket = getBucketNameOrThrow();
   const serviceFilter = buildServiceFilter(params.serviceId);
   const every = resolveInterval(params.timeRange);
@@ -511,35 +640,55 @@ const queryErrorRateSeries = async (params: { timeRange: string; stop?: string; 
 const getLatestPoint = (series: Array<{ timestamp: number; value: number }>) =>
   series.length ? series[series.length - 1] : null;
 
-const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceContext: any, options?: { stop?: string }) => {
+const buildBaseCardDataFromQuery = async (
+  query: any,
+  star: Starlight,
+  serviceContext: any,
+  options?: { stop?: string },
+) => {
   const metricRef = String(query?.metricRef || '').trim();
   const timeRange = String(query?.timeRange || '-1h');
   const stop = options?.stop;
-  const serviceId = query?.subject?.type === 'service' ? String(query?.subject?.id || '') : undefined;
+  const serviceId =
+    query?.subject?.type === 'service' ? String(query?.subject?.id || '') : undefined;
   const visualizationHint = query?.visualizationHint;
-  const isSingleValueVisualization = visualizationHint === 'number' || visualizationHint === 'donut';
+  const isSingleValueVisualization =
+    visualizationHint === 'number' || visualizationHint === 'donut';
 
   if (query?.calculation?.type === 'ratio') {
     const series = await queryRatioCalculationSeries({ query, timeRange, stop, serviceId, star });
     const unit = typeof query.calculation.unit === 'string' ? query.calculation.unit : '';
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit,
+      };
     }
-    return { kind: 'timeseries', unit, series: [{ name: metricRef || 'Calculated ratio', points: series }] };
+    return {
+      kind: 'timeseries',
+      unit,
+      series: [{ name: metricRef || 'Calculated ratio', points: series }],
+    };
   }
 
   if (metricRef === 'service.cpu.usage') {
     const series = await queryTimeseries({
       measurementFilter: 'r["_measurement"] == "os.cpu.utilization"',
       fieldFilter: 'r["_field"] == "cpu_usage" or r["_field"] == "value"',
-      aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
+      aggregateFn:
+        query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
       stop,
       serviceId,
       star,
     });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: '%' };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit: '%',
+      };
     }
     return { kind: 'timeseries', unit: '%', series: [{ name: 'CPU', points: series }] };
   }
@@ -548,7 +697,8 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
     const series = await queryTimeseries({
       measurementFilter: 'r["_measurement"] == "process.memory.rss"',
       fieldFilter: 'r["_field"] == "memory_usage" or r["_field"] == "value"',
-      aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
+      aggregateFn:
+        query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
       stop,
       serviceId,
@@ -556,46 +706,71 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
       normalizeValue: normalizeRssMemoryValue,
     });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: MEMORY_USAGE_UNIT };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit: MEMORY_USAGE_UNIT,
+      };
     }
-    return { kind: 'timeseries', unit: MEMORY_USAGE_UNIT, series: [{ name: 'Memory', points: series }] };
+    return {
+      kind: 'timeseries',
+      unit: MEMORY_USAGE_UNIT,
+      series: [{ name: 'Memory', points: series }],
+    };
   }
 
   if (metricRef === 'service.memory.usage.percent') {
     const series = await queryMemoryUsagePercentSeries({
-      aggregateFn: query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
+      aggregateFn:
+        query?.aggregation === 'latest' ? 'last' : query?.aggregation === 'max' ? 'max' : 'mean',
       timeRange,
       stop,
       serviceId,
       star,
     });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: MEMORY_USAGE_PERCENT_UNIT };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit: MEMORY_USAGE_PERCENT_UNIT,
+      };
     }
-    return { kind: 'timeseries', unit: MEMORY_USAGE_PERCENT_UNIT, series: [{ name: 'Memory Usage', points: series }] };
+    return {
+      kind: 'timeseries',
+      unit: MEMORY_USAGE_PERCENT_UNIT,
+      series: [{ name: 'Memory Usage', points: series }],
+    };
   }
 
   if (metricRef === 'service.qps') {
     const qpsSeries = await queryServiceQpsSeries({ timeRange, stop, serviceId, star });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: qpsSeries.length ? qpsSeries[qpsSeries.length - 1].value : 0 };
+      return {
+        kind: 'number',
+        value: qpsSeries.length ? qpsSeries[qpsSeries.length - 1].value : 0,
+      };
     }
     return { kind: 'timeseries', series: [{ name: 'QPS', points: qpsSeries }] };
   }
 
   if (metricRef === 'service.response.time') {
     const aggregateFn = query?.aggregation === 'max' ? 'max' : 'mean';
-    const series = isSingleValueVisualization && query?.aggregation === 'latest'
-      ? await queryLatestDurationWithFallback({ timeRange, stop, serviceId, star })
-      : await queryProtocolDurationSeries({
-          aggregation: aggregateFn,
-          timeRange,
-          stop,
-          serviceId,
-          star,
-        });
+    const series =
+      isSingleValueVisualization && query?.aggregation === 'latest'
+        ? await queryLatestDurationWithFallback({ timeRange, stop, serviceId, star })
+        : await queryProtocolDurationSeries({
+            aggregation: aggregateFn,
+            timeRange,
+            stop,
+            serviceId,
+            star,
+          });
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit: 'ms' };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit: 'ms',
+      };
     }
     return { kind: 'timeseries', unit: 'ms', series: [{ name: 'Latency', points: series }] };
   }
@@ -610,7 +785,10 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
   }
 
   if (metricRef === 'instance.cpu.usage' || metricRef === 'instance.memory.usage') {
-    const rows = await serviceContext.getInstancesList({ serviceId: serviceId || '', scope: query?.scope });
+    const rows = await serviceContext.getInstancesList({
+      serviceId: serviceId || '',
+      scope: query?.scope,
+    });
     return {
       kind: 'table',
       columns: [
@@ -648,29 +826,58 @@ const buildBaseCardDataFromQuery = async (query: any, star: Starlight, serviceCo
     };
   }
 
+  if (metricRef === 'gateway.request.url.total') {
+    const bucket = getBucketNameOrThrow();
+    const limit = Math.max(1, Math.min(20, Number(query?.limit || 10)));
+    const fluxQuery = `
+      from(bucket: "${bucket}")
+        |> range(start: ${timeRange})
+        |> filter(fn: (r) => r["_measurement"] == "http_requests_total")
+        ${buildProtocolServiceFilter(serviceId)}
+        |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
+        |> filter(fn: (r) => exists r.url or exists r.path)
+        |> map(fn: (r) => ({ r with
+          request_url: if exists r.url then string(v: r.url) else if exists r.path then string(v: r.path) else "",
+          request_method: if exists r.method then string(v: r.method) else "HTTP"
+        }))
+        |> group(columns: ["request_url", "request_method"])
+        |> sum()
+    `;
+    const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
+    return {
+      kind: 'distribution',
+      items: buildGatewayRequestUrlDistributionItems(rows, limit),
+    };
+  }
+
   if (isRawSystemMetricRef(metricRef)) {
-    const series = metricRef === 'universe.request.error.total'
-      ? await queryRawRequestErrorSeries({ timeRange, stop, serviceId, star })
-      : isProtocolDurationMetricRef(metricRef)
-        ? await queryExactProtocolDurationSeries({
-            metricRef,
-            aggregation: query?.aggregation,
-            timeRange,
-            stop,
-            serviceId,
-            star,
-          })
-      : await queryRawSystemMetricSeries({
-          metricRef,
-          aggregation: query?.aggregation,
-          timeRange,
-          stop,
-          serviceId,
-          star,
-        });
+    const series =
+      metricRef === 'universe.request.error.total'
+        ? await queryRawRequestErrorSeries({ timeRange, stop, serviceId, star })
+        : isProtocolDurationMetricRef(metricRef)
+          ? await queryExactProtocolDurationSeries({
+              metricRef,
+              aggregation: query?.aggregation,
+              timeRange,
+              stop,
+              serviceId,
+              star,
+            })
+          : await queryRawSystemMetricSeries({
+              metricRef,
+              aggregation: query?.aggregation,
+              timeRange,
+              stop,
+              serviceId,
+              star,
+            });
     const unit = rawSystemMetricUnit(metricRef);
     if (isSingleValueVisualization) {
-      return { kind: 'number', value: series.length ? series[series.length - 1].value : null, unit };
+      return {
+        kind: 'number',
+        value: series.length ? series[series.length - 1].value : null,
+        unit,
+      };
     }
     return { kind: 'timeseries', unit, series: [{ name: metricRef, points: series }] };
   }
@@ -686,7 +893,10 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
   const currentValue = Number(data.value);
   if (!Number.isFinite(currentValue)) return data;
 
-  const { timeRange, stop } = resolveCompareTimeRange(String(query?.timeRange || '-1h'), compare.mode);
+  const { timeRange, stop } = resolveCompareTimeRange(
+    String(query?.timeRange || '-1h'),
+    compare.mode,
+  );
   const baselineData = await buildBaseCardDataFromQuery(
     {
       ...query,
@@ -695,7 +905,7 @@ const buildCardDataFromQuery = async (query: any, star: Starlight, serviceContex
     },
     star,
     serviceContext,
-    { stop }
+    { stop },
   ).catch(() => null);
 
   const baselineValue = baselineData?.kind === 'number' ? baselineData.value : null;
@@ -805,7 +1015,9 @@ function createMetricsQueryService() {
       async getInstancesList(params: { serviceId: string; scope?: 'tenant' | 'system' }) {
         const rawServiceId = String(params?.serviceId || '').trim();
         const scope = normalizeMetricsScope(params?.scope);
-        const serviceId = rawServiceId.startsWith('system:') ? rawServiceId.slice('system:'.length) : rawServiceId;
+        const serviceId = rawServiceId.startsWith('system:')
+          ? rawServiceId.slice('system:'.length)
+          : rawServiceId;
         if (!serviceId || serviceId.startsWith('$')) return [];
         const nodes = star.registry?.getNodeList({ onlyAvaiable: true, withServices: true }) || [];
         const instances: any[] = [];
@@ -829,7 +1041,13 @@ function createMetricsQueryService() {
         });
         return instances;
       },
-      async getServicesList(params: { page?: number; pageSize?: number; status?: string | string[]; keyword?: string; scope?: 'tenant' | 'system' }) {
+      async getServicesList(params: {
+        page?: number;
+        pageSize?: number;
+        status?: string | string[];
+        keyword?: string;
+        scope?: 'tenant' | 'system';
+      }) {
         return await buildServiceCatalogSnapshot(
           {
             page: Number(params?.page || 1),
@@ -867,7 +1085,9 @@ function createMetricsQueryService() {
             }
 
             const scope = normalizeMetricsScope(ctx.params?.scope);
-            const sourceKind = ['auto', 'sdk', 'darwin-event', 'mixed'].includes(String(ctx.params?.sourceKind || ''))
+            const sourceKind = ['auto', 'sdk', 'darwin-event', 'mixed'].includes(
+              String(ctx.params?.sourceKind || ''),
+            )
               ? (ctx.params?.sourceKind as 'auto' | 'sdk' | 'darwin-event' | 'mixed')
               : undefined;
             const serviceId = String(ctx.params?.serviceId || '').trim() || undefined;
@@ -942,7 +1162,7 @@ function createMetricsQueryService() {
                 try {
                   const validation = validateQuerySpec(
                     { ...(card?.query || {}), scope: card?.query?.scope || scope },
-                    normalizeMetricsScope
+                    normalizeMetricsScope,
                   );
                   if (!validation.valid) {
                     return {
@@ -953,14 +1173,21 @@ function createMetricsQueryService() {
                       error: { code: 'INVALID_QUERY_SPEC', message: validation.issues.join('; ') },
                     };
                   }
-                  const data = await buildCardDataFromQuery(validation.normalizedQuery, star, this as any);
+                  const data = await buildCardDataFromQuery(
+                    validation.normalizedQuery,
+                    star,
+                    this as any,
+                  );
                   if (!data) {
                     return {
                       cardId: String(card?.cardId || ''),
                       status: 'error',
                       startedAt: cardStartedAt,
                       finishedAt: Date.now(),
-                      error: { code: 'UNSUPPORTED_METRIC_REF', message: `Unsupported metricRef: ${validation.normalizedQuery.metricRef || 'unknown'}` },
+                      error: {
+                        code: 'UNSUPPORTED_METRIC_REF',
+                        message: `Unsupported metricRef: ${validation.normalizedQuery.metricRef || 'unknown'}`,
+                      },
                     };
                   }
                   return {
@@ -977,11 +1204,57 @@ function createMetricsQueryService() {
                     status: 'error',
                     startedAt: cardStartedAt,
                     finishedAt: Date.now(),
-                    error: { code: 'QUERY_EXECUTION_FAILED', message: error?.message || 'Query execution failed' },
+                    error: {
+                      code: 'QUERY_EXECUTION_FAILED',
+                      message: error?.message || 'Query execution failed',
+                    },
                   };
                 }
               }),
             );
+
+            // Auto-upsert alert rules from card configs so metrics-alerts evaluator sees them
+            // Deduplicate by metric so multiple cards referencing the same metric don't create duplicate rules
+            const seenMetrics = new Set<string>()
+            const cardsToUpsert = cards
+              .filter((card: any) => card?.query?.alert?.enabled && card?.query?.alert?.ruleId)
+              .filter((card: any) => {
+                const key = `${card.query.metricRef || ''}::${card.query.subject?.type === 'service' ? card.query.subject?.id || 'all' : 'all'}`
+                if (seenMetrics.has(key)) return false
+                seenMetrics.add(key)
+                return true
+              })
+            Promise.allSettled(
+              cardsToUpsert.map(async (card: any) => {
+                  const alert = card.query.alert
+                  const query = card.query
+                  const service =
+                    query.subject?.type === 'service' ? query.subject?.id || 'all' : 'all'
+                  const payload = {
+                    id: alert.ruleId,
+                    name:
+                      alert.name ||
+                      `${query.metricRef || 'unknown'} ${alert.level || 'warning'}阈值告警`,
+                    service,
+                    metric: query.metricRef,
+                    operator: alert.operator || '>',
+                    threshold: Number(alert.threshold ?? 0),
+                    unit: alert.unit || '',
+                    duration: Number(alert.duration || 5),
+                    level: alert.level || 'warning',
+                    enabled: alert.enabled !== false,
+                    channels: alert.channels?.length ? alert.channels : ['Email'],
+                  }
+                  try {
+                    await ctx.call('metrics-alerts.v1.alert-rules/:id', payload)
+                  } catch (err) {
+                    star.logger?.warn(
+                      `[AlertEval] Failed to upsert alert rule ${alert.ruleId} from card ${card.cardId}:`,
+                      err,
+                    )
+                  }
+                }),
+            )
 
             const response = {
               status: 200,
@@ -1023,8 +1296,11 @@ function createMetricsQueryService() {
           try {
             assertSystemScopeAllowed(ctx);
             const validation = validateQuerySpec(
-              { ...(ctx.params?.query || {}), scope: ctx.params?.query?.scope || ctx.params?.scope },
-              normalizeMetricsScope
+              {
+                ...(ctx.params?.query || {}),
+                scope: ctx.params?.query?.scope || ctx.params?.scope,
+              },
+              normalizeMetricsScope,
             );
             const cacheKey = `metrics-query:preview:${JSON.stringify({ scope: ctx.params?.scope, query: validation.normalizedQuery, valid: validation.valid, issues: validation.issues })}`;
             const cached = getCachedQueryResult(cacheKey);
@@ -1044,7 +1320,11 @@ function createMetricsQueryService() {
               setCachedQueryResult(cacheKey, response);
               return response;
             }
-            const data = await buildCardDataFromQuery(validation.normalizedQuery, star, this as any);
+            const data = await buildCardDataFromQuery(
+              validation.normalizedQuery,
+              star,
+              this as any,
+            );
             const response = {
               status: 200,
               data: {
@@ -1079,8 +1359,11 @@ function createMetricsQueryService() {
           try {
             assertSystemScopeAllowed(ctx);
             const validation = validateQuerySpec(
-              { ...(ctx.params?.query || {}), scope: ctx.params?.query?.scope || ctx.params?.scope },
-              normalizeMetricsScope
+              {
+                ...(ctx.params?.query || {}),
+                scope: ctx.params?.query?.scope || ctx.params?.scope,
+              },
+              normalizeMetricsScope,
             );
             return {
               status: 200,
@@ -1096,7 +1379,11 @@ function createMetricsQueryService() {
               status: 200,
               data: {
                 code: HttpResponseCode.Success,
-                content: { supported: true, valid: false, issues: [error?.message || '查询校验失败'] },
+                content: {
+                  supported: true,
+                  valid: false,
+                  issues: [error?.message || '查询校验失败'],
+                },
                 message: '查询校验失败',
                 success: true,
               },
@@ -1114,7 +1401,7 @@ function createMetricsQueryService() {
           assertSystemScopeAllowed(ctx);
           const validation = validateQuerySpec(
             { ...(ctx.params?.query || {}), scope: ctx.params?.query?.scope || ctx.params?.scope },
-            normalizeMetricsScope
+            normalizeMetricsScope,
           );
           return {
             status: 200,
@@ -1122,7 +1409,11 @@ function createMetricsQueryService() {
               code: HttpResponseCode.Success,
               content: {
                 supported: validation.valid,
-                script: JSON.stringify({ type: 'queryspec', query: validation.normalizedQuery }, null, 2),
+                script: JSON.stringify(
+                  { type: 'queryspec', query: validation.normalizedQuery },
+                  null,
+                  2,
+                ),
                 language: 'queryspec-json',
                 issues: validation.issues,
               },

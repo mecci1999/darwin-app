@@ -16,6 +16,7 @@ type MicroAppManifest = {
 };
 
 const TICKET_SECRET = process.env.MICRO_APP_TICKET_SECRET || 'starlight-micro-app-ticket-secret';
+const MAX_MICRO_APP_PACKAGE_BYTES = Number(process.env.MICRO_APP_MAX_PACKAGE_MB || 100) * 1024 * 1024;
 const uploadChunkKey = (uploadId: string) => `micro-app:upload:${uploadId}`;
 type ChunkUploadState = { total: number; chunks: Record<string, string>; updatedAt: number };
 
@@ -139,6 +140,7 @@ const currentUserId = (ctx: Context) => String(currentUser(ctx)?.userId || curre
 const currentTenantId = (ctx: Context) => String((ctx.meta as any)?.tenantId || currentUser(ctx)?.tenantId || currentUserId(ctx));
 const isAdmin = (ctx: Context) => Boolean(currentUser(ctx)?.isAdmin);
 const requestIp = (ctx: Context) => String((ctx.meta as any)?.req?.ip || '');
+const requestedPackageVersion = (params: any) => String(params?.targetVersion || params?.appVersion || '');
 
 const hashToPercent = (value: string) => parseInt(crypto.createHash('sha256').update(value).digest('hex').slice(0, 8), 16) % 100;
 
@@ -222,7 +224,9 @@ export default function microAppActions(star: Starlight) {
 
           const packageBuffer = Buffer.from(packageBase64, 'base64');
           if (!packageBuffer.length) return fail('微应用包格式不正确');
-          if (packageBuffer.length > 50 * 1024 * 1024) return fail('微应用包不能超过 50MB');
+          if (packageBuffer.length > MAX_MICRO_APP_PACKAGE_BYTES) {
+            return fail(`微应用包不能超过 ${Math.floor(MAX_MICRO_APP_PACKAGE_BYTES / 1024 / 1024)}MB`);
+          }
           const manifest = parseManifestFromZip(packageBuffer);
           const scanReport = createStaticScanReport(packageBuffer);
           if (!scanReport.passed) return fail('静态安全扫描未通过，请移除敏感文件后重新上传');
@@ -329,7 +333,8 @@ export default function microAppActions(star: Starlight) {
       metadata: { auth: true },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         if (!isAdmin(ctx)) return fail('只有管理员可以审核微应用', HttpResponseCode.NoPermissionError, 403);
-        const { appId, version, decision, reason } = ctx.params as any;
+        const { appId, decision, reason } = ctx.params as any;
+        const version = requestedPackageVersion(ctx.params);
         if (!appId || !version || !['approved', 'rejected'].includes(decision)) return fail('审核参数不完整');
         const before = await star.db.microApp.findMicroAppVersion(appId, version);
         const next = await star.db.microApp.updateMicroAppVersionStatus(appId, version, decision, {
@@ -353,7 +358,8 @@ export default function microAppActions(star: Starlight) {
       metadata: { auth: true },
       async handler(ctx: Context): Promise<HttpResponseItem> {
         if (!isAdmin(ctx)) return fail('只有管理员可以发布微应用', HttpResponseCode.NoPermissionError, 403);
-        const { appId, version } = ctx.params as any;
+        const { appId } = ctx.params as any;
+        const version = requestedPackageVersion(ctx.params);
         const record = await star.db.microApp.findMicroAppVersion(appId, version);
         if (!record) return fail('微应用版本不存在');
         if (!['approved', 'published'].includes(record.status)) return fail('只有审核通过的版本可以发布');
@@ -415,7 +421,8 @@ export default function microAppActions(star: Starlight) {
     'v1.download': {
       metadata: { auth: true },
       async handler(ctx: Context): Promise<HttpResponseItem> {
-        const { appId, version } = ctx.params as any;
+        const { appId } = ctx.params as any;
+        const version = requestedPackageVersion(ctx.params);
         const app = await star.db.microApp.findMicroAppByAppId(appId);
         if (!canAccessApp(ctx, app)) return fail('没有该微应用的使用权限', HttpResponseCode.NoPermissionError, 403);
         const record = version
@@ -434,10 +441,27 @@ export default function microAppActions(star: Starlight) {
       },
     },
 
+    'v1.previewDownload': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        if (!isAdmin(ctx)) return fail('只有管理员可以预览待审核微应用', HttpResponseCode.NoPermissionError, 403);
+        const { appId } = ctx.params as any;
+        const version = requestedPackageVersion(ctx.params);
+        if (!appId || !version) return fail('预览参数不完整');
+        const record = await star.db.microApp.findMicroAppVersion(appId, version);
+        if (!record) return fail('微应用版本不存在');
+        if (!['pending_review', 'approved', 'published'].includes(record.status)) {
+          return fail('当前版本状态不支持预览');
+        }
+        return ok(publicVersion(record, true), '微应用预览包获取成功');
+      },
+    },
+
     'v1.runtime-ticket': {
       metadata: { auth: true },
       async handler(ctx: Context): Promise<HttpResponseItem> {
-        const { appId, version } = ctx.params as any;
+        const { appId } = ctx.params as any;
+        const version = requestedPackageVersion(ctx.params);
         const app = await star.db.microApp.findMicroAppByAppId(appId);
         if (!canAccessApp(ctx, app)) return fail('没有该微应用的运行权限', HttpResponseCode.NoPermissionError, 403);
         const record = version

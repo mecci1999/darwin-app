@@ -37,10 +37,15 @@ import {
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
 
-const GATEWAY_SERVICE_WAIT_TIMEOUT_MS = Number(process.env.GATEWAY_SERVICE_WAIT_TIMEOUT_MS || 20000);
-const GATEWAY_SERVICE_WAIT_INTERVAL_MS = Number(process.env.GATEWAY_SERVICE_WAIT_INTERVAL_MS || 500);
+const GATEWAY_SERVICE_WAIT_TIMEOUT_MS = Number(
+  process.env.GATEWAY_SERVICE_WAIT_TIMEOUT_MS || 20000,
+);
+const GATEWAY_SERVICE_WAIT_INTERVAL_MS = Number(
+  process.env.GATEWAY_SERVICE_WAIT_INTERVAL_MS || 500,
+);
 const UPLOADS_PUBLIC_PREFIX = '/uploads/';
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const JSON_BODY_LIMIT = process.env.GATEWAY_JSON_BODY_LIMIT || '16mb';
 
 const tryServeUploadedAsset = async (req: IncomingRequest, res: GatewayResponse) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
@@ -83,12 +88,17 @@ const tryServeUploadedAsset = async (req: IncomingRequest, res: GatewayResponse)
 };
 
 const waitForRegisteredService = async (star: Starlight, service: string) => {
-  const hasService = () => star.registry?.services?.list?.().some((item: any) => item.name === service);
+  const hasService = () =>
+    star.registry?.services?.list?.().some((item: any) => item.name === service);
 
   if (hasService()) return true;
 
   try {
-    await star.waitForServices(service, GATEWAY_SERVICE_WAIT_TIMEOUT_MS, GATEWAY_SERVICE_WAIT_INTERVAL_MS);
+    await star.waitForServices(
+      service,
+      GATEWAY_SERVICE_WAIT_TIMEOUT_MS,
+      GATEWAY_SERVICE_WAIT_INTERVAL_MS,
+    );
   } catch (error) {
     star.logger?.warn('Gateway target service wait timed out', {
       service,
@@ -142,6 +152,7 @@ const emitGatewayTopologyMetric = async (
     durationMs: number;
     userId?: string;
     method?: string;
+    requestUrl?: string;
     phase?: 'start' | 'finish';
   },
 ) => {
@@ -159,6 +170,7 @@ const emitGatewayTopologyMetric = async (
     phase: params.phase,
     userId: params.userId,
     method: params.method,
+    requestUrl: params.requestUrl,
     timestamp: Date.now(),
   };
 
@@ -166,17 +178,23 @@ const emitGatewayTopologyMetric = async (
     if (typeof ctx.call !== 'function') {
       throw new Error('ctx.call unavailable');
     }
-    const result = await ctx.call('metrics.v1.topology', {
-      ...payload,
-      scope: 'system',
-    }, {
-      meta: {
-        ...ctx.meta,
-        adminMetrics: true,
+    const result = await ctx.call(
+      'metrics.v1.topology',
+      {
+        ...payload,
+        scope: 'system',
       },
-    });
+      {
+        meta: {
+          ...ctx.meta,
+          adminMetrics: true,
+        },
+      },
+    );
     if ((result as any)?.data?.success === false || (result as any)?.status >= 400) {
-      throw new Error(`metrics.v1.topology rejected observed metric: ${JSON.stringify((result as any)?.data || result)}`);
+      throw new Error(
+        `metrics.v1.topology rejected observed metric: ${JSON.stringify((result as any)?.data || result)}`,
+      );
     }
   } catch (error) {
     star.logger?.warn('Gateway topology metric rpc failed, falling back to event emit', {
@@ -220,7 +238,12 @@ const shouldSkipTopologyObservation = (service: string, action: string, params: 
 
 const shouldPreserveSlashActionPath = (service: string) => service === 'metrics-alerts';
 
-const remapMetricsRoute = (rawService: string, rawVersion: string, rawAction: string, rawParams: any = {}) => {
+const remapMetricsRoute = (
+  rawService: string,
+  rawVersion: string,
+  rawAction: string,
+  rawParams: any = {},
+) => {
   let service = rawService;
   let action = rawAction;
   const params = { ...rawParams };
@@ -316,8 +339,13 @@ const remapSubscriptionRoute = (rawService: string, rawAction: string, rawParams
 const normalizeGatewayRouteParams = (req: IncomingRequest) => {
   const originalUrl = String(req.originalUrl || '');
   const rawPath = originalUrl.split('?')[0] || '';
-  const apiPath = rawPath.startsWith('/api/') ? rawPath.slice('/api/'.length) : rawPath.replace(/^\//, '');
-  const segments = apiPath.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+  const apiPath = rawPath.startsWith('/api/')
+    ? rawPath.slice('/api/'.length)
+    : rawPath.replace(/^\//, '');
+  const segments = apiPath
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment));
 
   if (segments.length < 3) return req.$params;
 
@@ -328,6 +356,24 @@ const normalizeGatewayRouteParams = (req: IncomingRequest) => {
     version: segments[1],
     action: segments.slice(2).join('/'),
   };
+};
+
+const safeDecodePath = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const resolveGatewayRequestPath = (reqMeta?: { originalUrl?: unknown; url?: unknown }) => {
+  const rawUrl = String(reqMeta?.originalUrl || reqMeta?.url || '').trim();
+  if (!rawUrl) return '';
+  try {
+    return safeDecodePath(new URL(rawUrl, 'http://localhost').pathname || '/');
+  } catch {
+    return safeDecodePath(rawUrl.split('?')[0] || '');
+  }
 };
 
 let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
@@ -459,7 +505,7 @@ async function initializeGatewayService() {
             '/': 'gateway.dispatch',
           },
           bodyParsers: {
-            json: true,
+            json: { limit: JSON_BODY_LIMIT },
           },
           async onBeforeCall(
             ctx: Context,
@@ -471,6 +517,8 @@ async function initializeGatewayService() {
               userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
               headers: req.headers,
               method: req.method,
+              originalUrl: req.originalUrl || req.url,
+              url: req.url,
             };
 
             if (req?.socket?.remoteAddress) {
@@ -569,7 +617,7 @@ async function initializeGatewayService() {
             '/': 'gateway.dispatch',
           },
           bodyParsers: {
-            json: true,
+            json: { limit: JSON_BODY_LIMIT },
           },
           // 请求发生前处理
           async onBeforeCall(
@@ -583,6 +631,8 @@ async function initializeGatewayService() {
               userAgent: req.headers['user-agent'] || req.headers['User-Agent'],
               headers: req.headers,
               method: req.method,
+              originalUrl: req.originalUrl || req.url,
+              url: req.url,
             };
 
             // IP黑名单检查
@@ -773,7 +823,9 @@ async function initializeGatewayService() {
 
           const dispatchStartedAt = Date.now();
           const userId = (ctx.meta as any)?.user?.userId;
-          const method = (ctx.meta as any)?.req?.method;
+          const reqMeta = (ctx.meta as any)?.req;
+          const method = reqMeta?.method;
+          const requestUrl = resolveGatewayRequestPath(reqMeta);
           const isLogStreamDispatch = service === 'logs' && version === 'v1' && action === 'stream';
           if (isLogStreamDispatch) {
             star.logger?.info('Gateway log stream dispatch start', {
@@ -786,7 +838,11 @@ async function initializeGatewayService() {
               level: (params as any)?.level,
             });
           }
-          const shouldRecordBeforeDispatch = !shouldSkipTopologyObservation(service, action, params);
+          const shouldRecordBeforeDispatch = !shouldSkipTopologyObservation(
+            service,
+            action,
+            params,
+          );
 
           if (shouldRecordBeforeDispatch) {
             void emitGatewayTopologyMetric(ctx, star, {
@@ -798,10 +854,12 @@ async function initializeGatewayService() {
               phase: 'start',
               userId,
               method,
+              requestUrl,
             });
           }
 
-          return ctx.call(`${service}.${version}.${action}`, params, { meta: ctx.meta })
+          return ctx
+            .call(`${service}.${version}.${action}`, params, { meta: ctx.meta })
             .then((result) => {
               if (isLogStreamDispatch) {
                 star.logger?.info('Gateway log stream dispatch result', {
@@ -823,6 +881,7 @@ async function initializeGatewayService() {
                   phase: 'finish',
                   userId,
                   method,
+                  requestUrl,
                 });
               }
               if (service === 'metrics-query') {
@@ -851,6 +910,7 @@ async function initializeGatewayService() {
                   phase: 'finish',
                   userId,
                   method,
+                  requestUrl,
                 });
               }
               if (service === 'metrics-query') {
