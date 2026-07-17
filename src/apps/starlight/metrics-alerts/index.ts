@@ -107,11 +107,7 @@ function createMetricsAlertsService() {
       await InfluxDBHandler.initialize(this.settings.influxdb, star);
       const runEvaluation = async () => {
         try {
-          this.logger.info('[AlertEval] ===== evaluation cycle starting =====');
           const results = await evaluateAlertRules(this as any, star);
-          this.logger.info(
-            `[AlertEval] ===== evaluation cycle done: ${results.length} rules evaluated =====`,
-          );
         } catch (error) {
           this.logger.error('[AlertEval] Metrics alert rule evaluation failed:', error);
         }

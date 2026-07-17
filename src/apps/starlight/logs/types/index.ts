@@ -459,6 +459,7 @@ export interface LogsState {
     batchProcessor: NodeJS.Timeout | null;
     elasticsearchReconnect?: NodeJS.Timeout | null;
     streamCleaner?: NodeJS.Timeout | null;
+    diskMonitor?: NodeJS.Timeout | null;
   };
   cache: {
     logs: Map<string, any>;

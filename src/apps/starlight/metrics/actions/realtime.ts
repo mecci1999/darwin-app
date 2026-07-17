@@ -271,7 +271,9 @@ const buildRequestStats = async (timeRange: string, star: Starlight) => {
       |> range(start: ${timeRange})
       |> filter(fn: (r) => r["_measurement"] == "universe.request.total" or r["_measurement"] == "http_requests_total" or r["_measurement"] == "rpc_requests_total" or r["_measurement"] == "messaging_requests_total")
       |> filter(fn: (r) => r["_field"] == "value" or r["_field"] == "count" or r["_field"] == "total")
-      |> aggregateWindow(every: 1d, fn: sum, createEmpty: false)
+      |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+      |> derivative(unit: 1s, nonNegative: true)
+      |> aggregateWindow(every: 1h, fn: sum, createEmpty: false)
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();

@@ -531,9 +531,6 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
     try {
       const value = await queryRuleMetricValue(rule, star);
       if (typeof value !== 'number' || !Number.isFinite(value)) {
-        star.logger?.warn(
-          `[AlertEval] rule=${rule.id} metric=${rule.metric} SKIPPED (no data)`,
-        );
         continue;
       }
       const matched = compareValue(value, rule.operator, rule.threshold);
@@ -550,9 +547,6 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
             ? 'suppressed'
             : 'resolved';
       if (matched || sustained || nextStatus !== (previousStatus || 'resolved')) {
-        star.logger?.info(
-          `[AlertEval] rule=${rule.id} value=${value} ${rule.operator} ${rule.threshold} => matched=${matched} sustained=${sustained} status=${previousStatus || 'none'} -> ${nextStatus}`,
-        );
       }
       const serviceName =
         rule.service === 'all' ? '全系统' : normalizeServiceId(rule.service) || rule.service;
@@ -637,17 +631,11 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
                 time: nextAlert.time,
               },
             })
-            star.logger?.info(
-              `[AlertEval] rule=${rule.id} WebSocket push ok`,
-            )
           }
           } catch (err) {
           star.logger?.warn(`[AlertEval] rule=${rule.id} WebSocket push failed:`, err)
         }
       } else if (nextAlert.status === 'active') {
-        star.logger?.info(
-          `[AlertEval] rule=${rule.id} notification SKIPPED (cooldown: ${cooldownRemaining}ms remaining)`,
-        );
       }
 
       results.push(nextAlert);

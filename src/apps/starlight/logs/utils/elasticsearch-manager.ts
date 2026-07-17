@@ -5,6 +5,10 @@
 import { ElasticsearchClient, summarizeElasticsearchError } from './elasticsearch';
 import { Context } from 'node-universe';
 
+const DISK_CHECK_THRESHOLD = 85
+const MAX_INDEX_AGE_DAYS = 7
+const DISK_CHECK_INTERVAL_MS = 10 * 60 * 1000
+
 class ElasticsearchManager {
   private static instance: ElasticsearchManager;
   private esClient: ElasticsearchClient | null = null;
@@ -128,6 +132,80 @@ class ElasticsearchManager {
    */
   isConnected(): boolean {
     return this.isInitialized && this.esClient !== null;
+  }
+
+  async checkDiskAndCleanup(): Promise<void> {
+    if (!this.esClient) return
+
+    try {
+      const rawClient = (this.esClient as any).client || this.esClient
+
+      const [clusterStats, indices] = await Promise.all([
+        (rawClient as any).cluster?.stats?.() ?? (rawClient as any).nodes?.stats?.(),
+        (rawClient as any).cat?.indices?.({ format: 'json', h: 'index,creation.date.string,store.size', bytes: 'b' }) ?? [],
+      ])
+
+      const totalBytes = clusterStats?.nodes?.fs?.total_in_bytes ?? clusterStats?._nodes?.total
+      const availableBytes = clusterStats?.nodes?.fs?.available_in_bytes
+      const diskUsagePercent = totalBytes && availableBytes
+        ? Math.round(((totalBytes - availableBytes) / totalBytes) * 100)
+        : null
+
+      if (diskUsagePercent === null) return
+
+      if (diskUsagePercent < DISK_CHECK_THRESHOLD) return
+
+      console.warn(
+        `[ES Cleanup] 磁盘使用率 ${diskUsagePercent}%，超过阈值 ${DISK_CHECK_THRESHOLD}%，开始清理...`
+      )
+
+      const cutoffDate = new Date()
+      cutoffDate.setDate(cutoffDate.getDate() - MAX_INDEX_AGE_DAYS)
+      const cutoffStr = cutoffDate.toISOString().split('T')[0]
+
+      let deletedCount = 0
+
+      for (const idx of indices || []) {
+        const name = idx.index || idx.i || ''
+        if (!name || name.startsWith('.')) continue
+
+        const created = idx['creation.date.string'] || ''
+        if (created && created < cutoffStr) {
+          try {
+            await (rawClient as any).indices?.delete?.({ index: name })
+            deletedCount++
+            console.log(`[ES Cleanup] 已删除过期索引: ${name} (创建于 ${created})`)
+          } catch (err) {
+            console.warn(`[ES Cleanup] 删除索引 ${name} 失败:`, summarizeElasticsearchError(err))
+          }
+        }
+      }
+
+      if (diskUsagePercent >= 95) {
+        try {
+          await (rawClient as any).indices?.putSettings?.({
+            index: '_all',
+            body: { 'index.blocks.read_only_allow_delete': null },
+          })
+          console.log('[ES Cleanup] 已解除 read-only 锁定')
+        } catch (err) {
+          console.warn('[ES Cleanup] 解除锁定失败:', summarizeElasticsearchError(err))
+        }
+      }
+
+      console.log(`[ES Cleanup] 完成，本次清理 ${deletedCount} 个索引`)
+    } catch (err) {
+      console.warn('[ES Cleanup] 执行失败:', summarizeElasticsearchError(err))
+    }
+  }
+
+  startDiskMonitor(): NodeJS.Timeout | null {
+    const interval = setInterval(() => {
+      this.checkDiskAndCleanup()
+    }, DISK_CHECK_INTERVAL_MS)
+
+    console.log(`[ES Cleanup] 磁盘监控已启动，每 ${DISK_CHECK_INTERVAL_MS / 60000} 分钟检查一次`)
+    return interval
   }
 
   /**

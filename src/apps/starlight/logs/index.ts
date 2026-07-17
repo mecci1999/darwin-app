@@ -273,6 +273,7 @@ function createLogsService() {
           batchProcessor: batchInterval,
           quotaChecker: null,
           elasticsearchReconnect: elasticsearchReconnectInterval,
+          diskMonitor: elasticsearchManager.startDiskMonitor(),
         };
 
         this.logger.info('Logs service started successfully');
@@ -296,6 +297,9 @@ function createLogsService() {
         }
         if (logsState.timers.elasticsearchReconnect) {
           clearInterval(logsState.timers.elasticsearchReconnect);
+        }
+        if (logsState.timers.diskMonitor) {
+          clearInterval(logsState.timers.diskMonitor);
         }
 
         // 关闭Elasticsearch连接
