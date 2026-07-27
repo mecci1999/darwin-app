@@ -1,0 +1,97 @@
+name: darwin-app
+
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app-defaults
+  image: ${APP_IMAGE:?APP_IMAGE is required}
+  env_file:
+    - ../.env.production
+  restart: unless-stopped
+  networks: [app_network]
+  mem_limit: 80m
+  cpus: 0.12
+  pids_limit: 128
+  init: true
+  logging: *default-logging
+  healthcheck:
+    test: ["CMD-SHELL", "node -e 'process.kill(1, 0)'" ]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 20s
+
+services:
+  gateway:
+    <<: *app-defaults
+    command: ["node", "dist/core/gateway/index.js"]
+    mem_limit: 160m
+    cpus: 0.30
+    ports:
+      - "127.0.0.1:6670:6670"
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6670/api/health', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  auth:
+    <<: *app-defaults
+    command: ["node", "dist/core/auth/index.js"]
+
+  user:
+    <<: *app-defaults
+    command: ["node", "dist/core/user/index.js"]
+
+  file:
+    <<: *app-defaults
+    command: ["node", "dist/core/file/index.js"]
+    volumes:
+      - uploads_data:/app/uploads
+
+  metrics:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/metrics/index.js"]
+
+  metrics-query:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/metrics-query/index.js"]
+
+  metrics-alerts:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/metrics-alerts/index.js"]
+
+  metrics-compat:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/metrics-compat/index.js"]
+
+  logs:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/logs/index.js"]
+
+  video:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/video/index.js"]
+
+  subscription:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/subscription/index.js"]
+
+  micro-app:
+    <<: *app-defaults
+    command: ["node", "dist/apps/starlight/micro-app/index.js"]
+
+networks:
+  app_network:
+    name: darwin_app_network
+    external: true
+
+volumes:
+  uploads_data:

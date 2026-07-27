@@ -1,0 +1,1304 @@
+# Darwin App 线上运营与维护文档
+
+本文档覆盖 Darwin App 当前阶段在腾讯云 CVM 上的部署、日常维护、备份、升级、回滚，以及后续新增博客和摄影作品集微服务的发布方式。
+
+本文档是对旧部署文档的完整替换。所有命令都按照当前仓库实际情况编写；生产 Dockerfile、生产启动脚本和拆分 Compose 文件均已实现，但部署前仍必须完成本机构建、镜像构建和配置校验。
+
+---
+
+## 0. 你的腾讯云服务器规格与部署结论
+
+当前服务器：
+
+| 项目 | 配置 | 影响 |
+| --- | --- | --- |
+| 实例 | 通用型 | 适合早期单机部署，不适合高并发和高可靠生产集群 |
+| CPU | 2 核 | 不建议多副本；编译和 Elasticsearch 启动时会有明显资源竞争 |
+| 内存 | 4 GB | 必须限制 JVM、Kafka 和应用内存，并配置 Swap |
+| 系统盘 | SSD 云硬盘 100 GB | 数据、镜像、日志和备份共用，必须设置磁盘告警和保留策略 |
+| 流量包 | 1000 GB/月 | 应用接口通常足够，图片、视频和大文件不应长期走本机带宽 |
+| 带宽 | 7 Mbps | 约 0.875 MB/s，摄影图片和视频建议使用腾讯云 COS + CDN |
+
+### 0.1 推荐的当前路线
+
+第一阶段采用：
+
+```text
+腾讯云 CVM
+  ├── Nginx：公网 80/443
+  ├── Gateway：仅绑定宿主机 127.0.0.1:6670
+  ├── Node 微服务：Docker 内网
+  └── 基础设施：Docker 内网
+       ├── MySQL
+       ├── Redis
+       ├── Kafka + Zookeeper
+       ├── InfluxDB
+       └── Elasticsearch
+```
+
+仓库现在提供了以下生产部署契约：
+
+1. `pnpm build:all` 编译所有微服务入口，且每个服务都有非 `nodemon` 的 `start:*:prod` 脚本。
+2. 根目录 `Dockerfile` 使用 pnpm 锁文件进行多阶段构建；不会把环境文件复制进镜像。
+3. `docker/docker-compose.infra.yml` 和 `docker/docker-compose.app.yml` 分离基础设施和应用；旧 `docker/docker-compose.yml` 保持为开发基础设施配置。
+4. `.env.production.example` 是安全模板；实际 `.env.production` 必须只保存在受保护的服务器路径，填入独立生成的密钥后设置为 `600`。
+5. 生产 Compose 只发布 Gateway 的 `127.0.0.1:6670` 和 WebSocket 的 `127.0.0.1:8090`；所有数据服务仅在 Docker 内网。
+
+这仍是单机 Compose 部署方案，不等同于高可用集群。必须先验证镜像、基础设施健康状态和应用的关键业务路径，再接入 Nginx 公网流量。
+
+---
+
+## 1. 上线前必须完成的仓库改造
+
+在腾讯云执行部署前，必须先在本地代码仓库完成并验证以下内容。
+
+### 1.1 统一包管理器
+
+当前仓库存在 `pnpm-lock.yaml`，同时旧 Dockerfile 引用 `yarn.lock`。必须统一使用 pnpm：
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+```
+
+不要在同一生产镜像中混用 Yarn 和 pnpm。
+
+### 1.2 增加生产启动脚本
+
+保留开发脚本，例如：
+
+```json
+"start:gateway": "cross-env NODE_ENV=development nodemon ./src/core/gateway/index.ts"
+```
+
+每个实际服务都已提供不使用 `nodemon` 的生产脚本，脚本路径与 `build:all` 产物一致：
+
+```json
+{
+  "start:gateway:prod": "cross-env NODE_ENV=production node ./dist/core/gateway/index.js",
+  "start:user:prod": "cross-env NODE_ENV=production node ./dist/core/user/index.js",
+  "start:auth:prod": "cross-env NODE_ENV=production node ./dist/core/auth/index.js",
+  "start:file:prod": "cross-env NODE_ENV=production node ./dist/core/file/index.js",
+  "start:metrics:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/metrics/index.js",
+  "start:metrics-query:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/metrics-query/index.js",
+  "start:metrics-alerts:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/metrics-alerts/index.js",
+  "start:metrics-compat:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/metrics-compat/index.js",
+  "start:logs:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/logs/index.js",
+  "start:subscription:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/subscription/index.js",
+  "start:video:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/video/index.js",
+  "start:micro-app:prod": "cross-env NODE_ENV=production node ./dist/apps/starlight/micro-app/index.js"
+}
+```
+
+完成后逐个验证：
+
+```bash
+pnpm run start:gateway:prod
+pnpm run start:user:prod
+```
+
+如果 `dist` 文件不存在，先修正构建脚本，不要用 `nodemon` 冒充生产方案。
+
+### 1.3 增加全量构建脚本
+
+`pnpm build` 和 `pnpm build:all` 均会编译全部服务入口。确认所有入口均生成到 `dist/`：
+
+```bash
+pnpm build:all
+find dist -type f -name 'index.js'
+```
+
+构建脚本必须在本地通过以下检查后才能部署：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build:all
+pnpm exec tsc --noEmit
+pnpm exec jest -- --runInBand
+```
+
+### 1.4 重写生产 Dockerfile
+
+生产镜像应使用与锁文件匹配的 pnpm，并且不复制 `.env.production` 进镜像。环境变量通过 Compose 的 `env_file` 或服务器密钥管理注入。
+
+实际 Dockerfile 使用如下多阶段结构：
+
+```dockerfile
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:22-bookworm-slim AS builder
+WORKDIR /app
+RUN corepack enable
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json pnpm-lock.yaml tsconfig.json rollup.config.js ./
+COPY src ./src
+COPY typings ./typings
+RUN pnpm build:all
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+CMD ["node", "dist/core/gateway/index.js"]
+```
+
+Dockerfile 的依赖阶段提供原生依赖所需的构建工具，运行阶段仅保留生产依赖和 `dist`。环境变量通过 Compose `env_file` 注入，绝不构建进镜像。
+
+### 1.5 拆分 Compose 文件
+
+生产目录当前为：
+
+```text
+darwin-app/
+├── docker/
+│   ├── docker-compose.infra.yml
+│   ├── docker-compose.app.yml
+│   ├── mysql_data/
+│   ├── influxdb_data/
+│   └── elasticsearch_data/
+├── Dockerfile
+├── .dockerignore
+└── .env.production
+```
+
+`docker/docker-compose.yml` 保留为开发基础设施配置，不能作为安全的生产配置。生产必须使用下面两个单独的文件。
+
+### 1.6 数据库迁移脚本必须先实现
+
+当前 `package.json` 虽然声明了 `migrate` 和 `seed` 脚本，但仓库当前没有经过验证的 `scripts/migrate.js`、`scripts/seed.js` 文件。正式上线前必须实现并验证迁移系统；在此之前不得执行迁移或 seed 命令，也不能把它们当作已完成能力。
+
+---
+
+## 2. 腾讯云控制台准备
+
+### 2.1 安全组
+
+安全组公网入方向只保留：
+
+| 端口 | 协议 | 来源 | 用途 |
+| --- | --- | --- | --- |
+| 22 | TCP | 你的固定公网 IP/32 | SSH 管理；不要对全网开放 |
+| 80 | TCP | `0.0.0.0/0` | HTTP 和证书签发 |
+| 443 | TCP | `0.0.0.0/0` | HTTPS |
+
+以下端口不要加入公网安全组：
+
+```text
+3306  MySQL
+6379  Redis
+9092  Kafka
+2181  Zookeeper
+8086  InfluxDB
+9200  Elasticsearch
+9300  Elasticsearch transport
+6670  Gateway（推荐只监听 127.0.0.1）
+8090  WebSocket（通过 Nginx 反代）
+```
+
+若必须临时远程调试，只允许你的固定 IP，并在调试结束后立即删除规则。生产不应依赖公网访问数据库或消息队列。
+
+### 2.2 域名和 HTTPS
+
+准备一个 API 域名，例如：
+
+```text
+api.example.com -> 腾讯云 CVM 公网 IP
+```
+
+建议使用腾讯云 DNSPod 管理解析，使用 Nginx + Certbot 或腾讯云 SSL 证书配置 HTTPS。正式域名和证书配置完成前，不要把登录接口作为长期公网入口。
+
+### 2.3 磁盘规划
+
+100GB 系统盘必须预留空间：
+
+```text
+系统和 Docker：约 15-25GB
+应用镜像：约 5-15GB
+MySQL/InfluxDB/Elasticsearch：按业务增长使用
+备份和日志：必须设置上限，不能无限增长
+```
+
+不要把长期图片、视频和大文件放在本机 Docker volume。后续摄影作品集应使用腾讯云 COS，必要时通过 CDN 对外分发。
+
+---
+
+## 3. 首次配置腾讯云 CVM
+
+以下命令以 Ubuntu 22.04/24.04 为例，在 SSH 登录后执行。若系统不是 Ubuntu，应先确认对应包管理器，不要盲目执行。
+
+### 3.1 登录并更新系统
+
+```bash
+ssh ubuntu@你的服务器公网IP
+sudo apt update
+sudo apt full-upgrade -y
+sudo apt install -y ca-certificates curl git jq nginx unzip rsync ufw htop
+```
+
+### 3.2 配置 Swap
+
+4GB 内存运行 Kafka、Elasticsearch、MySQL 和多个 Node 服务时，建议配置 4GB Swap 作为防止瞬时 OOM 的缓冲。Swap 不是内存扩容，不能替代升级实例。
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-darwin-app.conf
+sudo sysctl --system
+free -h
+```
+
+### 3.3 配置 Elasticsearch 内核参数
+
+```bash
+echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-elasticsearch.conf
+sudo sysctl --system
+```
+
+### 3.4 安装 Docker
+
+使用 Docker 官方安装源，不要在生产服务器上安装未经确认来源的旧脚本。安装后把当前用户加入 docker 用户组：
+
+```bash
+curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+sudo sh /tmp/get-docker.sh
+sudo usermod -aG docker "$USER"
+newgrp docker
+docker version
+docker compose version
+```
+
+### 3.5 SSH 加固
+
+先确认密钥登录可用，再关闭密码登录；不要在还未验证密钥前关闭密码登录，避免把自己锁在服务器外。
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+```
+
+将本地公钥追加到 `~/.ssh/authorized_keys` 后，编辑：
+
+```bash
+sudoedit /etc/ssh/sshd_config
+```
+
+至少确认：
+
+```text
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+```
+
+验证配置并重启：
+
+```bash
+sudo sshd -t
+sudo systemctl restart ssh
+```
+
+保留当前 SSH 会话，另开一个终端确认新会话可以登录后再关闭旧会话。
+
+---
+
+## 4. 获取代码并建立生产目录
+
+### 4.1 创建目录
+
+```bash
+sudo mkdir -p /opt/darwin-app/{releases,shared,backups,logs}
+sudo chown -R "$USER":"$USER" /opt/darwin-app
+cd /opt/darwin-app
+```
+
+### 4.2 拉取代码
+
+推荐使用 Git tag 或 commit 部署，不要直接依赖会变化的 `main` 和 `latest`：
+
+```bash
+cd /opt/darwin-app
+git clone 你的仓库地址 source
+cd source
+git checkout 你的已验证版本tag或commit
+```
+
+如果仓库是私有仓库，使用部署专用 SSH key，不要把个人私钥上传到服务器。
+
+### 4.3 创建持久化目录
+
+```bash
+mkdir -p /opt/darwin-app/shared/{mysql_data,redis_data,influxdb_data,influxdb_config,elasticsearch_data,uploads}
+mkdir -p /opt/darwin-app/backups/{mysql,influxdb,elasticsearch}
+```
+
+把数据库和文件目录放在 `shared` 中，应用每次发布使用新的 release 或镜像版本；不要把数据目录放在会被删除的代码目录里。
+
+---
+
+## 5. 生产环境变量
+
+### 5.1 先处理现有敏感信息
+
+历史 `.env.production` 曾包含开发值和明文密码，应视为已经暴露：
+
+1. 重新生成 MySQL 密码。
+2. 重新生成 `PASSWORD_SECRET_KEY` 和 JWT 相关密钥。
+3. 重新生成 Redis、Kafka、InfluxDB、Elasticsearch 凭据。
+4. 检查 Git 历史和日志，确认旧密码没有泄露。
+
+不要把真实密码写进本文档、代码、Dockerfile 或 Compose 文件。
+
+### 5.2 创建服务器环境文件
+
+```bash
+cd /opt/darwin-app/source
+touch .env.production
+chmod 600 .env.production
+```
+
+从 `.env.production.example` 复制后，容器内基础设施地址必须保持为 Docker service name：
+
+```env
+NODE_ENV=production
+
+# 以实际代码读取的变量名为准；以下是部署目标示例
+MYSQL_HOST=mysql
+MYSQL_PORT=3306
+MYSQL_DATABASE=darwin_app
+MYSQL_USER=darwin
+MYSQL_PASSWORD=替换为随机强密码
+
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=替换为随机强密码
+REDIS_DB=0
+
+KAFKA_BROKERS=kafka:29092
+KAFKA_HOST=kafka:29092
+KAFKA_USER=替换为Kafka用户
+KAFKA_PASSWORD=替换为随机强密码
+
+INFLUXDB_URL=http://influxdb:8086
+INFLUXDB_USERNAME=admin
+INFLUXDB_PASSWORD=替换为随机强密码
+INFLUXDB_ORG=darwin_app
+INFLUXDB_BUCKET=metrics
+INFLUXDB_TOKEN=替换为随机token
+
+ELASTICSEARCH_URL=http://elasticsearch:9200
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_PASSWORD=替换为随机强密码
+
+PASSWORD_SECRET_KEY=替换为随机密钥
+ADMIN_EMAILS=你的管理员邮箱
+QR_CODE_EXPIRE=120
+TOKEN_EXIPRE_TIME=6h
+REFRESH_TOKEN_EXIPRE_TIME=3d
+
+# 公网只通过 Nginx 暴露 Gateway
+GATEWAY_PORT=6670
+WS_SERVER_PORT=8090
+WS_SERVER_PATH=/ws
+```
+
+变量名必须以 `src/config` 及各服务实际读取方式为准。`.env.example` 与当前业务代码可能存在历史命名差异，部署前要逐项核对，尤其是 `MYSQL_USER`、JWT 密钥拼写和 Kafka 配置。当前应用实际读取的是 `MYSQL_USER`，不能只配置 `MYSQL_USERNAME`。
+
+### 5.3 生成随机值
+
+```bash
+openssl rand -base64 32
+openssl rand -hex 32
+```
+
+不要在 shell 历史中直接输入完整密码；必要时执行：
+
+```bash
+history -d 行号
+```
+
+---
+
+## 6. 生产基础设施 Compose 约束
+
+生产 Compose 必须满足以下条件：
+
+1. 固定镜像版本，禁止 `latest`。
+2. 所有数据服务使用持久化目录或命名卷。
+3. MySQL、Redis、Kafka、Zookeeper、InfluxDB、Elasticsearch 不配置公网端口映射。
+4. 所有服务加入同一个内部 Docker network。
+5. 使用健康检查，而不是 `sleep 5`、`sleep 20` 判断依赖是否可用。
+6. 为 4GB 实例限制内存，避免 Elasticsearch 和 Kafka 抢光内存。
+7. Redis 必须设置密码；Kafka 必须正确设置内部 advertised listener。
+
+### 6.1 4GB 实例资源建议
+
+以下不是“完整栈可以稳定运行”的承诺，而是单项上限参考。4GB 实例不能在没有压测和监控的情况下同时无约束运行全部基础设施及所有 Node 服务：
+
+| 服务 | 建议内存上限 |
+| --- | ---: |
+| Elasticsearch | 512MB-768MB |
+| Kafka | 512MB-768MB |
+| Zookeeper | 128MB-256MB |
+| MySQL | 384MB-512MB |
+| InfluxDB | 256MB-384MB |
+| Redis | 64MB-128MB |
+| Node 服务合计 | 512MB-768MB |
+
+即使按上述参考值，宿主机、Docker、文件缓存和突发峰值仍可能导致 OOM。因此推荐先只启动实际需要的服务；如果业务必须同时运行完整栈，优先把 MySQL、Kafka、InfluxDB 或 Elasticsearch 迁移到腾讯云托管服务，或升级 CVM。不要只增加 Swap 后继续承载更大流量。
+
+### 6.2 现有 Compose 上线前的必要修正
+
+开发用 `docker/docker-compose.yml` 存在以下生产风险：
+
+- 使用 `bitnami/zookeeper:latest`、`bitnami/kafka:latest`、`mysql:latest`、`redis:latest`。
+- 对外映射了多个基础设施端口。
+- Kafka advertised listener 写死为 `localhost`，容器间服务无法按生产方式可靠发现。
+- Kafka 堆内存上限达到 `1536m`，不适合 4GB 机器与其他服务共存。
+- 没有完整的健康检查和清晰的生产网络隔离。
+
+这些问题已在 `docker-compose.infra.yml` 中修正：镜像版本固定、持久化使用命名卷、数据端口不发布、Kafka 只通告 `kafka:29092`，并且每项基础设施都有健康检查。Elasticsearch 目前仅限 `internal: true` Docker 网络且 `xpack.security.enabled=false`；这不是认证防护。若未来需要其他网络访问 Elasticsearch，必须先启用并验证认证/TLS。
+
+---
+
+## 7. 应用 Compose 目标结构
+
+生产应用 Compose 为每个微服务启动一个容器，共享同一个不可变应用镜像。`docker/docker-compose.app.yml` 是实际文件；其非 Gateway 健康检查只验证 PID 1 存活，因为这些服务没有独立 HTTP 健康路由。Gateway 健康检查实际请求 `GET /api/health`。
+
+```yaml
+services:
+  gateway:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/core/gateway/index.js"]
+    env_file: ["../.env.production"]
+    ports:
+      - "127.0.0.1:6670:6670"
+      - "127.0.0.1:8090:8090"
+    restart: unless-stopped
+    networks: [app_network]
+
+  auth:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/core/auth/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+  user:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/core/user/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+  file:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/core/file/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+  metrics:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/apps/starlight/metrics/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+  logs:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/apps/starlight/logs/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+  subscription:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/apps/starlight/subscription/index.js"]
+    env_file: ["../.env.production"]
+    restart: unless-stopped
+    networks: [app_network]
+
+networks:
+  app_network:
+    external: true
+```
+
+应用 Compose 必须在基础设施全部健康后启动。由于两个 Compose 文件是独立项目，应用文件不声明跨项目 `depends_on`；启动顺序由第 8 节的健康状态检查保证。
+
+Compose 文件位于 `docker/` 时，建议从仓库根目录显式指定变量文件，并在 Compose 中使用正确的相对路径：
+
+```yaml
+env_file:
+  - ../.env.production
+```
+
+同时，`${APP_IMAGE}` 属于 Compose 文件插值变量，不能只依赖 `env_file`。启动时必须显式提供：
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml config
+```
+
+创建共享网络：
+
+```bash
+# 正常情况下由 docker-compose.infra.yml 创建 darwin_app_network。
+# 只有在基础设施已停用、但需单独检查网络时才查看：
+docker network inspect darwin_app_network
+```
+
+---
+
+## 8. 首次上线操作顺序
+
+### 8.1 本地发布前验证
+
+在本地项目目录执行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm exec tsc --noEmit
+pnpm exec jest -- --runInBand
+pnpm build:all
+docker build --pull -t darwin-app:local-verify .
+docker run --rm darwin-app:local-verify node --version
+```
+
+镜像构建若依赖镜像拉取超时，应先恢复 Docker registry 网络连接后重试；不得跳过镜像构建直接上传未验证代码。
+
+### 8.2 服务器安装基础设施
+
+进入包含生产 Compose 的版本目录：
+
+```bash
+cd /opt/darwin-app/source
+# docker-compose.infra.yml 会创建内部网络 darwin_app_network。
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml config
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml pull
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml up -d
+```
+
+检查状态：
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml logs --tail=200 mysql
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml logs --tail=200 kafka
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml logs --tail=200 elasticsearch
+```
+
+在基础设施未稳定前，不要启动应用服务。
+
+### 8.3 初始化数据库
+
+先确认 MySQL 容器健康。当前仓库没有经过验证的 `scripts/migrate.js`，实现迁移系统前不得执行迁移命令：
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml exec mysql mysqladmin ping -h localhost -u root -p
+# 前置条件：scripts/migrate.js 已实现并通过验证
+docker compose --env-file .env.production -f docker/docker-compose.app.yml run --rm gateway node scripts/migrate.js
+```
+
+只有明确需要演示数据时才执行 seed；当前仓库没有经过验证的 `scripts/seed.js`，实现前不得执行：
+
+```bash
+# 前置条件：scripts/seed.js 已实现并通过验证
+docker compose --env-file .env.production -f docker/docker-compose.app.yml run --rm gateway node scripts/seed.js
+```
+
+### 8.4 启动应用
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml config
+docker compose --env-file .env.production -f docker/docker-compose.app.yml up -d
+docker compose --env-file .env.production -f docker/docker-compose.app.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=200 gateway
+```
+
+检查容器资源：
+
+```bash
+docker stats --no-stream
+free -h
+df -h
+```
+
+### 8.5 配置 Nginx
+
+创建 `/etc/nginx/sites-available/darwin-app`：
+
+```nginx
+server {
+    listen 80;
+    server_name api.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:6670;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+启用并检查：
+
+```bash
+sudo ln -s /etc/nginx/sites-available/darwin-app /etc/nginx/sites-enabled/darwin-app
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+完成 DNS 解析后再申请 HTTPS。证书启用后，把 HTTP 配置改为 301 跳转到 HTTPS，并确认 WebSocket 仍可连接。
+
+### 8.6 首次验收
+
+```bash
+curl -i http://127.0.0.1:6670/api/health
+curl -i https://api.example.com/api/health
+docker compose --env-file .env.production -f docker/docker-compose.app.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml ps
+```
+
+随后验证：
+
+1. 登录和刷新 token。
+2. Gateway 到 `auth`、`user` 的服务调用。
+3. 指标写入和查询。
+4. 日志写入、查询和 Elasticsearch 清理任务。
+5. 文件上传；大文件不要长期使用本机磁盘。
+6. WebSocket 长连接。
+
+---
+
+## 9. 日常运维
+
+### 9.1 每日检查
+
+```bash
+cd /opt/darwin-app/source
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.app.yml ps
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+free -h
+df -h
+```
+
+重点观察：
+
+- 容器是否频繁重启。
+- 内存是否持续低于 300MB 可用。
+- Swap 是否持续大量使用。
+- `/var/lib/docker` 和数据目录是否超过 70%。
+- Kafka 是否积压。
+- Elasticsearch 是否超过 70% 磁盘使用率。
+- MySQL 是否出现连接数耗尽。
+
+### 9.2 日志
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=200 gateway
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs -f gateway
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml logs --tail=200 kafka
+```
+
+不要无限制使用 `logs -f` 写入文件。应用日志应配置轮转，Docker 日志也应设置 `max-size` 和 `max-file`。
+
+### 9.3 磁盘清理
+
+先确认没有错误发布或备份任务，再执行：
+
+```bash
+docker system df
+docker image prune
+```
+
+禁止在没有确认数据卷的情况下执行：
+
+```bash
+# 危险：可能删除数据库数据
+# docker volume prune
+```
+
+日志和 Elasticsearch 数据必须按保留周期清理。当前日志清理逻辑按 `logs`/`logs-*` 索引内的 `receivedAt` 文档时间清理，不要通过删除整个长期索引替代文档保留策略。
+
+---
+
+## 10. 备份与恢复
+
+备份不能和唯一数据放在同一块 100GB 系统盘。至少将备份同步到腾讯云 COS 或另一台受保护的存储位置，并定期做恢复演练。
+
+### 10.1 MySQL
+
+```bash
+mkdir -p /opt/darwin-app/backups/mysql
+# .env.production 包含 MYSQL_ROOT_PASSWORD 和 MYSQL_DATABASE，但 Docker Compose 的 --env-file
+# 不会把它们导出到宿主机 shell。将同一组值保存在仅服务器可读的受保护文件中供备份任务加载。
+# mysql-root.env 示例：export MYSQL_ROOT_PASSWORD='...'; export MYSQL_DATABASE='darwin_app'
+set -a
+source /opt/darwin-app/shared/secrets/mysql-root.env
+set +a
+docker exec mysql mysqldump --single-transaction --routines --triggers \
+  -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" \
+  | gzip > "/opt/darwin-app/backups/mysql/darwin_app_$(date +%F_%H%M).sql.gz"
+```
+
+恢复前先停止会写入同一数据的应用，确认备份文件非空并保留当前数据库快照：
+
+```bash
+gunzip -c /opt/darwin-app/backups/mysql/darwin_app_YYYY-MM-DD_HHMM.sql.gz \
+  | docker exec -i mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"
+```
+
+### 10.2 InfluxDB
+
+```bash
+docker exec influxdb influx backup /tmp/influx-backup -t "$INFLUXDB_TOKEN"
+docker cp influxdb:/tmp/influx-backup \
+  "/opt/darwin-app/backups/influxdb/$(date +%F)"
+```
+
+### 10.3 Elasticsearch
+
+优先使用 Elasticsearch snapshot repository。小规模临时恢复前可以停止 Elasticsearch 后备份数据目录，但不能在运行中直接复制数据目录并把它当作一致性备份。
+
+MySQL、InfluxDB 和 Elasticsearch 备份完成后，必须同步到腾讯云 COS 或其他独立存储；只保存在 `/opt/darwin-app/backups` 不算完成备份。
+
+### 10.4 Redis
+
+Redis 默认是缓存，不能把只存在 Redis 的数据当作唯一业务数据。若未来承载关键状态，应开启 AOF/RDB 并纳入备份。
+
+### 10.5 备份策略
+
+建议：
+
+- MySQL：每天全量，至少保留 7-14 天。
+- InfluxDB：每天或按指标重要性备份。
+- Elasticsearch：按日志保留策略做 snapshot。
+- 备份完成后同步 COS，并定期下载验证。
+- 每月至少做一次恢复演练。
+
+---
+
+## 11. 标准发布与回滚
+
+### 11.1 版本发布原则
+
+禁止在生产使用 `latest`。每次发布使用不可变版本号：
+
+```text
+darwin-app:2026-07-27-abc1234
+```
+
+发布前必须保留：
+
+- 当前运行版本。
+- 新版本镜像。
+- 当前 Compose 配置。
+- 当前环境变量备份位置，不把秘密写入 Git。
+- 数据库迁移版本。
+
+### 11.2 当前单机发布流程
+
+在本地验证并构建镜像后，将镜像推送到腾讯云容器镜像服务 TCR，或在服务器构建。2核4GB 服务器不适合频繁在生产编译大型原生依赖，推荐本地/CI 构建后推送：
+
+```bash
+docker build --pull -t 你的TCR仓库地址/darwin-app:2026-07-27-abc1234 .
+docker push 你的TCR仓库地址/darwin-app:2026-07-27-abc1234
+```
+
+服务器执行：
+
+```bash
+cd /opt/darwin-app/source
+docker compose --env-file .env.production -f docker/docker-compose.app.yml pull
+docker compose --env-file .env.production -f docker/docker-compose.app.yml up -d
+docker compose --env-file .env.production -f docker/docker-compose.app.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=200 gateway
+```
+
+单机 Compose 的 `up -d` 会按服务重建容器。若 Gateway 只有一个实例，重建窗口可能存在短暂连接中断；要做到真正无感发布，需要蓝绿实例或腾讯云负载均衡，见下一节。
+
+### 11.3 真正零停机的蓝绿发布
+
+当前 2核4GB 实例不建议同时运行完整的两套基础设施，但可以只对 Gateway 和需要升级的应用服务做短时间蓝绿。所有现有服务已使用 `NODE_INSTANCE_ID`、容器 hostname 或进程号构成唯一 nodeID；蓝绿发布前仍必须在预发布环境验证 WebSocket 客户端重连和连接排空，因此不能在未演练前宣称已实现无感切换：
+
+```text
+客户端 -> Nginx/腾讯云 CLB -> blue Gateway 或 green Gateway
+
+基础设施和 Kafka 仍然只保留一套
+```
+
+流程：
+
+1. 构建不可变的新镜像。
+2. 使用不同 Compose project 启动 green 应用服务。
+3. green 连接同一套基础设施，但使用唯一 `NODE_INSTANCE_ID`。
+4. 检查 green 健康状态和关键接口。
+5. 切换 Nginx upstream 或 CLB 后端权重到 green。
+6. 观察 5-15 分钟错误率、延迟、内存和 Kafka 消费情况。
+7. 稳定后停止 blue；异常则把流量切回 blue。
+
+注意：数据库变更必须兼容 blue 和 green，遵循：
+
+```text
+expand：先添加兼容的新字段/表
+deploy：部署同时兼容旧结构和新结构的代码
+migrate/use：迁移数据并启用新逻辑
+contract：确认旧版本不再运行后删除旧字段/逻辑
+```
+
+### 11.4 回滚
+
+应用回滚（以下命令只有在生产应用 Compose 已实际创建并验证后执行）：
+
+```bash
+# 将 .env.production 中 APP_IMAGE 恢复为上一个已验证的不可变镜像版本。
+# 以下命令会重建整个应用服务，不适合单服务故障；单服务回滚请使用下一节。
+docker compose --env-file .env.production -f docker/docker-compose.app.yml up -d
+```
+
+如果使用 blue/green，只需先切换流量，再停止异常版本。数据库回滚不能简单等同于应用回滚；不可逆迁移必须提前准备兼容代码、反向 migration 或备份恢复方案。
+
+### 11.5 单微服务故障修复、替换与回滚
+
+本节用于线上单独处理一个应用微服务。当前生产应用使用一个共享镜像 `APP_IMAGE`，再由每个 Compose service 的 `command` 启动不同入口；因此可以只重启或重建一个 service，而不影响其他应用容器和基础设施。
+
+当前可独立操作的应用服务：
+
+```text
+gateway
+auth
+user
+file
+metrics
+metrics-query
+metrics-alerts
+metrics-compat
+logs
+video
+subscription
+micro-app
+```
+
+在服务器项目目录先定义快捷命令：
+
+```bash
+cd /opt/darwin-app/source
+APP_COMPOSE='docker compose --env-file .env.production -f docker/docker-compose.app.yml'
+INFRA_COMPOSE='docker compose --env-file .env.production -f docker/docker-compose.infra.yml'
+```
+
+#### 11.5.1 先确认故障边界
+
+不要在发现错误后直接停止整套应用。先用目标服务名替换 `<service>`：
+
+```bash
+$APP_COMPOSE ps <service>
+$APP_COMPOSE logs --tail=300 <service>
+$APP_COMPOSE logs --tail=300 gateway
+$INFRA_COMPOSE ps
+$INFRA_COMPOSE logs --tail=200 kafka
+docker stats --no-stream
+free -h
+df -h
+```
+
+`gateway` 是唯一具备 HTTP 健康检查的应用服务：
+
+```bash
+curl -i http://127.0.0.1:6670/api/health
+```
+
+其他应用服务的 Compose healthcheck 只确认 Node 进程仍在运行，不代表它已成功连接 Kafka、MySQL、Redis、InfluxDB 或 Elasticsearch。修复后必须结合服务日志和真实业务调用验证。
+
+#### 11.5.2 临时故障：只重启目标服务
+
+适用于偶发进程异常、短暂依赖断连等未修改代码的情况：
+
+```bash
+$APP_COMPOSE restart <service>
+$APP_COMPOSE ps <service>
+$APP_COMPOSE logs --tail=300 <service>
+```
+
+示例：
+
+```bash
+$APP_COMPOSE restart logs
+```
+
+`restart` 不会拉取新镜像、不会应用新代码，也不会重启其他服务。
+
+#### 11.5.3 容器异常：用当前镜像单独重建服务
+
+当重启无效、但仍要使用当前已部署镜像时：
+
+```bash
+$APP_COMPOSE rm --stop --force <service>
+$APP_COMPOSE up -d --no-deps <service>
+$APP_COMPOSE ps <service>
+$APP_COMPOSE logs --tail=300 <service>
+```
+
+`--no-deps` 是必须项：它保证只处理目标应用容器，不会重启 Kafka、MySQL、Redis、InfluxDB、Elasticsearch、Gateway 或其他应用服务。
+
+`file` 服务和 `gateway` 共用 `uploads_data` 命名卷。替换 `file` 时绝对不要附加 `-v`，也不要执行 `docker volume prune`，否则可能删除已上传文件：
+
+```bash
+# 错误：会删除服务挂载的数据卷
+# $APP_COMPOSE rm --stop --force -v file
+```
+
+#### 11.5.4 代码修复：仅把一个服务切换到新镜像
+
+代码修复应先在本地或 CI 完成检查，构建并推送不可变镜像：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm exec tsc --noEmit
+pnpm run build:all
+docker build --pull -t 你的TCR仓库地址/darwin-app:2026-07-27-abc1234 .
+docker push 你的TCR仓库地址/darwin-app:2026-07-27-abc1234
+```
+
+上线前记录旧版本，作为回滚点：
+
+```bash
+grep '^APP_IMAGE=' .env.production
+$APP_COMPOSE ps
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+```
+
+将服务器 `.env.production` 的镜像变量更新为新镜像：
+
+```env
+APP_IMAGE=你的TCR仓库地址/darwin-app:2026-07-27-abc1234
+```
+
+然后只拉取并重建目标服务，例如只发布 `metrics-alerts`：
+
+```bash
+$APP_COMPOSE config
+$APP_COMPOSE pull metrics-alerts
+$APP_COMPOSE up -d --no-deps --force-recreate metrics-alerts
+$APP_COMPOSE ps metrics-alerts
+$APP_COMPOSE logs --tail=300 metrics-alerts
+```
+
+虽然 `.env.production` 中的 `APP_IMAGE` 是共享变量，但只有被 `up -d --force-recreate` 的服务会切换到新镜像；未重建的其他容器继续使用原先的镜像 ID。必须记录哪些服务已升级，以免出现无法追踪的混合版本状态。
+
+不要在只修复一个服务时执行下面的命令：
+
+```bash
+# 会影响整个应用 Compose 项目，不是单服务发布命令
+# $APP_COMPOSE up -d
+```
+
+#### 11.5.5 单服务镜像回滚
+
+如果新版本异常，将 `.env.production` 的 `APP_IMAGE` 改回 11.5.4 中记录的旧不可变镜像，然后仅重建失败服务：
+
+```bash
+$APP_COMPOSE config
+$APP_COMPOSE pull <service>
+$APP_COMPOSE up -d --no-deps --force-recreate <service>
+$APP_COMPOSE logs --tail=300 <service>
+```
+
+镜像回滚只回退程序文件，不能自动回滚数据。
+
+#### 11.5.6 完整替换服务的分级处理
+
+| 场景 | 示例 | 操作方式 |
+| --- | --- | --- |
+| 代码修复 | 空指针、查询条件、接口逻辑 | 新镜像 + 仅重建目标服务 |
+| 配置修复 | 超时、日志级别、单服务地址 | 优先使用服务专属变量；确认影响范围后只重建目标服务 |
+| 兼容替换 | 保持原服务名、actions、Kafka 事件格式 | 先验证新镜像，再单服务替换并走真实业务链路验收 |
+| 数据破坏性替换 | 改表、删字段、重建 ES 索引、改 Kafka 消费语义 | 备份、迁移演练、兼容代码、维护窗口；禁止直接原地替换 |
+
+完整替换仍要保持以下契约稳定，除非已执行专项迁移方案：
+
+1. Node-Universe 服务名和 Gateway action 名称。
+2. Kafka topic、消息 payload 和 consumer group 行为。
+3. MySQL、Redis、InfluxDB、Elasticsearch 的数据结构与读写语义。
+4. 服务的 `namespace: darwin-app` 和唯一 `nodeID`。
+
+新旧版本并行或蓝绿演练时必须显式设置不同的 `NODE_INSTANCE_ID`。不要复用其他服务的 Kafka consumer group，否则可能发生消费者抢占或重复处理。
+
+#### 11.5.7 数据变更的禁止事项
+
+当前仓库的数据库迁移脚本尚未实现并验证。以下变更不能只靠替换镜像完成：
+
+- MySQL 表、列、索引、约束变更。
+- Elasticsearch 索引 mapping 或删除/重建索引。
+- InfluxDB bucket、保留策略或 measurement 语义变更。
+- Kafka topic、消费者组、事件格式或幂等性语义变更。
+
+这类修改必须遵循：
+
+```text
+备份并验证恢复 -> expand（新增兼容结构） -> 部署兼容代码 -> 迁移/切换 -> 验证 -> contract（确认旧版本停止后清理）
+```
+
+在迁移系统和恢复演练完成前，安排维护窗口，不要承诺单服务替换能够无损回滚数据。
+
+---
+
+## 12. 后续新增博客/摄影作品集微服务
+
+新增服务不得直接修改正在运行的容器，也不要把新业务塞进 `start:all` 的长命令。每个新业务都应是独立服务、独立容器和独立发布单元。
+
+### 12.1 目录和服务命名
+
+例如博客服务：
+
+```text
+src/apps/starlight/blog/
+├── index.ts
+├── actions/
+├── methods/
+├── events/
+├── types/
+├── validators/
+└── utils/
+```
+
+摄影作品集服务可以是：
+
+```text
+src/apps/starlight/portfolio/
+```
+
+服务名必须唯一且稳定，例如 `blog`、`portfolio`。所有服务使用相同的 `namespace: 'darwin-app'` 和同一个 Kafka 集群，但 `nodeID` 必须包含唯一实例标识：
+
+```ts
+const instanceId = process.env.NODE_INSTANCE_ID || process.env.HOSTNAME || `${process.pid}`
+nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'production'}-${instanceId}`
+```
+
+### 12.2 数据隔离
+
+博客和摄影服务不要随意复用现有业务表：
+
+- 至少使用独立表前缀或独立 schema。
+- 更推荐独立数据库用户和独立 schema。
+- 所有业务数据继续带 `tenantId`，不能绕过租户隔离。
+- 文件不要写入容器临时目录。
+- 摄影原图、缩略图和视频使用腾讯云 COS，数据库只保存对象 key 和元数据。
+
+### 12.3 Kafka 隔离
+
+每个新服务使用独立 consumer group，例如：
+
+```text
+darwin-blog-production
+darwin-portfolio-production
+```
+
+不要复用现有服务的 consumer group，否则新服务可能抢走旧服务的消息。topic 名称要有版本和业务边界，例如：
+
+```text
+blog.article-events.v1
+portfolio.asset-events.v1
+```
+
+### 12.4 新服务接入步骤
+
+1. 创建服务目录和入口。
+2. 定义 actions、methods、events、校验器和数据库迁移。
+3. 增加开发脚本和生产脚本。
+4. 增加 `build:all` 的构建输入。
+5. 增加应用 Compose service，但先不修改公网路由。
+6. 构建新版本镜像。
+7. 在生产启动新服务容器。
+8. 验证容器健康、Kafka 注册、数据库连接和内部 `ctx.call`。
+9. 只增加新的 Gateway 路由，例如 `/api/blog/v1/...`。
+10. 通过 Nginx/CLB 灰度少量流量。
+11. 观察稳定后扩大流量。
+
+新服务启动失败时，现有 Gateway、auth、user、metrics、logs 等服务仍应保持运行，因为它们是独立容器。
+
+### 12.5 新服务 Compose 示例
+
+```yaml
+  blog:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["node", "dist/apps/starlight/blog/index.js"]
+    env_file: ["../.env.production"]
+    environment:
+      NODE_INSTANCE_ID: blog-primary
+      KAFKA_GROUP_ID: darwin-blog-production
+    restart: unless-stopped
+    networks: [app_network]
+```
+
+摄影作品集服务同理，但图片流量应由 COS/CDN 承担，不能把 7Mbps CVM 作为图片分发节点。
+
+### 12.6 新服务失败时的处理
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=300 blog
+docker compose --env-file .env.production -f docker/docker-compose.app.yml stop blog
+```
+
+停止新服务不会停止现有服务。只有在数据库迁移已经影响旧服务时，才需要按迁移回滚方案处理；因此数据库必须先 expand，再部署新服务。
+
+---
+
+## 13. 常见故障排查
+
+### 13.1 容器内连不上基础设施
+
+容器内使用：
+
+```text
+mysql:3306
+redis:6379
+kafka:29092
+influxdb:8086
+elasticsearch:9200
+```
+
+不要在容器环境使用 `localhost`。`localhost` 指向当前容器本身。
+
+### 13.2 服务互相找不到
+
+检查：
+
+1. 目标服务容器是否运行。
+2. `namespace` 是否都是 `darwin-app`。
+3. Kafka broker 地址和认证是否一致。
+4. 服务名和 action 名称是否正确。
+5. `nodeID` 是否冲突。
+6. Kafka 是否已经 ready。
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml ps
+docker compose --env-file .env.production -f docker/docker-compose.infra.yml logs --tail=200 kafka
+docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=200 gateway
+```
+
+### 13.3 4GB 内存不足
+
+```bash
+free -h
+docker stats --no-stream
+dmesg -T | grep -i -E 'oom|killed process'
+```
+
+处理顺序：
+
+1. 确认 Elasticsearch heap 不超过约 1GB。
+2. 确认 Kafka 没有使用 1536MB 以上的堆上限。
+3. 降低日志级别和日志保留量。
+4. 暂停不必要的开发工具和监控容器。
+5. 将 MySQL、ES、Kafka 或 InfluxDB 迁移到腾讯云托管服务。
+6. 仍不足时升级 CVM，不要依赖 Swap 长期运行。
+
+### 13.4 磁盘满
+
+```bash
+df -h
+docker system df
+du -sh /opt/darwin-app/shared/*
+```
+
+先清理过期镜像和日志，再检查 Elasticsearch、上传文件和备份目录。不要删除数据库数据卷。
+
+### 13.5 Kafka 连接失败
+
+检查 `KAFKA_CFG_ADVERTISED_LISTENERS`：容器内应用必须拿到 `kafka:29092`，不能拿到 `localhost`。Kafka 的客户端认证配置、listener protocol 和 group ID 必须与 Node 服务一致。
+
+---
+
+## 14. 安全基线
+
+1. `.env.production` 权限为 `600`，不提交 Git。
+2. 生产密码全部重新生成，不复用当前开发环境密码。
+3. 安全组只开放 SSH、80、443。
+4. SSH 使用密钥登录，禁止 root 远程登录和密码登录。
+5. MySQL、Redis、Kafka、Zookeeper、InfluxDB、Elasticsearch 不开放公网。
+6. 不使用 `latest` 镜像标签。
+7. 不使用 `nodemon`、`start:all` 或 `sleep` 作为生产进程管理和就绪判断。
+8. 定期更新基础镜像和依赖，但必须先在预发布环境验证。
+9. 网关启用 HTTPS、请求体限制、速率限制和安全响应头。
+10. 管理员邮箱、JWT 密钥、支付密钥和第三方密钥单独保管。
+11. 备份同步到 CVM 之外，并验证可恢复。
+12. 为 CPU、内存、磁盘、接口错误率和 Kafka 积压配置告警。
+
+---
+
+## 15. 上线验收清单
+
+### 仓库
+
+- [x] 已统一 pnpm/yarn，不再引用不存在的锁文件。
+- [x] 已实现 `build:all`；发布前仍须在目标版本上验证。
+- [x] 所有生产入口不使用 `nodemon`。
+- [x] 生产 Dockerfile 使用实际存在的构建脚本。
+- [x] `docker-compose.infra.yml` 和 `docker-compose.app.yml` 已实际存在；发布前仍须以实际受保护环境文件运行 `docker compose config`。
+- [ ] 所有镜像使用固定版本。
+- [x] 多副本前已修正 `nodeID` 唯一性。
+
+### 腾讯云
+
+- [ ] 安全组只开放 22、80、443，且 22 仅允许固定 IP。
+- [ ] 已配置 Swap 和 `vm.max_map_count`。
+- [ ] Docker 和 Compose 版本已确认。
+- [ ] 域名已解析到 CVM。
+- [ ] Nginx 配置通过 `nginx -t`。
+- [ ] HTTPS 和 WebSocket 已验证。
+
+### 应用和数据
+
+- [ ] `.env.production` 使用真实生产值，权限为 600。
+- [ ] 容器内地址使用 service name。
+- [ ] MySQL 迁移完成并有备份。
+- [ ] Kafka、Redis、InfluxDB、Elasticsearch 状态正常。
+- [ ] 登录、服务发现、指标、日志、文件上传接口验证通过。
+- [ ] MySQL、InfluxDB、Elasticsearch 备份任务已配置。
+- [ ] 已检查 `docker stats`、`free -h` 和 `df -h`。
+
+---
+
+## 16. 当前最短执行路线
+
+不要直接执行开发用 `docker/docker-compose.yml` 作为生产部署。正确顺序是：
+
+1. 在本地通过类型检查、测试、全量构建和镜像构建。
+2. 以受保护的生产环境文件审查生产基础设施 Compose。
+3. 以受保护的生产环境文件审查生产应用 Compose。
+5. 在腾讯云完成安全组、Swap、Docker、域名和 HTTPS 准备。
+6. 上传或拉取已验证版本，创建 `.env.production`。
+7. 启动基础设施，逐项检查健康状态。
+8. 仅在迁移脚本已实现并验证后执行数据库迁移；seed 默认不执行。完成后执行备份，并将备份同步到腾讯云 COS 或其他独立存储。
+9. 启动应用服务，检查服务发现和核心接口。
+10. 启用 Nginx/HTTPS，对外开放 API。
+11. 建立备份、告警、日志和回滚流程。
+12. 后续新增博客/摄影服务时，只新增独立容器和路由，不重启或修改现有服务容器。
+
+生产 Dockerfile、两个 Compose 文件、全量构建脚本、生产启动脚本和健康检查已经补齐并完成本地配置校验。生产镜像入口会在保持应用非 root 运行的前提下初始化 `/app/uploads` 命名卷权限。当前上线前剩余工作是：实现并验证数据库迁移脚本、使用真实受保护的 `.env.production` 构建镜像、在腾讯云启动服务并完成备份与恢复演练。
+
+---
+
+**核心原则：基础设施不暴露公网，应用按版本独立容器化，数据和代码分离，新增服务先启动后接入路由，数据库变更保持向后兼容，所有发布都可观察、可回滚。**

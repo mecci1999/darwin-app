@@ -1,0 +1,162 @@
+name: darwin-app
+
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.9.2
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOO_HEAP_SIZE: "96"
+    volumes:
+      - zookeeper_data:/bitnami/zookeeper
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo ruok > /dev/tcp/127.0.0.1/2181'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  kafka:
+    image: bitnami/kafka:3.8.1
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_BROKER_ID: "1"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_MESSAGE_MAX_BYTES: "5242880"
+      KAFKA_CFG_LOG_RETENTION_HOURS: "24"
+      KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+      KAFKA_HEAP_OPTS: -Xms320m -Xmx320m
+    volumes:
+      - kafka_data:/bitnami/kafka
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.50
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+
+  mysql:
+    image: mysql:8.4.3
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    command: --skip-name-resolve --max-connections=100
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.50
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  redis:
+    image: redis:7.4.1-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --maxmemory 72mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.20
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  influxdb:
+    image: influxdb:2.7.11
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:?INFLUXDB_PASSWORD is required}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:?INFLUXDB_ORG is required}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:?INFLUXDB_BUCKET is required}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:?INFLUXDB_TOKEN is required}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.35
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "influx ping --host http://localhost:8086 >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      ES_JAVA_OPTS: -Xms320m -Xmx320m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks: [app_network]
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.50
+    logging: *default-logging
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+
+networks:
+  app_network:
+    name: darwin_app_network
+    driver: bridge
+    internal: true
+
+volumes:
+  zookeeper_data:
+  kafka_data:
+  mysql_data:
+  redis_data:
+  influxdb_data:
+  influxdb_config:
+  elasticsearch_data:

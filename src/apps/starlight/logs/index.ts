@@ -11,6 +11,11 @@ import '../../../utils/loadEnv';
 import createActions from './actions';
 import {
   APP_NAME,
+  ELASTICSEARCH_MAX_RETRIES,
+  ELASTICSEARCH_PASSWORD,
+  ELASTICSEARCH_REQUEST_TIMEOUT,
+  ELASTICSEARCH_URL,
+  ELASTICSEARCH_USERNAME,
   KAFKA_BROKERS,
   KAFKA_CLIENT_ID,
   KAFKA_PASSWORD,
@@ -72,7 +77,7 @@ function createLogsService() {
   // 创建Star实例
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}-${process.env.NODE_INSTANCE_ID || process.env.HOSTNAME || process.pid}`,
     transporter: {
       type: 'KAFKA',
       debug: isTransportDebugEnabled(),
@@ -151,13 +156,13 @@ function createLogsService() {
 
       // Elasticsearch连接配置
       elasticsearch: {
-        node: 'http://localhost:9200',
+        node: ELASTICSEARCH_URL,
         auth: {
-          username: 'elastic',
-          password: 'changeme',
+          username: ELASTICSEARCH_USERNAME,
+          password: ELASTICSEARCH_PASSWORD,
         },
-        maxRetries: 3,
-        requestTimeout: 30000,
+        maxRetries: ELASTICSEARCH_MAX_RETRIES,
+        requestTimeout: ELASTICSEARCH_REQUEST_TIMEOUT,
         sniffOnStart: true,
       },
 

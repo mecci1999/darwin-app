@@ -16,7 +16,7 @@ async function initializeUserService() {
 
   const star = new Star({
     namespace: 'darwin-app',
-    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}`,
+    nodeID: `${APP_NAME}-${process.env.NODE_ENV || 'development'}-${process.env.NODE_INSTANCE_ID || process.env.HOSTNAME || process.pid}`,
     transporter: {
       type: 'KAFKA',
       debug: isTransportDebugEnabled(),
