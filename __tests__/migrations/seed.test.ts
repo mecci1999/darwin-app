@@ -32,8 +32,8 @@ describe('subscription seed', () => {
 
     const insert = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO subscription_plans'));
     expect(insert).toBeDefined();
-    expect(insert?.[0]).toContain('createdAt, updatedAt');
-    expect(insert?.[0]).not.toContain('created_at');
+    expect(insert?.[0]).toContain('created_at, updated_at');
+    expect(insert?.[0]).not.toContain('createdAt');
     expect(insert?.[0]).toContain('ON DUPLICATE KEY UPDATE id = id');
     expect(insert?.[1].replacements).toEqual([
       '00000000-0000-4000-8000-000000000001',

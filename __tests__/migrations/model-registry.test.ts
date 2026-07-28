@@ -22,7 +22,11 @@ const getIndexFieldName = (field: unknown) => {
 
 describe('production database model registry', () => {
   it('registers every DatabaseService model key with its table definition', () => {
-    const sequelize = new Sequelize('database', 'user', 'password', { dialect: 'mysql', logging: false });
+    const sequelize = new Sequelize('database', 'user', 'password', {
+      dialect: 'mysql',
+      logging: false,
+      define: { underscored: true },
+    });
     const modelKeys = Object.values(DataBaseTableNames);
 
     getModels(sequelize, modelKeys);
@@ -35,7 +39,11 @@ describe('production database model registry', () => {
   });
 
   it('uses physical model columns in every production index', () => {
-    const sequelize = new Sequelize('database', 'user', 'password', { dialect: 'mysql', logging: false });
+    const sequelize = new Sequelize('database', 'user', 'password', {
+      dialect: 'mysql',
+      logging: false,
+      define: { underscored: true },
+    });
     const modelKeys = Object.values(DataBaseTableNames);
 
     getModels(sequelize, modelKeys);
@@ -50,6 +58,31 @@ describe('production database model registry', () => {
           expect(column).toBeDefined();
           expect(physicalColumns).toContain(column);
         }
+      }
+    }
+  });
+
+  it('uses snake_case physical timestamp columns in every production model', () => {
+    const sequelize = new Sequelize('database', 'user', 'password', {
+      dialect: 'mysql',
+      logging: false,
+      define: { underscored: true },
+    });
+    const modelKeys = Object.values(DataBaseTableNames);
+
+    getModels(sequelize, modelKeys);
+
+    for (const modelKey of modelKeys) {
+      const attributes = sequelize.models[modelKey].getAttributes();
+
+      if (attributes.createdAt) {
+        expect(attributes.createdAt.field).toBe('created_at');
+      }
+      if (attributes.updatedAt) {
+        expect(attributes.updatedAt.field).toBe('updated_at');
+      }
+      if (attributes.deletedAt) {
+        expect(attributes.deletedAt.field).toBe('deleted_at');
       }
     }
   });

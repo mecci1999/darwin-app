@@ -22,6 +22,9 @@ const createDatabaseConnection = () => {
     port: Number(process.env.MYSQL_PORT || 3306),
     logging: false,
     timezone: '+08:00',
+    define: {
+      underscored: true,
+    },
   });
 };
 

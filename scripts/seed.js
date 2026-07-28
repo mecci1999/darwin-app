@@ -25,7 +25,7 @@ const run = async () => {
 
     await sequelize.query(
       `INSERT INTO subscription_plans
-        (id, name, display_name, description, price, currency, billing_cycle, features, limits, is_active, sort_order, createdAt, updatedAt)
+        (id, name, display_name, description, price, currency, billing_cycle, features, limits, is_active, sort_order, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        ON DUPLICATE KEY UPDATE id = id`,
       {
