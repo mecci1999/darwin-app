@@ -26,7 +26,7 @@
 ```text
 腾讯云 CVM
   ├── Nginx：公网 80/443
-  ├── Gateway：仅绑定宿主机 127.0.0.1:6670
+  ├── Gateway：双网络；仅绑定宿主机 127.0.0.1:6670/8090
   ├── Node 微服务：Docker 内网
   └── 基础设施：Docker 内网
        ├── MySQL
@@ -42,7 +42,7 @@
 2. 根目录 `Dockerfile` 使用 pnpm 锁文件进行多阶段构建；不会把环境文件复制进镜像。
 3. `docker/docker-compose.infra.yml` 和 `docker/docker-compose.app.yml` 分离基础设施和应用；旧 `docker/docker-compose.yml` 保持为开发基础设施配置。
 4. `.env.production.example` 是安全模板；实际 `.env.production` 必须只保存在受保护的服务器路径，填入独立生成的密钥后设置为 `600`。
-5. 生产 Compose 只发布 Gateway 的 `127.0.0.1:6670` 和 WebSocket 的 `127.0.0.1:8090`；所有数据服务仅在 Docker 内网。
+5. 生产 Compose 只发布 Gateway 的 `127.0.0.1:6670` 和 WebSocket 的 `127.0.0.1:8090`。Gateway 同时加入内部 `darwin_app_network` 和仅它使用的普通 bridge `darwin_gateway_ingress`，使 Docker 能建立回环端口转发；所有其他应用和数据服务只加入内部网络。
 
 这仍是单机 Compose 部署方案，不等同于高可用集群。必须先验证镜像、基础设施健康状态和应用的关键业务路径，再接入 Nginx 公网流量。
 
@@ -507,7 +507,7 @@ history -d 行号
 
 ## 7. 应用 Compose 目标结构
 
-生产应用 Compose 为每个微服务启动一个容器，共享同一个不可变应用镜像。`docker/docker-compose.app.yml` 是实际文件；其非 Gateway 健康检查只验证 PID 1 存活，因为这些服务没有独立 HTTP 健康路由。Gateway 健康检查实际请求 `GET /api/health`。
+生产应用 Compose 为每个微服务启动一个容器，共享同一个不可变应用镜像。`docker/docker-compose.app.yml` 是实际文件；其非 Gateway 健康检查只验证 PID 1 存活，因为这些服务没有独立 HTTP 健康路由。Gateway 健康检查实际请求 `GET /api/health`。Gateway 需要同时连接两个网络：内部 `darwin_app_network` 用于访问所有微服务和数据服务；`darwin_gateway_ingress` 是仅 Gateway 使用的普通 bridge，用于让 Docker 将回环端口发布给宿主机 Nginx。
 
 ```yaml
 services:
@@ -519,7 +519,7 @@ services:
       - "127.0.0.1:6670:6670"
       - "127.0.0.1:8090:8090"
     restart: unless-stopped
-    networks: [app_network]
+    networks: [app_network, ingress_network]
 
   auth:
     image: ${APP_IMAGE:?APP_IMAGE is required}
@@ -566,6 +566,9 @@ services:
 networks:
   app_network:
     external: true
+  ingress_network:
+    name: darwin_gateway_ingress
+    driver: bridge
 ```
 
 应用 Compose 必须在基础设施全部健康后启动。由于两个 Compose 文件是独立项目，应用文件不声明跨项目 `depends_on`；启动顺序由第 8 节的健康状态检查保证。
@@ -583,12 +586,16 @@ env_file:
 docker compose --env-file .env.production -f docker/docker-compose.app.yml config
 ```
 
-创建共享网络：
+创建网络：
 
 ```bash
 # 正常情况下由 docker-compose.infra.yml 创建 darwin_app_network。
 # 只有在基础设施已停用、但需单独检查网络时才查看：
 docker network inspect darwin_app_network
+
+# 正常情况下由 docker-compose.app.yml 创建 darwin_gateway_ingress。
+# 该网络只允许 gateway 加入；不得把数据服务或其他微服务加入其中。
+docker network inspect darwin_gateway_ingress
 ```
 
 ---

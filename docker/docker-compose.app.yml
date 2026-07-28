@@ -30,6 +30,7 @@ services:
     command: ["node", "dist/core/gateway/index.js"]
     mem_limit: 160m
     cpus: 0.30
+    networks: [app_network, ingress_network]
     ports:
       - "127.0.0.1:6670:6670"
       - "127.0.0.1:8090:8090"
@@ -92,6 +93,9 @@ networks:
   app_network:
     name: darwin_app_network
     external: true
+  ingress_network:
+    name: darwin_gateway_ingress
+    driver: bridge
 
 volumes:
   uploads_data:
