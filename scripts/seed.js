@@ -23,19 +23,11 @@ const run = async () => {
       throw new Error('subscription_plans does not exist; run pnpm migrate before pnpm seed');
     }
 
-    const existing = await sequelize.query(
-      'SELECT id FROM subscription_plans WHERE name = ? LIMIT 1',
-      { replacements: [FREE_PLAN.name], type: QueryTypes.SELECT },
-    );
-    if (existing.length > 0) {
-      console.log('Free plan already exists; no seed changes applied');
-      return;
-    }
-
     await sequelize.query(
       `INSERT INTO subscription_plans
-        (id, name, display_name, description, price, currency, billing_cycle, features, limits, is_active, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        (id, name, display_name, description, price, currency, billing_cycle, features, limits, is_active, sort_order, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON DUPLICATE KEY UPDATE id = id`,
       {
         replacements: [
           FREE_PLAN.id,
@@ -51,7 +43,7 @@ const run = async () => {
         ],
       },
     );
-    console.log('Created deterministic free subscription plan');
+    console.log('Ensured deterministic free subscription plan');
   } finally {
     await sequelize.close();
   }
