@@ -94,6 +94,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'RefundRequest',
       tableName: 'refund_requests',
       timestamps: true,
       indexes: [

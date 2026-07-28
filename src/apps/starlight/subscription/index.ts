@@ -212,6 +212,9 @@ function createSubscriptionService() {
       this.logger.info('Starting subscription service...');
 
       try {
+        await star.db.simpleInitialize();
+        this.logger.info('Subscription database connection initialized');
+
         this.logger.info('Starting subscription processors...');
 
         await PaymentHandler.initialize(star as any, subscriptionState);
@@ -292,6 +295,7 @@ function createSubscriptionService() {
       Object.assign(this, methods);
     },
     async started() {
+      await star.db.simpleInitialize();
       this.logger.info('Subscription billing service started successfully');
     },
     async stopped() {

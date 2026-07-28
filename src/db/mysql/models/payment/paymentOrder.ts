@@ -131,6 +131,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'PaymentOrder',
       tableName: 'payment_orders',
       timestamps: true,
       indexes: [

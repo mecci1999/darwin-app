@@ -1,0 +1,33 @@
+import { parseCorsAllowedOrigins } from '../../src/core/gateway/cors';
+
+describe('parseCorsAllowedOrigins', () => {
+  it('keeps local desktop origins and normalizes valid origins outside production', () => {
+    expect(parseCorsAllowedOrigins(' https://app.example.com,https://admin.example.com,https://app.example.com ', 'development')).toEqual([
+      'http://localhost:6130',
+      'http://127.0.0.1:6130',
+      'tauri://localhost',
+      'http://tauri.localhost',
+      'https://tauri.localhost',
+      'asset://localhost',
+      'https://app.example.com',
+      'https://admin.example.com',
+    ]);
+  });
+
+  it('rejects wildcard, non-HTTPS, and non-origin production values', () => {
+    expect(parseCorsAllowedOrigins('*,http://app.example.com,https://app.example.com/path,not a url', 'development')).toEqual([
+      'http://localhost:6130',
+      'http://127.0.0.1:6130',
+      'tauri://localhost',
+      'http://tauri.localhost',
+      'https://tauri.localhost',
+      'asset://localhost',
+    ]);
+  });
+
+  it('uses only validated explicit HTTPS origins in production', () => {
+    expect(parseCorsAllowedOrigins('https://app.example.com,http://localhost:6130,tauri://localhost', 'production')).toEqual([
+      'https://app.example.com',
+    ]);
+  });
+});

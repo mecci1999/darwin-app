@@ -73,10 +73,10 @@ export class ElasticsearchClient {
   constructor(config: { node: string; username?: string; password?: string; index: string }) {
     this.client = new Client({
       node: config.node,
-      auth: config.username || config.password
+      auth: config.username && config.password
         ? {
-            username: config.username || 'elastic',
-            password: config.password || '',
+            username: config.username,
+            password: config.password,
           }
         : undefined,
     });

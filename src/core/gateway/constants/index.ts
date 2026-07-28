@@ -20,7 +20,7 @@ export const SLOW_QUERY_THRESHOLD = 1000; // 1秒
 export const WEBSOCKET_DEFAULT_PORT = 6668;
 
 // Kafka配置
-export const KAFKA_BROKERS = process.env.KAFKA_BROKERS || 'localhost:9092';
+export const KAFKA_BROKERS = process.env.KAFKA_BROKERS || process.env.KAFKA_HOST || 'localhost:9092';
 export const KAFKA_USER = process.env.KAFKA_USER || '';
 export const KAFKA_PASSWORD = process.env.KAFKA_PASSWORD || '';
 export const KAFKA_CLIENT_ID = 'gateway-service';

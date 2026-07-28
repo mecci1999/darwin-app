@@ -19,7 +19,7 @@ const loadModelsRecursive = (
     const fullPath = path.join(directoryPath, file);
     // const stat = fs.statSync(fullPath);
 
-    if (file.endsWith('.ts') && !file.endsWith('.d.ts')) {
+    if ((file.endsWith('.ts') && !file.endsWith('.d.ts')) || (file.endsWith('.js') && !file.endsWith('.d.js'))) {
       // 统一处理模型文件
       const fileName = path.parse(file).name;
       const modelKey = fileName.endsWith('Table') ? fileName.replace('Table', '') : fileName;

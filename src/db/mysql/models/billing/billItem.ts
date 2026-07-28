@@ -86,6 +86,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'BillItem',
       tableName: 'bill_items',
       timestamps: true,
       indexes: [

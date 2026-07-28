@@ -20,7 +20,7 @@ async function initializeUserService() {
     transporter: {
       type: 'KAFKA',
       debug: isTransportDebugEnabled(),
-      host: process.env.KAFKA_HOST || '127.0.0.1:9092',
+      host: process.env.KAFKA_BROKERS || process.env.KAFKA_HOST || '127.0.0.1:9092',
       options: {
         producer: {
           'linger.ms': 0,
@@ -31,11 +31,14 @@ async function initializeUserService() {
           'fetch.min.bytes': 1,
           'fetch.wait.max.ms': 100,
         },
-        sasl: {
-          mechanism: 'plain',
-          username: process.env.KAFKA_USER || 'darwin_app',
-          password: process.env.KAFKA_PASSWORD || 'K@fk@_S3cur3_P@ssw0rd_2025!',
-        },
+        sasl:
+          process.env.KAFKA_USER && process.env.KAFKA_PASSWORD
+            ? {
+                mechanism: 'plain',
+                username: process.env.KAFKA_USER,
+                password: process.env.KAFKA_PASSWORD,
+              }
+            : undefined,
         ssl: false,
         groupId: `user-group-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
         heartbeatInterval: 3000,
@@ -56,7 +59,7 @@ async function initializeUserService() {
         redis: {
           port: parseInt(process.env.REDIS_PORT || '6379'),
           host: process.env.REDIS_HOST || 'localhost',
-          password: process.env.REDIS_PASSWORD || 'R3d1s_S3cur3_P@ssw0rd_2024!@#',
+            password: process.env.REDIS_PASSWORD || '',
         },
       },
     },

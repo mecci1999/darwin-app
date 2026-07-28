@@ -89,6 +89,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'UserQuota',
       tableName: 'user_quotas',
       timestamps: true,
       indexes: [

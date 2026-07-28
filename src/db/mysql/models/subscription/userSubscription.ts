@@ -116,6 +116,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'UserSubscription',
       tableName: 'user_subscriptions',
       timestamps: true,
       indexes: [

@@ -129,6 +129,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'UserBillingAddress',
       tableName: 'user_billing_addresses',
       timestamps: true,
       indexes: [

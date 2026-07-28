@@ -73,6 +73,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'BillingReminderSetting',
       tableName: 'billing_reminder_settings',
       timestamps: true,
       indexes: [

@@ -108,47 +108,54 @@ pnpm build:all
 find dist -type f -name 'index.js'
 ```
 
-构建脚本必须在本地通过以下检查后才能部署：
+构建脚本必须在本地通过类型检查和全量构建；以下 focused Jest 测试已在本仓库通过：`__tests__/gateway/cors.test.ts`、`__tests__/micro-app/ticket-secret.test.ts`、`__tests__/subscription/models.test.ts`、`__tests__/migrations/model-registry.test.ts`、`__tests__/migrations/migrate.test.ts`。完整 Jest 当前不是已完成的发布 gate：独立运行仍有已知的非本次改动失败（`metrics-query` 聚合断言、`metrics-alerts` 断言，以及 `metrics-sdk` 对未安装 `vitest` 的导入）。修复这些独立问题前，不得在文档中宣称完整 Jest 已通过。
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build:all
 pnpm exec tsc --noEmit
-pnpm exec jest -- --runInBand
+pnpm exec jest __tests__/gateway/cors.test.ts __tests__/micro-app/ticket-secret.test.ts __tests__/subscription/models.test.ts __tests__/migrations/model-registry.test.ts __tests__/migrations/migrate.test.ts --runInBand
 ```
 
 ### 1.4 重写生产 Dockerfile
 
 生产镜像应使用与锁文件匹配的 pnpm，并且不复制 `.env.production` 进镜像。环境变量通过 Compose 的 `env_file` 或服务器密钥管理注入。
 
-实际 Dockerfile 使用如下多阶段结构：
+实际根目录 `Dockerfile` 使用四个阶段：`base` 启用 Corepack；`dependencies` 安装 `python3 make g++` 并以 `pnpm install --frozen-lockfile` 安装依赖；`builder` 只复制 TypeScript 构建配置和 `src` 后运行 `pnpm run build:all`；`production-dependencies` 从依赖层执行 `pnpm prune --prod`。最终 `runtime` 使用独立的 `node:22.14.0-bookworm-slim`，不包含 `package.json` 或环境文件。
 
 ```dockerfile
-FROM node:22-bookworm-slim AS deps
+FROM node:22.14.0-bookworm-slim AS base
 WORKDIR /app
 RUN corepack enable
+
+FROM base AS dependencies
+RUN apt-get update && apt-get install --no-install-recommends -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM node:22-bookworm-slim AS builder
-WORKDIR /app
-RUN corepack enable
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json pnpm-lock.yaml tsconfig.json rollup.config.js ./
+FROM dependencies AS builder
+COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-COPY typings ./typings
-RUN pnpm build:all
+RUN pnpm run build:all
 
-FROM node:22-bookworm-slim AS runtime
+FROM dependencies AS production-dependencies
+RUN pnpm prune --prod
+
+FROM node:22.14.0-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json ./
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+RUN apt-get update && apt-get install --no-install-recommends -y util-linux && rm -rf /var/lib/apt/lists/* && mkdir -p /app/uploads && chown node:node /app/uploads
+COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --chown=node:node scripts ./scripts
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+RUN chmod 755 /usr/local/bin/docker-entrypoint
+EXPOSE 6670 8090
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 CMD ["node", "dist/core/gateway/index.js"]
 ```
 
-Dockerfile 的依赖阶段提供原生依赖所需的构建工具，运行阶段仅保留生产依赖和 `dist`。环境变量通过 Compose `env_file` 注入，绝不构建进镜像。
+运行镜像保留生产 `node_modules`、`dist` 和 migration/seed `scripts`。入口脚本在容器以 root 启动时创建并递归交还 `/app/uploads` 给 `node:node`，随后用 `setpriv` 以非 root `node` 用户执行命令；若容器已非 root，则直接执行命令。环境变量通过 Compose `env_file` 注入，绝不构建进镜像。
 
 ### 1.5 拆分 Compose 文件
 
@@ -169,9 +176,16 @@ darwin-app/
 
 `docker/docker-compose.yml` 保留为开发基础设施配置，不能作为安全的生产配置。生产必须使用下面两个单独的文件。
 
-### 1.6 数据库迁移脚本必须先实现
+### 1.6 首次公开上线的 Go / No-Go 门槛
 
-当前 `package.json` 虽然声明了 `migrate` 和 `seed` 脚本，但仓库当前没有经过验证的 `scripts/migrate.js`、`scripts/seed.js` 文件。正式上线前必须实现并验证迁移系统；在此之前不得执行迁移或 seed 命令，也不能把它们当作已完成能力。
+当前生产 Compose、Dockerfile 和构建链路已具备，但在以下四项完成、测试并发布新镜像前，**禁止执行首次应用 Compose 启动或将 API 暴露给公网用户**。
+
+1. **Kafka 认证模式统一。** 生产 `docker-compose.infra.yml` 配置的是仅 Docker 内网可访问的 PLAINTEXT Kafka：`kafka:29092`。所有应用服务仅在 `KAFKA_USER` 和 `KAFKA_PASSWORD` 都显式存在时配置 SASL；生产 PLAINTEXT 模式下两者必须保持空值，且服务端不使用写死的用户名/密码 fallback。
+2. **Gateway 生产 CORS 白名单。** `CORS_ALLOWED_ORIGINS` 是逗号分隔的精确 HTTPS 来源列表，例如 `https://app.example.com`。Gateway 会去除空白和重复项、拒绝 `*`/非 HTTPS/带路径的值，并保留本地 Tauri 开发来源；携带凭据的请求禁止使用 `*`。
+3. **订阅服务数据库初始化与初始套餐。** `subscription` 在开始支付、通知、配额等任务前初始化 MySQL；`pnpm seed` 可重复执行并且只创建确定的 `free` 套餐。
+4. **版本化迁移和可选 seed。** `pnpm migrate` 使用 `app_migrations` 账本执行仅前向、非破坏性的已注册迁移。首次空数据库 bootstrap 由迁移工具受控地加载生产模型并执行一次 `sync({ force: false, alter: false })`，随后验证所有运行时表并写入基线；应用服务仅验证数据库连接，不执行 Sequelize `sync()`。
+
+完成后必须在全新 Docker volume 的预发布环境演练完整顺序：基础设施 → migration → 必要 seed → 应用服务 → 登录、文件、指标、日志、订阅、WebSocket 验收。
 
 ---
 
@@ -369,6 +383,10 @@ chmod 600 .env.production
 
 ```env
 NODE_ENV=production
+API_URL=https://api.example.com
+FRONTEND_URL=https://app.example.com
+# Comma-separated exact HTTPS origins; `*` is invalid because Gateway enables credentials.
+CORS_ALLOWED_ORIGINS=https://app.example.com
 
 # 以实际代码读取的变量名为准；以下是部署目标示例
 MYSQL_HOST=mysql
@@ -384,8 +402,9 @@ REDIS_DB=0
 
 KAFKA_BROKERS=kafka:29092
 KAFKA_HOST=kafka:29092
-KAFKA_USER=替换为Kafka用户
-KAFKA_PASSWORD=替换为随机强密码
+# 当前生产 Kafka 为 Docker 内网 PLAINTEXT；保持为空，除非 broker 已明确切换到 SASL。
+KAFKA_USER=
+KAFKA_PASSWORD=
 
 INFLUXDB_URL=http://influxdb:8086
 INFLUXDB_USERNAME=admin
@@ -410,9 +429,26 @@ WS_SERVER_PORT=8090
 WS_SERVER_PATH=/ws
 ```
 
-变量名必须以 `src/config` 及各服务实际读取方式为准。`.env.example` 与当前业务代码可能存在历史命名差异，部署前要逐项核对，尤其是 `MYSQL_USER`、JWT 密钥拼写和 Kafka 配置。当前应用实际读取的是 `MYSQL_USER`，不能只配置 `MYSQL_USERNAME`。
+变量名必须以 `src/config` 及各服务实际读取方式为准。`.env.example` 与当前业务代码可能存在历史命名差异，部署前要逐项核对，尤其是 `MYSQL_USER`、JWT 密钥拼写和 Kafka 配置。当前应用实际读取的是 `MYSQL_USER`，不能只配置 `MYSQL_USERNAME`。当生产 Kafka 保持 PLAINTEXT 时，`KAFKA_USER` 和 `KAFKA_PASSWORD` 必须保持空值；只有 broker 与所有客户端已统一切换到 SASL 后才可填写。
 
-### 5.3 生成随机值
+### 5.3 首次发布数据库顺序
+
+基础设施健康后、任何应用服务启动前，必须只运行一个 migration job。首次部署的目标数据库必须是新的空 schema；基线迁移使用与生产相同的已编译模型定义创建全部运行时表，拒绝在已有应用表的数据库上执行，且不使用 `force` 或 `alter`。MySQL DDL 会隐式提交，因此首次基线依靠空库前置条件、单 job 锁和完成后的全表验证，而不是声称整套 DDL 可回滚。
+
+生产环境从仓库根目录使用与 MySQL 相同 Docker 网络中的一次性容器执行（生产 `MYSQL_HOST=mysql` 不能由宿主机解析）：
+
+```bash
+docker compose --env-file .env.production -f docker/docker-compose.app.yml \
+  run --rm --no-deps gateway node scripts/migrate.js
+
+# 可选；仅创建缺失的 free 套餐
+docker compose --env-file .env.production -f docker/docker-compose.app.yml \
+  run --rm --no-deps gateway node scripts/seed.js
+```
+
+`pnpm migrate` 和 `pnpm seed` 供本地或 CI 调用；生产容器使用上述 `node scripts/*.js` 命令。迁移通过 MySQL advisory lock 串行化执行，先创建 `app_migrations` 迁移账本，再执行未记录的前向迁移。非 DDL 的后续 migration 可标记为 transactional，使其 schema 操作与账本记录位于同一数据库事务；MySQL DDL migration 必须具备明确的前置条件和完成后验证，且不得在失败后盲目写入账本。不要在未备份的生产数据库上跳过备份/恢复演练。应用运行时不会在生产环境自动创建或修改表。
+
+### 5.4 生成随机值
 
 ```bash
 openssl rand -base64 32
@@ -559,6 +595,8 @@ docker network inspect darwin_app_network
 
 ## 8. 首次上线操作顺序
 
+> **停止条件：** 第 1.6 节的四项 Go / No-Go 门槛未全部完成时，本节只能用于准备 CVM、域名、TCR、Docker、Swap、环境文件和 Compose `config` 校验；不得启动 `docker-compose.app.yml`，不得在宝塔开放 API 公网流量。
+
 ### 8.1 本地发布前验证
 
 在本地项目目录执行：
@@ -566,7 +604,7 @@ docker network inspect darwin_app_network
 ```bash
 pnpm install --frozen-lockfile
 pnpm exec tsc --noEmit
-pnpm exec jest -- --runInBand
+pnpm exec jest __tests__/gateway/cors.test.ts __tests__/micro-app/ticket-secret.test.ts __tests__/subscription/models.test.ts __tests__/migrations/model-registry.test.ts __tests__/migrations/migrate.test.ts --runInBand
 pnpm build:all
 docker build --pull -t darwin-app:local-verify .
 docker run --rm darwin-app:local-verify node --version
@@ -599,20 +637,22 @@ docker compose --env-file .env.production -f docker/docker-compose.infra.yml log
 
 ### 8.3 初始化数据库
 
-先确认 MySQL 容器健康。当前仓库没有经过验证的 `scripts/migrate.js`，实现迁移系统前不得执行迁移命令：
+先确认 MySQL 容器健康、已完成可恢复备份，且没有其他 migration job。首次 bootstrap 只允许新的空数据库；迁移会拒绝已有非账本表，不能用于接管历史 schema：
 
 ```bash
 docker compose --env-file .env.production -f docker/docker-compose.infra.yml exec mysql mysqladmin ping -h localhost -u root -p
-# 前置条件：scripts/migrate.js 已实现并通过验证
-docker compose --env-file .env.production -f docker/docker-compose.app.yml run --rm gateway node scripts/migrate.js
+docker compose --env-file .env.production -f docker/docker-compose.app.yml \
+  run --rm --no-deps gateway node scripts/migrate.js
 ```
 
-只有明确需要演示数据时才执行 seed；当前仓库没有经过验证的 `scripts/seed.js`，实现前不得执行：
+迁移成功并核对 `app_migrations` 后，只在确有需要时执行幂等初始 seed：
 
 ```bash
-# 前置条件：scripts/seed.js 已实现并通过验证
-docker compose --env-file .env.production -f docker/docker-compose.app.yml run --rm gateway node scripts/seed.js
+docker compose --env-file .env.production -f docker/docker-compose.app.yml \
+  run --rm --no-deps gateway node scripts/seed.js
 ```
+
+首次基线会从本次镜像的已编译 Sequelize 模型创建完整运行时 schema，并在全表验证后记录 `001-initial-model-baseline`。MySQL DDL 不可作为可回滚事务；失败时不要启动应用，保留日志并在新的预发布空库重新演练，或按经过审查的恢复方案处理。
 
 ### 8.4 启动应用
 
@@ -1047,7 +1087,7 @@ $APP_COMPOSE logs --tail=300 <service>
 
 #### 11.5.7 数据变更的禁止事项
 
-当前仓库的数据库迁移脚本尚未实现并验证。以下变更不能只靠替换镜像完成：
+仓库提供 `scripts/migrate.js`、`scripts/migrations.js` 和 `scripts/seed.js`。首次空库基线和每个后续数据变更都必须经过迁移测试、账本核对和预发布恢复演练；以下变更不能只靠替换镜像完成：
 
 - MySQL 表、列、索引、约束变更。
 - Elasticsearch 索引 mapping 或删除/重建索引。
@@ -1060,7 +1100,7 @@ $APP_COMPOSE logs --tail=300 <service>
 备份并验证恢复 -> expand（新增兼容结构） -> 部署兼容代码 -> 迁移/切换 -> 验证 -> contract（确认旧版本停止后清理）
 ```
 
-在迁移系统和恢复演练完成前，安排维护窗口，不要承诺单服务替换能够无损回滚数据。
+迁移 job 必须唯一执行；MySQL DDL 迁移需要前置条件和完成后验证，不能声称可由事务自动回滚。安排维护窗口，不要承诺单服务替换能够无损回滚数据。
 
 ---
 
@@ -1272,6 +1312,7 @@ du -sh /opt/darwin-app/shared/*
 ### 应用和数据
 
 - [ ] `.env.production` 使用真实生产值，权限为 600。
+- [ ] `MICRO_APP_TICKET_SECRET` 已设置为独立随机值；`CORS_ALLOWED_ORIGINS` 仅包含精确 HTTPS 前端来源。
 - [ ] 容器内地址使用 service name。
 - [ ] MySQL 迁移完成并有备份。
 - [ ] Kafka、Redis、InfluxDB、Elasticsearch 状态正常。
@@ -1291,13 +1332,13 @@ du -sh /opt/darwin-app/shared/*
 5. 在腾讯云完成安全组、Swap、Docker、域名和 HTTPS 准备。
 6. 上传或拉取已验证版本，创建 `.env.production`。
 7. 启动基础设施，逐项检查健康状态。
-8. 仅在迁移脚本已实现并验证后执行数据库迁移；seed 默认不执行。完成后执行备份，并将备份同步到腾讯云 COS 或其他独立存储。
+8. 在基础设施健康、迁移前备份完成且没有并发 migration job 时，用一次性 Gateway 容器执行 `node scripts/migrate.js`。首次只针对新的空库；需要初始套餐时再执行 `node scripts/seed.js`。核对 `app_migrations` 和 `free` 套餐后，将备份同步到腾讯云 COS 或其他独立存储。
 9. 启动应用服务，检查服务发现和核心接口。
 10. 启用 Nginx/HTTPS，对外开放 API。
 11. 建立备份、告警、日志和回滚流程。
 12. 后续新增博客/摄影服务时，只新增独立容器和路由，不重启或修改现有服务容器。
 
-生产 Dockerfile、两个 Compose 文件、全量构建脚本、生产启动脚本和健康检查已经补齐并完成本地配置校验。生产镜像入口会在保持应用非 root 运行的前提下初始化 `/app/uploads` 命名卷权限。当前上线前剩余工作是：实现并验证数据库迁移脚本、使用真实受保护的 `.env.production` 构建镜像、在腾讯云启动服务并完成备份与恢复演练。
+生产 Dockerfile、两个 Compose 文件、全量构建脚本、生产启动脚本和健康检查已经补齐并完成本地配置校验。生产镜像入口会在保持应用非 root 运行的前提下初始化 `/app/uploads` 命名卷权限。当前上线前剩余工作是：使用真实受保护的 `.env.production` 构建镜像，并在全新 Docker volume 的预发布环境完成“基础设施 → migration → 可选 seed → 账本/表核对 → 应用 → 备份恢复”演练。
 
 ---
 

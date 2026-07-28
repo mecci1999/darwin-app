@@ -142,7 +142,11 @@ export class DatabaseService {
         mainConnection.connection = this.connection;
       }
 
-      await this.connection.sync({ force: false });
+      if (process.env.NODE_ENV === 'production') {
+        await this.connection.authenticate();
+      } else {
+        await this.connection.sync({ force: false });
+      }
 
       // 如果需要完整初始化（包括IP黑名单等）
       if (config.enableIpBlacklist || config.enableIpSyncTimer) {
@@ -224,7 +228,11 @@ export class DatabaseService {
         mainConnection.connection = this.connection;
       }
 
-      await this.connection.sync({ force: false });
+      if (process.env.NODE_ENV === 'production') {
+        await this.connection.authenticate();
+      } else {
+        await this.connection.sync({ force: false });
+      }
 
       this.isInitialized = true;
       this.star.logger?.info(`Database connection [${this.serviceName}] established`);

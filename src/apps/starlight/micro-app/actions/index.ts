@@ -15,7 +15,13 @@ type MicroAppManifest = {
   permissions?: Record<string, unknown>;
 };
 
-const TICKET_SECRET = process.env.MICRO_APP_TICKET_SECRET || 'starlight-micro-app-ticket-secret';
+export const requireMicroAppTicketSecret = () => {
+  const secret = process.env.MICRO_APP_TICKET_SECRET?.trim();
+  if (!secret) {
+    throw new Error('MICRO_APP_TICKET_SECRET is required to issue or verify micro-app runtime tickets');
+  }
+  return secret;
+};
 const MAX_MICRO_APP_PACKAGE_BYTES = Number(process.env.MICRO_APP_MAX_PACKAGE_MB || 100) * 1024 * 1024;
 const uploadChunkKey = (uploadId: string) => `micro-app:upload:${uploadId}`;
 type ChunkUploadState = { total: number; chunks: Record<string, string>; updatedAt: number };
@@ -162,14 +168,14 @@ const canAccessApp = (ctx: Context, app: any) => {
 
 const signPayload = (payload: Record<string, unknown>) => {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', TICKET_SECRET).update(body).digest('base64url');
+  const signature = crypto.createHmac('sha256', requireMicroAppTicketSecret()).update(body).digest('base64url');
   return `${body}.${signature}`;
 };
 
 const verifyTicket = (ticket: string) => {
   const [body, signature] = ticket.split('.');
   if (!body || !signature) return null;
-  const expected = crypto.createHmac('sha256', TICKET_SECRET).update(body).digest('base64url');
+  const expected = crypto.createHmac('sha256', requireMicroAppTicketSecret()).update(body).digest('base64url');
   if (expected !== signature) return null;
   const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
   if (!payload?.exp || Number(payload.exp) < Date.now()) return null;
@@ -364,7 +370,9 @@ export default function microAppActions(star: Starlight) {
         if (!record) return fail('微应用版本不存在');
         if (!['approved', 'published'].includes(record.status)) return fail('只有审核通过的版本可以发布');
         const previous = await star.db.microApp.findLatestPublishedVersion(appId);
-        const signature = crypto.createHmac('sha256', TICKET_SECRET).update(record.packageSha256).digest('hex');
+        const signature = crypto.createHmac('sha256', requireMicroAppTicketSecret())
+          .update(record.packageSha256)
+          .digest('hex');
         const next = await star.db.microApp.updateMicroAppVersionStatus(appId, version, 'published', {
           signature,
           publishedAt: new Date(),

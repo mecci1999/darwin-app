@@ -10,7 +10,7 @@ export const DATABASE_CONFIG = {
   HOST: process.env.MYSQL_HOST || 'localhost',
   PORT: parseInt(process.env.MYSQL_PORT || '3306'),
   USER: process.env.MYSQL_USER || 'root',
-  PASSWORD: process.env.MYSQL_PASSWORD || 'DarwinApp2024_MySQL!',
+  PASSWORD: process.env.MYSQL_PASSWORD || '',
   DATABASE: process.env.MYSQL_DATABASE || 'darwin_app',
   CHARSET: 'utf8mb4',
   TIMEZONE: '+08:00',
@@ -20,17 +20,17 @@ export const DATABASE_CONFIG = {
 export const REDIS_CONFIG = {
   HOST: process.env.REDIS_HOST || 'localhost',
   PORT: parseInt(process.env.REDIS_PORT || '6379'),
-  PASSWORD: process.env.REDIS_PASSWORD || 'DarwinApp2024_Redis!',
+  PASSWORD: process.env.REDIS_PASSWORD || '',
   DB: parseInt(process.env.REDIS_DB || '0'),
 };
 
 // Kafka配置
 export const KAFKA_CONFIG = {
-  BROKERS: (process.env.KAFKA_HOST || 'localhost:9092').split(','),
+  BROKERS: (process.env.KAFKA_BROKERS || process.env.KAFKA_HOST || 'localhost:9092').split(','),
   CLIENT_ID: 'subscription-service',
   GROUP_ID: 'subscription-group',
   USERNAME: process.env.KAFKA_USER || '',
-  PASSWORD: process.env.KAFKA_PASSWORD || 'DarwinApp2024_Kafka!',
+  PASSWORD: process.env.KAFKA_PASSWORD || '',
 };
 
 // 缓存配置

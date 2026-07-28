@@ -71,6 +71,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'QuotaUsageHistory',
       tableName: 'quota_usage_history',
       timestamps: false,
       indexes: [

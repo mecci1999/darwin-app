@@ -74,9 +74,10 @@ class MainDatabaseConnection {
       try {
         this.connection = this.getConnectionByOptions(options);
         resolve(
-          (this.promise = this.connection.sync({ force: false }).then(() => {
-            return this.connection as any;
-          })),
+          (this.promise =
+            process.env.NODE_ENV === 'production'
+              ? this.connection.authenticate().then(() => this.connection as any)
+              : this.connection.sync({ force: false }).then(() => this.connection as any)),
         );
       } catch (error) {
         reject(error);

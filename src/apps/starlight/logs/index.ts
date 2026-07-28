@@ -157,10 +157,13 @@ function createLogsService() {
       // Elasticsearch连接配置
       elasticsearch: {
         node: ELASTICSEARCH_URL,
-        auth: {
-          username: ELASTICSEARCH_USERNAME,
-          password: ELASTICSEARCH_PASSWORD,
-        },
+        auth:
+          ELASTICSEARCH_USERNAME && ELASTICSEARCH_PASSWORD
+            ? {
+                username: ELASTICSEARCH_USERNAME,
+                password: ELASTICSEARCH_PASSWORD,
+              }
+            : undefined,
         maxRetries: ELASTICSEARCH_MAX_RETRIES,
         requestTimeout: ELASTICSEARCH_REQUEST_TIMEOUT,
         sniffOnStart: true,

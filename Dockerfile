@@ -27,6 +27,7 @@ RUN apt-get update \
     && chown node:node /app/uploads
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --chown=node:node scripts ./scripts
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN chmod 755 /usr/local/bin/docker-entrypoint
 EXPOSE 6670 8090

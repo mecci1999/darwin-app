@@ -89,6 +89,7 @@ export default function (sequelize: Sequelize) {
     },
     {
       sequelize,
+      modelName: 'PaymentProvider',
       tableName: 'payment_providers',
       timestamps: true,
       indexes: [

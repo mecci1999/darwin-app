@@ -16,6 +16,7 @@ import {
 } from 'typings';
 import { DatabaseService } from 'db/mysql';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { parseCorsAllowedOrigins } from './cors';
 import gatewayMethods, { createWebSocketManager } from './methods';
 
 // 导入模块化的工具类和类型
@@ -457,14 +458,7 @@ async function initializeGatewayService() {
       port: Number(GATEWAY_PORT || DEFAULT_PORT),
       ip: '0.0.0.0',
       cors: {
-        origin: [
-          'http://localhost:6130',
-          'http://127.0.0.1:6130',
-          'tauri://localhost',
-          'http://tauri.localhost',
-          'https://tauri.localhost',
-          'asset://localhost',
-        ],
+        origin: parseCorsAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS),
         methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
         allowedHeaders: [
           'Content-Type',

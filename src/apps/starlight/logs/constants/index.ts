@@ -8,8 +8,8 @@ export const DEFAULT_PORT = 6668;
 
 // Elasticsearch配置
 export const ELASTICSEARCH_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
-export const ELASTICSEARCH_USERNAME = process.env.ELASTICSEARCH_USERNAME || 'elastic';
-export const ELASTICSEARCH_PASSWORD = process.env.ELASTICSEARCH_PASSWORD || 'changeme';
+export const ELASTICSEARCH_USERNAME = process.env.ELASTICSEARCH_USERNAME || '';
+export const ELASTICSEARCH_PASSWORD = process.env.ELASTICSEARCH_PASSWORD || '';
 export const ELASTICSEARCH_INDEX_PREFIX = process.env.ELASTICSEARCH_INDEX_PREFIX || 'logs';
 export const ELASTICSEARCH_MAX_RETRIES = parseInt(process.env.ELASTICSEARCH_MAX_RETRIES || '3');
 export const ELASTICSEARCH_REQUEST_TIMEOUT = parseInt(process.env.ELASTICSEARCH_REQUEST_TIMEOUT || '30000');
