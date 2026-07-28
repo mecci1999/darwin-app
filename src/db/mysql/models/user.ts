@@ -103,7 +103,7 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.STRING(16),
         defaultValue: 'zh-CN',
       },
-      lastActiveAt: { type: DataTypes.DATE },
+      lastActiveAt: { type: DataTypes.DATE, field: 'last_active_at' },
       meta: {
         type: DataTypes.TEXT,
         comment: '扩展元数据的JSON字符串',
@@ -123,12 +123,13 @@ export default function (sequelize: Sequelize) {
         type: DataTypes.INTEGER,
         defaultValue: 0,
       },
-      createdAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+      createdAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW, field: 'created_at' },
       updatedAt: {
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW,
+        field: 'updated_at',
       },
-      deletedAt: { type: DataTypes.DATE },
+      deletedAt: { type: DataTypes.DATE, field: 'deleted_at' },
       power: {
         type: DataTypes.INTEGER,
         defaultValue: 0,

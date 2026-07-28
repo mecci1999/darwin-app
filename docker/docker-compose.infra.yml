@@ -8,7 +8,7 @@ x-logging: &default-logging
 
 services:
   zookeeper:
-    image: bitnami/zookeeper:3.9.2
+    image: ${ZOOKEEPER_IMAGE:?ZOOKEEPER_IMAGE is required}
     environment:
       ALLOW_ANONYMOUS_LOGIN: "yes"
       ZOO_HEAP_SIZE: "96"
@@ -27,7 +27,7 @@ services:
       start_period: 20s
 
   kafka:
-    image: bitnami/kafka:3.8.1
+    image: ${KAFKA_IMAGE:?KAFKA_IMAGE is required}
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
       start_period: 45s
 
   mysql:
-    image: mysql:8.4.3
+    image: ${MYSQL_IMAGE:?MYSQL_IMAGE is required}
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
       MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
@@ -81,8 +81,10 @@ services:
       start_period: 40s
 
   redis:
-    image: redis:7.4.1-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --maxmemory 72mb --maxmemory-policy allkeys-lru
+    image: ${REDIS_IMAGE:?REDIS_IMAGE is required}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --maxmemory 72mb --maxmemory-policy allkeys-lru"]
     volumes:
       - redis_data:/data
     networks: [app_network]
@@ -98,7 +100,7 @@ services:
       start_period: 15s
 
   influxdb:
-    image: influxdb:2.7.11
+    image: ${INFLUXDB_IMAGE:?INFLUXDB_IMAGE is required}
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
@@ -122,7 +124,7 @@ services:
       start_period: 30s
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    image: ${ELASTICSEARCH_IMAGE:?ELASTICSEARCH_IMAGE is required}
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
