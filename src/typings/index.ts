@@ -111,6 +111,10 @@ export interface verifyCodeOptions {
   references?: string | string[] | undefined;
   /** The subject of the e-mail */
   subject?: string | undefined;
+  /** HTML body for clients that support rich email. */
+  html?: string | undefined;
+  /** Plain-text fallback body for clients that do not render HTML. */
+  text?: string | undefined;
   /** An object or array of additional header fields */
   headers?: Headers | undefined;
   /** optional Message-Id value, random value will be generated if not set */

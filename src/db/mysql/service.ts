@@ -113,6 +113,7 @@ export class DatabaseService {
             DataBaseTableNames.Config,
             DataBaseTableNames.IPBlackList,
             DataBaseTableNames.EmailAuth,
+            DataBaseTableNames.AdminBootstrapLock,
             DataBaseTableNames.WechatAuth,
             DataBaseTableNames.ScanAuth,
             DataBaseTableNames.SubscriptionPlan,
@@ -199,6 +200,7 @@ export class DatabaseService {
             DataBaseTableNames.Config,
             DataBaseTableNames.IPBlackList,
             DataBaseTableNames.EmailAuth,
+            DataBaseTableNames.AdminBootstrapLock,
             DataBaseTableNames.WechatAuth,
             DataBaseTableNames.ScanAuth,
             DataBaseTableNames.SubscriptionPlan,
@@ -273,6 +275,7 @@ export class DatabaseService {
   get auth() {
     return {
       findEmailIsExist: authApi.findEmailIsExist,
+      registerEmailUser: authApi.registerEmailUser,
       saveOrUpdateEmailAuth: authApi.saveOrUpdateEmailAuth,
       findEmailAuthByEmail: authApi.findEmailAuthByEmail,
       findEmailAuthByUserId: authApi.findEmailAuthByUserId,

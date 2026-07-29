@@ -46,6 +46,7 @@ services:
   auth:
     <<: *app-defaults
     command: ["node", "dist/core/auth/index.js"]
+    networks: [app_network, auth_egress_network]
 
   user:
     <<: *app-defaults
@@ -95,6 +96,9 @@ networks:
     external: true
   ingress_network:
     name: darwin_gateway_ingress
+    driver: bridge
+  auth_egress_network:
+    name: darwin_auth_egress
     driver: bridge
 
 volumes:

@@ -1349,4 +1349,151 @@ du -sh /opt/darwin-app/shared/*
 
 ---
 
+## 17. 腾讯云生产环境基线（2026-07，后续发布先读本节）
+
+> **内部受限运维资料：**本节包含公网 IP、内部端口、容器/网络名称、部署路径、镜像仓库和代理拓扑；不得发布到公开仓库、公开工单、截图或对外文档。信息会随服务器变更而过期；每次重大发布后应更新镜像版本、Compose 变更和验收状态。**严禁在本文档记录 SSH 私钥、密码、Token、API/Registry/DNS/宝塔凭据、`.env.production` 内容、连接串、会话密钥或证书私钥。**
+
+### 17.1 主机与访问边界
+
+| 项目 | 当前值 | 说明 |
+| --- | --- | --- |
+| 云厂商 / 实例 | 腾讯云 CVM / Lighthouse | 单机生产环境，非高可用集群 |
+| 公网 IPv4 | `175.178.250.182` | `api.starlight.host` 的默认线路 A 记录目标 |
+| 系统 | Ubuntu 20.04，`x86_64` | 观察到的基线；Ubuntu 20.04 标准支持已于 2025-05 结束，当前未安装 Ubuntu Pro 工具，需安排受控的系统升级或 ESM 评估 |
+| Docker | 24.0.2，Compose v2.18.1 | 不更改 Docker daemon 配置或重启 Docker，除非已评估 FRPS 影响 |
+| Nginx | 宝塔管理，`/www/server/nginx` | 站点 include 位于 `/www/server/panel/vhost/nginx/` |
+| 反向代理站点 | `api.starlight.host` | vhost：`/www/server/panel/vhost/nginx/api.starlight.host.conf` |
+| 运维用户 | `lighthouse` | 通过 SSH 密钥登录，具备非交互式 `sudo` |
+| SSH 防火墙 | UFW 仅允许明确的固定来源 IP | 每次变更前保留可用 SSH 会话；不得先关闭当前有效管理路径 |
+
+公网入口只应是宝塔 Nginx 的 `80/443`。防火墙已允许 `80/tcp`、`443/tcp`；应用端口和数据端口不得加到公网安全组或 UFW。
+
+### 17.2 网络与服务拓扑
+
+```text
+公网用户
+  -> api.starlight.host:443
+  -> 宝塔 Nginx
+     -> 127.0.0.1:6670  Gateway HTTP API
+     -> 127.0.0.1:8090  Gateway WebSocket
+  -> Docker darwin_app_network（internal=true）
+     -> 应用微服务 + MySQL/Redis/Kafka/Zookeeper/InfluxDB/Elasticsearch
+```
+
+- `darwin_app_network` 是内部 Docker 网络；数据服务和普通微服务不能直接暴露公网。
+- Gateway 额外连接 `darwin_gateway_ingress`，这是使 Docker 能发布**仅回环**端口的必要普通 bridge；该网络只允许 Gateway 加入。
+- Gateway 端口必须保持：`127.0.0.1:6670:6670`、`127.0.0.1:8090:8090`。验证时使用 `ss -ltnp`，不得出现 `0.0.0.0:6670` 或 `0.0.0.0:8090`。
+- 现有 `frps` 容器是独立服务。**禁止**为发布 darwin-app 重启 Docker、FRPS、宝塔面板或整台主机。
+
+### 17.3 生产目录、镜像和环境文件
+
+| 项目 | 路径 / 值 | 规则 |
+| --- | --- | --- |
+| 部署根目录 | `/opt/darwin-app` | 保留，不要删除 shared/release 数据 |
+| 当前源码目录 | `/opt/darwin-app/source` | CVM GitHub 网络可能不稳定；发布不能依赖远端 `git fetch` 成功 |
+| 生产环境文件 | `/opt/darwin-app/source/.env.production` | `600`；仅服务器保存；禁止输出、复制进镜像或提交 Git |
+| Release manifest | `/opt/darwin-app/shared/releases/` | 每次发布记录 commit、镜像 tag/digest、时间和验收结果 |
+| 应用镜像仓库 | `ccr.ccs.tencentyun.com/starlight/darwin-app` | 使用 TCR，不使用 `latest` |
+| 当前应用镜像 | `20260728.4-g22356fe` | 已验证 `linux/amd64`；对应应用代码提交 `22356fe` |
+| 当前镜像 digest | `sha256:fb1428c00c6ca7d37ff51fb8e1e90622d21aa0fc03fbc0a9294a96b38abf2686` | 不可变发布锚点 |
+| 当前 Compose 网络修订 | `0739de2` | Gateway dual-network / loopback ingress 修复 |
+
+生产基础设施镜像也已镜像到同一 TCR namespace 并在 Compose 中按 digest 固定。CVM 到 Docker Hub 曾超时；遇到拉取问题优先使用既有 TCR 镜像，**不要**通过改 Docker daemon 或安装不可信镜像加速器排障。
+
+### 17.4 已完成的生产验收
+
+截至本节更新时，下列项目已经通过实际验证：
+
+- [x] 6 个基础设施服务 healthy：ZooKeeper、Kafka、MySQL、Redis、InfluxDB、Elasticsearch。
+- [x] 12 个应用服务 healthy：Gateway、auth、user、file、metrics、metrics-query、metrics-alerts、metrics-compat、logs、subscription、video、micro-app。
+- [x] 在 fresh Docker volume 上完成 `001-initial-model-baseline` migration、迁移账本验证和幂等 `free` 套餐 seed。
+- [x] 修复并回归验证模型 timestamp/index 的 snake_case 映射；不存在已知的 `Unknown column` schema 问题。
+- [x] Gateway 回环健康检查：`curl --fail http://127.0.0.1:6670/api/health` 返回 200。
+- [x] 公网 HTTPS 健康检查：`https://api.starlight.host/api/health` 返回 200。
+- [x] Let’s Encrypt 证书已部署到 `/www/server/panel/vhost/letsencrypt/api.starlight.host/`；证书 SAN 为 `api.starlight.host`，当前证书有效至 `2026-10-26`。
+- [x] HTTP 的非 ACME 请求 301 跳转 HTTPS；Nginx 配置每次修改先执行 `/www/server/nginx/sbin/nginx -t`，通过后仅执行 graceful reload。
+- [x] 服务器本地 WebSocket 验收：`https://127.0.0.1/ws?clientId=...`（带 Host/SNI `api.starlight.host`）返回 `101 Switching Protocols`，Gateway 有连接日志。
+- [x] FRPS 在部署过程中持续运行，未被重启。
+
+### 17.5 当前未完成项与停止条件
+
+| 状态 | 项目 | 下一步 / 验收条件 |
+| --- | --- | --- |
+| 进行中 | 个人 ICP 备案 | 当前已提交审核；保持域名解析稳定，等待腾讯云/管局审核通过并完成腾讯云接入备案生效 |
+| 阻塞于备案 | 公网 WSS 终验 | 备案生效后，从至少两个独立外网重复验证 `wss://api.starlight.host/ws?clientId=<唯一值>`；每次必须得到 `101`、`connected` 和 `pong`，并在 Gateway/Nginx 日志关联成功连接 |
+| 未完成 | 生产备份自动化与异地恢复演练 | 配置 MySQL、InfluxDB、Elasticsearch 的定时备份至 COS；至少一次恢复演练后才标记完成 |
+| 未完成 | 监控与告警 | 为 CPU、内存、磁盘、容器重启、HTTPS 失败、证书到期、Kafka 积压和关键 API 错误率配置告警 |
+| 持续任务 | Release manifest | 后续每次部署都更新 commit、镜像 tag/digest、迁移、服务清单、回滚版本和验收结果 |
+
+**公网 WSS 当前未验证，不能作为已对外可用的能力声明。**备案前的外部 WSS 失败证据：外网 TLS ClientHello 已到达 CVM，但客户端侧随后发送 TCP reset，Nginx 没有对应 HTTP access log；这不是 Gateway、Docker、Nginx 或回环端口的故障。备案生效并完成最终 ingress/proxy 验证前，不得通过暴露 `8090`、关闭 TLS、关闭 UFW 或重启基础设施绕过问题。
+
+### 17.6 HTTPS 与 DNS-01 续期
+
+当前域名的 HTTP-01 曾被 DNSPod 备案拦截页影响，因此证书续期采用 DNS-01。
+
+| 项目 | 当前配置 |
+| --- | --- |
+| 证书 | Let’s Encrypt，`api.starlight.host` |
+| DNS 提供商 | DNSPod；专用凭据仅绑定 `starlight.host` 区域 |
+| 凭据存储 | 宝塔 `/www/server/panel/config/dns_mager.conf`，`root:root`、`0600`；禁止记录凭据值 |
+| 续期脚本 | `/usr/local/sbin/darwin-app-cert-renewal`，`root:root`、`0700` |
+| 调度 | `/etc/cron.d/darwin-app-cert-renewal`，每天 `03:17`（服务器时区 `Asia/Shanghai`，cron） |
+| 续期阈值 | 剩余不超过 30 天 |
+| 更新动作 | 仅当证书文件 hash 改变时执行 `nginx -t` 和 graceful reload；不重启 Docker/FRPS |
+| 续期日志 | `/var/log/darwin-app-cert-renewal.log` |
+
+日常验证：
+
+```bash
+sudo /usr/local/sbin/darwin-app-cert-renewal
+sudo tail -n 100 /var/log/darwin-app-cert-renewal.log
+sudo openssl x509 \
+  -in /www/server/panel/vhost/letsencrypt/api.starlight.host/fullchain.pem \
+  -noout -subject -issuer -dates -ext subjectAltName
+```
+
+若 DNSPod Token 需要轮换：先在 DNSPod 创建仅限 `starlight.host` DNS TXT 管理、且 IP 白名单为 `175.178.250.182` 的新凭据；更新 root-only DNS 配置后，先用临时 `_acme-challenge` TXT 创建/删除做验证，再撤销旧 Token。不得在聊天、Git、shell history、Compose 文件或应用 `.env.production` 中保存 Token。
+
+### 17.7 后续新增/升级服务的最短 Runbook
+
+每次新增服务或发布新镜像按以下顺序执行；不要跳过前置验证：
+
+1. **本地实现与验证**：增加服务入口、生产启动命令、`build:all` 输入、Compose service、健康检查、必要 migration/seed、Gateway 路由和文档。运行 `pnpm exec tsc --noEmit`、相关 Jest 测试、`pnpm run build:all`、`docker build`。完整 Jest 仍存在已知独立失败，不能把“完整 Jest 通过”作为虚假 gate。
+2. **镜像发布**：本地/CI 构建 `linux/amd64` 不可变镜像，推送到 TCR；记录 tag 和 digest。不要在 2C4G CVM 构建大型镜像，也不要使用 `latest`。
+3. **发布前记录与配置校验**：保存当前 `APP_IMAGE`、运行容器镜像和 release manifest；同步必要的 Compose 文件；在 CVM 执行 `docker compose --env-file .env.production -f docker/docker-compose.app.yml config`。不得输出 `.env.production`。
+4. **数据变更先行**：若有 migration，先备份并在预发布 fresh volume 演练；生产只启动一个 migration job，核对 `app_migrations`。对已有服务采用 expand -> deploy -> migrate/use -> contract 兼容策略。
+5. **最小影响发布**：新增服务时使用 `up -d --no-deps <新服务>`；修复单服务时只 pull/recreate 目标服务。不要为单服务发布执行全量 `up -d`，更不要重启 Docker、FRPS、Nginx 或基础设施。
+6. **验收与观察**：检查目标容器健康、日志、Kafka 注册、依赖连接、Gateway 调用；再做公网 HTTPS/WSS（如涉及）和真实业务路径验证。观察 `docker stats --no-stream`、`free -h`、`df -h`。
+7. **记录与回滚准备**：更新 release manifest 和本节的“当前应用镜像”；保留上一个不可变镜像及迁移/备份记录。若失败，先回滚目标服务镜像；数据库问题按已演练的恢复方案处理，不能用应用镜像回滚替代数据库回滚。
+
+### 17.8 快速检查命令（不输出密钥）
+
+```bash
+# 服务健康与版本
+sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+sudo docker compose --env-file /opt/darwin-app/source/.env.production \
+  -f /opt/darwin-app/source/docker/docker-compose.infra.yml ps
+sudo docker compose --env-file /opt/darwin-app/source/.env.production \
+  -f /opt/darwin-app/source/docker/docker-compose.app.yml ps
+
+# 本机入口隔离和 Gateway
+ss -ltnp | grep -E ':(80|443|6670|8090)\\b'
+curl --fail http://127.0.0.1:6670/api/health
+curl --fail https://api.starlight.host/api/health
+
+# Nginx 与证书
+sudo /www/server/nginx/sbin/nginx -t
+sudo openssl x509 \
+  -in /www/server/panel/vhost/letsencrypt/api.starlight.host/fullchain.pem \
+  -noout -dates -ext subjectAltName
+
+# 资源和独立服务连续性
+free -h
+df -h
+sudo docker stats --no-stream
+sudo docker ps --filter name=frps --format '{{.Names}} {{.Status}}'
+```
+
+---
+
 **核心原则：基础设施不暴露公网，应用按版本独立容器化，数据和代码分离，新增服务先启动后接入路由，数据库变更保持向后兼容，所有发布都可观察、可回滚。**

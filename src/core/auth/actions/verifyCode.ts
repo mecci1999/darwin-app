@@ -2,6 +2,17 @@ import { RequestParamInvalidError } from 'error';
 import { customAlphabet } from 'nanoid';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
+import { buildVerifyCodeEmail } from './verifyCodeEmail';
+import { resolveVerificationEmailConfig } from '../config/mail';
+
+export interface VerifyCodeEmailSender {
+  sendVerifyCodeEmail(params: {
+    email: string;
+    type: string;
+    options: ReturnType<typeof buildVerifyCodeEmail>;
+    code: string;
+  }): Promise<{ code: number; message?: string }>;
+}
 
 /**
  * 通过邮箱发送验证码，需要区分验证码的类型，例如：登录、注册、找回密码等。
@@ -13,7 +24,7 @@ export default function verifyCode(star: Starlight) {
         auth: false,
       },
       // 获取验证码，需要将验证码存储到redis中
-      async handler(ctx: Context): Promise<HttpResponseItem> {
+      async handler(this: VerifyCodeEmailSender, ctx: Context): Promise<HttpResponseItem> {
         try {
           // 排除极端情况
           if (!ctx.params.email || !ctx.params.type) {
@@ -21,20 +32,31 @@ export default function verifyCode(star: Starlight) {
             throw new RequestParamInvalidError();
           }
 
+          const email = String(ctx.params.email).trim().toLowerCase();
+          const emailConfig = resolveVerificationEmailConfig();
+          if (!emailConfig.enabled) {
+            return {
+              status: 200,
+              data: {
+                content: null,
+                message: '邮箱验证码服务暂未启用，请稍后重试～',
+                code: HttpResponseCode.ServiceActionFaild,
+                success: false,
+              },
+            };
+          }
+
           // 随机生成6位验证码
           const generateCode = customAlphabet('0123456789', 6)(6);
 
           const mailOptions = {
-            from: 'mecci1999@163.com', // 发件人邮箱
-            to: ctx.params.email, // 收件人邮箱
-            subject: '这是一张飞往Darwin宇宙的飞船船票',
-            html: `<p>您好，欢迎来到Darwin的宇宙</p>
-                  <span>您的验证码是</span><span style="font-size: 20px; font-weight: bold; margin-left: 8px; margin-right: 8px;">${generateCode}</span><span>，5分钟内有效，请勿向他人透露。</span>`,
+            ...buildVerifyCodeEmail(generateCode, ctx.params.type, emailConfig.from),
+            to: email,
           };
 
           // 发送邮件
-          const res = await (this as any).sendVerifyCodeEmail({
-            email: ctx.params.email,
+          const res = await this.sendVerifyCodeEmail({
+            email,
             type: ctx.params.type,
             options: mailOptions,
             code: generateCode,
@@ -42,7 +64,7 @@ export default function verifyCode(star: Starlight) {
 
           if (res.code !== 200) {
             // 删除发送失败的验证码缓存
-            await star.cacher.delete(`verifyCode:${ctx.params.email};type:${ctx.params.type}`);
+            await star.cacher.delete(`verifyCode:${email};type:${ctx.params.type}`);
             return {
               status: 200,
               data: {
@@ -66,7 +88,8 @@ export default function verifyCode(star: Starlight) {
         } catch (error) {
           star.logger?.error(error);
           // 删除发送失败的验证码缓存
-          await star.cacher.delete(`verifyCode:${ctx.params.email};type:${ctx.params.type}`);
+          const email = ctx.params.email ? String(ctx.params.email).trim().toLowerCase() : '';
+          await star.cacher.delete(`verifyCode:${email};type:${ctx.params.type}`);
           return {
             status: 500,
             data: {

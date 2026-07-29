@@ -1,6 +1,7 @@
 const path = require('path');
 
 const BASELINE_MIGRATION_ID = '001-initial-model-baseline';
+const ADMIN_BOOTSTRAP_LOCK_MIGRATION_ID = '002-admin-bootstrap-lock';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -57,6 +58,36 @@ const migrations = [
       }
     },
   },
+  {
+    id: ADMIN_BOOTSTRAP_LOCK_MIGRATION_ID,
+    // MySQL implicitly commits DDL, so this migration must be retryable rather than transactional.
+    transactional: false,
+    async up({ sequelize, queryInterface }) {
+      const existingTables = await queryInterface.showAllTables();
+      if (!existingTables.some(table => String(table).toLowerCase() === 'adminbootstraplock')) {
+        await queryInterface.createTable(
+          'adminBootstrapLock',
+          {
+            lock_id: {
+              type: require('sequelize').DataTypes.TINYINT,
+              allowNull: false,
+              primaryKey: true,
+            },
+          },
+        );
+      }
+      await sequelize.query(
+        'INSERT IGNORE INTO adminBootstrapLock (lock_id) VALUES (?)',
+        { replacements: [1] },
+      );
+    },
+  },
 ];
 
-module.exports = { BASELINE_MIGRATION_ID, getModelTableNames, getProductionModels, migrations };
+module.exports = {
+  ADMIN_BOOTSTRAP_LOCK_MIGRATION_ID,
+  BASELINE_MIGRATION_ID,
+  getModelTableNames,
+  getProductionModels,
+  migrations,
+};

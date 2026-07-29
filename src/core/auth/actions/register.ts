@@ -23,9 +23,11 @@ export default function register(star: Starlight) {
             throw new RequestParamInvalidError();
           }
 
+          const email = String(ctx.params.email).trim().toLowerCase();
+
           // 使用正则匹配验证邮箱是否有效
           const reg = /^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$/;
-          if (!reg.test(ctx.params.email)) {
+          if (!reg.test(email)) {
             return {
               status: 200,
               data: {
@@ -37,23 +39,8 @@ export default function register(star: Starlight) {
             };
           }
 
-          // 查询数据库判断邮箱是否已注册
-          const isExist = await star.db.auth.findEmailIsExist(ctx.params.email);
-
-          if (isExist) {
-            return {
-              status: 200,
-              data: {
-                content: null,
-                message: '该邮箱已注册',
-                code: HttpResponseCode.UserEmailAlreadyExist,
-                success: false,
-              },
-            };
-          }
-
           // 验证邮箱验证码是否正确
-          const verifyCode = await star.cacher.get(`verifyCode:${ctx.params.email};type:register`);
+          const verifyCode = await star.cacher.get(`verifyCode:${email};type:register`);
 
           if (verifyCode !== ctx.params.code) {
             return {
@@ -84,46 +71,16 @@ export default function register(star: Starlight) {
           // 生成用户ID
           const userId = generateUserId();
 
-          const adminEmailList = (ADMIN_EMAILS || '')
-            .split(',')
-            .map((email) => email.trim().toLowerCase())
-            .filter(Boolean);
-          const isAdminEmail = adminEmailList.includes(ctx.params.email.toLowerCase());
-
-          // 调用user服务，新增用户动作
-          const createUser = await ctx.call(
-            'user.v1.create',
-            {
-              userId,
-              source: 'email',
-              ...(isAdminEmail ? { power: 999 } : {}),
-            },
-            { timeout: 60000, meta: { ...(ctx.meta as any), internal: true } },
-          );
-
-          if (createUser.status !== 201) {
-            return {
-              status: 200,
-              data: {
-                content: null,
-                message: '注册账号失败，请稍后重试～',
-                code: HttpResponseCode.ServiceActionFaild,
-                success: false,
-              },
-            };
-          }
-
-          // 新增邮箱认证信息
-          const isSuccess = await star.db.auth.saveOrUpdateEmailAuth({
-            email: ctx.params.email,
+          const registration = await star.db.auth.registerEmailUser({
+            email,
             passwordHash: passwordHash,
             salt: salt,
             userId: userId,
-          });
+          }, ADMIN_EMAILS || '');
 
-          if (isSuccess) {
+          if (registration.status === 'created') {
             // 直接删除验证码对应的缓存
-            await star.cacher.delete(`verifyCode:${ctx.params.email};type:register`);
+            await star.cacher.delete(`verifyCode:${email};type:register`);
 
             return {
               status: 200,
@@ -132,6 +89,18 @@ export default function register(star: Starlight) {
                 message: '注册账号成功',
                 code: HttpResponseCode.Success,
                 success: true,
+              },
+            };
+          }
+
+          if (registration.status === 'email_exists') {
+            return {
+              status: 200,
+              data: {
+                content: null,
+                message: '该邮箱已注册',
+                code: HttpResponseCode.UserEmailAlreadyExist,
+                success: false,
               },
             };
           }
@@ -146,11 +115,12 @@ export default function register(star: Starlight) {
             },
           };
         } catch (error) {
+          star.logger?.error('Email registration failed', error);
           return {
             status: 500,
             data: {
               content: null,
-              message: `${error}`,
+              message: '注册账号失败，请稍后重试～',
               code: HttpResponseCode.ServiceActionFaild,
               success: false,
             },

@@ -7,6 +7,7 @@ import nodemailer from 'nodemailer';
 import { verifyCodeOptions } from 'typings';
 import { AuthState } from '../types';
 import { AuthUtils } from '../utils';
+import { resolveVerificationEmailConfig } from '../config/mail';
 
 const VERIFY_CODE_EMAIL_TIMEOUT_MS = Number(process.env.VERIFY_CODE_EMAIL_TIMEOUT_MS || 5000);
 const normalizeJwtExpiresIn = (
@@ -147,14 +148,20 @@ const authMethods = (star: Star, state?: AuthState) => ({
       );
 
       // 创建邮箱发送对象。SMTP 网络不可控，必须设置上限，避免接口一直等待到客户端超时。
+      const emailConfig = resolveVerificationEmailConfig();
+      if (!emailConfig.enabled) {
+        return { code: 503, message: '邮箱验证码服务暂未启用，请稍后重试～' };
+      }
       const transporter = nodemailer.createTransport({
-        service: '163',
+        host: emailConfig.host,
+        port: emailConfig.port,
+        secure: emailConfig.secure,
         connectionTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
         greetingTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
         socketTimeout: VERIFY_CODE_EMAIL_TIMEOUT_MS,
         auth: {
-          user: 'mecci1999@163.com',
-          pass: 'YEVimrR6xg6pNYKK',
+          user: emailConfig.user,
+          pass: emailConfig.password,
         },
       });
 
@@ -169,7 +176,10 @@ const authMethods = (star: Star, state?: AuthState) => ({
           transporter.close();
 
           if (error) {
-            star.logger?.error('发送邮件失败', params, error);
+            star.logger?.error('发送邮件失败', {
+              error: error.message,
+              type: params.type,
+            });
             reject({ code: 500, message: '验证码发送失败，请稍后重试～', error });
             return;
           }

@@ -7,6 +7,7 @@ export enum DataBaseTableNames {
   Config = 'config',
   IPBlackList = 'ipBlackList',
   EmailAuth = 'emailAuth',
+  AdminBootstrapLock = 'adminBootstrapLock',
   WechatAuth = 'wechatAuth',
   ScanAuth = 'scanAuth',
   // SaaS 相关表

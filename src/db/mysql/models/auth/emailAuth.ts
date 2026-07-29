@@ -3,7 +3,7 @@ import { DataBaseTableNames } from 'typings';
 import { UserTable } from '../user';
 
 export interface IEmailAuthAttributes {
-  id: number; // 主键
+  id?: number; // 主键
   userId: string; // 用户ID
   email: string; // 邮箱
   passwordHash: string; // 密码哈希值

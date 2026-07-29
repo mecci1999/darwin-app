@@ -25,8 +25,14 @@ describe('parseCorsAllowedOrigins', () => {
     ]);
   });
 
-  it('uses only validated explicit HTTPS origins in production', () => {
+  it('keeps desktop origins while only accepting validated explicit web origins in production', () => {
     expect(parseCorsAllowedOrigins('https://app.example.com,http://localhost:6130,tauri://localhost', 'production')).toEqual([
+      'http://localhost:6130',
+      'http://127.0.0.1:6130',
+      'tauri://localhost',
+      'http://tauri.localhost',
+      'https://tauri.localhost',
+      'asset://localhost',
       'https://app.example.com',
     ]);
   });

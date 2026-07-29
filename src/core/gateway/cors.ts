@@ -22,7 +22,5 @@ export const parseCorsAllowedOrigins = (value = '', nodeEnvironment = process.en
     .map(origin => origin.trim())
     .filter(isAllowedProductionOrigin);
 
-  return nodeEnvironment === 'production'
-    ? [...new Set(productionOrigins)]
-    : [...new Set([...LOCAL_AND_TAURI_ORIGINS, ...productionOrigins])];
+  return [...new Set([...LOCAL_AND_TAURI_ORIGINS, ...productionOrigins])];
 };

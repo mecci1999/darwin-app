@@ -71,4 +71,55 @@ describe('migration runner', () => {
       replacements: ['darwin-app-schema-migrations'],
     });
   });
+
+  it('creates and seeds the admin bootstrap singleton through a retryable incremental migration', async () => {
+    const migrations: Array<{ id: string; up: (...args: unknown[]) => Promise<void> }> =
+      migrationDefinitions.migrations;
+    const migration = migrations.find(item => item.id === migrationDefinitions.ADMIN_BOOTSTRAP_LOCK_MIGRATION_ID);
+    const queryInterface = {
+      showAllTables: jest.fn(async () => ['user']),
+      createTable: jest.fn(),
+    };
+    const sequelize = {
+      query: jest.fn(),
+    };
+
+    if (!migration) {
+      throw new Error('Admin bootstrap lock migration is not registered');
+    }
+
+    await migration.up({ sequelize, queryInterface });
+
+    expect(queryInterface.createTable).toHaveBeenCalledWith(
+      'adminBootstrapLock',
+      expect.objectContaining({ lock_id: expect.any(Object) }),
+    );
+    expect(sequelize.query).toHaveBeenCalledWith(
+      'INSERT IGNORE INTO adminBootstrapLock (lock_id) VALUES (?)',
+      { replacements: [1] },
+    );
+  });
+
+  it('retries a partially applied bootstrap-lock migration by seeding an existing table', async () => {
+    const migrations: Array<{ id: string; up: (...args: unknown[]) => Promise<void> }> =
+      migrationDefinitions.migrations;
+    const migration = migrations.find(item => item.id === migrationDefinitions.ADMIN_BOOTSTRAP_LOCK_MIGRATION_ID);
+    const queryInterface = {
+      showAllTables: jest.fn(async () => ['user', 'adminBootstrapLock']),
+      createTable: jest.fn(),
+    };
+    const sequelize = { query: jest.fn() };
+
+    if (!migration) {
+      throw new Error('Admin bootstrap lock migration is not registered');
+    }
+
+    await migration.up({ sequelize, queryInterface });
+
+    expect(queryInterface.createTable).not.toHaveBeenCalled();
+    expect(sequelize.query).toHaveBeenCalledWith(
+      'INSERT IGNORE INTO adminBootstrapLock (lock_id) VALUES (?)',
+      { replacements: [1] },
+    );
+  });
 });

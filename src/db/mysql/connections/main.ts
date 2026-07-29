@@ -42,6 +42,7 @@ class MainDatabaseConnection {
         DataBaseTableNames.Config,
         DataBaseTableNames.IPBlackList,
         DataBaseTableNames.EmailAuth,
+        DataBaseTableNames.AdminBootstrapLock,
         DataBaseTableNames.WechatAuth,
         DataBaseTableNames.ScanAuth,
         // SaaS 相关表
