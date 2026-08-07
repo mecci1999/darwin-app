@@ -1,0 +1,12 @@
+import { DataTypes, Model, Sequelize } from 'sequelize';
+import { DataBaseTableNames } from 'typings';
+
+export interface ITrailsTrustedPhotoshopStorageWriteFenceTableAttributes {
+  tenantId: string; operationId: string; slot: string; intentDigest: string; objectIdentity: string; mimeType: string; byteLength: string; sha256: string; state: string; fenceToken?: string; issuedAt?: Date; recordedAt?: Date; createdAt?: Date; updatedAt?: Date;
+}
+export class TrailsTrustedPhotoshopStorageWriteFenceTable extends Model<ITrailsTrustedPhotoshopStorageWriteFenceTableAttributes> implements ITrailsTrustedPhotoshopStorageWriteFenceTableAttributes {
+  public tenantId!: string; public operationId!: string; public slot!: string; public intentDigest!: string; public objectIdentity!: string; public mimeType!: string; public byteLength!: string; public sha256!: string; public state!: string; public fenceToken?: string; public issuedAt?: Date; public recordedAt?: Date; public readonly createdAt!: Date; public readonly updatedAt!: Date;
+}
+export default function (sequelize: Sequelize) { return TrailsTrustedPhotoshopStorageWriteFenceTable.init({
+  tenantId: { type: DataTypes.STRING(64), field: 'tenant_id', primaryKey: true }, operationId: { type: DataTypes.STRING(160), field: 'operation_id', primaryKey: true }, slot: { type: DataTypes.ENUM('master', 'grid-800:avif', 'grid-800:webp', 'grid-800:jpeg', 'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg', 'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg'), primaryKey: true }, intentDigest: { type: DataTypes.CHAR(64), field: 'intent_digest', allowNull: false }, objectIdentity: { type: DataTypes.CHAR(64), field: 'object_identity', allowNull: false }, mimeType: { type: DataTypes.STRING(160), field: 'mime_type', allowNull: false }, byteLength: { type: DataTypes.BIGINT.UNSIGNED, field: 'byte_length', allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, state: { type: DataTypes.ENUM('pending', 'issued', 'recorded'), allowNull: false }, fenceToken: { type: DataTypes.CHAR(64), field: 'fence_token' }, issuedAt: { type: DataTypes.DATE, field: 'issued_at' }, recordedAt: { type: DataTypes.DATE, field: 'recorded_at' }, createdAt: { type: DataTypes.DATE, field: 'created_at', defaultValue: DataTypes.NOW }, updatedAt: { type: DataTypes.DATE, field: 'updated_at', defaultValue: DataTypes.NOW },
+}, { sequelize, tableName: DataBaseTableNames.TrailsTrustedPhotoshopStorageWriteFence, modelName: DataBaseTableNames.TrailsTrustedPhotoshopStorageWriteFence, timestamps: true }); }

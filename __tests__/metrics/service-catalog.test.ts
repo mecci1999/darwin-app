@@ -227,4 +227,38 @@ describe('service catalog metrics snapshot', () => {
       health: 'healthy',
     }));
   });
+
+  it('coalesces concurrent system metric-map builds and reuses the short-lived result', async () => {
+    let resolvePrimaryBatch: (() => void) | undefined;
+    const primaryBatch = new Promise<void>((resolve) => {
+      resolvePrimaryBatch = resolve;
+    });
+    queryMetricsMock.mockImplementation(async () => {
+      await primaryBatch;
+      return [{ service_metric_key: 'gateway', _value: 300 }];
+    });
+    const star = {
+      registry: {
+        getNodeList: () => [
+          {
+            id: 'node-1',
+            hostname: 'node-1.local',
+            available: true,
+            services: [{ name: 'gateway' }],
+          },
+        ],
+      },
+    } as unknown as import('node-universe').Star;
+
+    const first = buildServiceCatalogSnapshot({ page: 1, pageSize: 10, scope: 'system' }, star);
+    const second = buildServiceCatalogSnapshot({ page: 2, pageSize: 10, scope: 'system' }, star);
+
+    await Promise.resolve();
+    expect(queryMetricsMock).toHaveBeenCalledTimes(5);
+    resolvePrimaryBatch?.();
+    await Promise.all([first, second]);
+
+    await buildServiceCatalogSnapshot({ page: 1, pageSize: 1, scope: 'system' }, star);
+    expect(queryMetricsMock).toHaveBeenCalledTimes(5);
+  });
 });

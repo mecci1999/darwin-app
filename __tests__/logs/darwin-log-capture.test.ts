@@ -7,6 +7,7 @@ import {
   enqueueDarwinLogRecord,
   enqueueForwardedDarwinLogRecord,
   flushDarwinLogCaptureForSearch,
+  flushDarwinLogCaptureNow,
   searchDarwinFallbackLogs,
 } from '../../src/apps/starlight/logs/utils/darwin-log-capture';
 import { elasticsearchManager } from '../../src/apps/starlight/logs/utils/elasticsearch-manager';
@@ -238,7 +239,7 @@ describe('Darwin log contract', () => {
     );
   });
 
-  it('waits for in-flight flushes before search-triggered gateway flush drains queued logs', async () => {
+  it('drains queued logs for explicit search flushes without waiting for an Elasticsearch refresh', async () => {
     let releaseFirstFlush: (() => void) | undefined;
     const bulkIndex = jest
       .fn()
@@ -282,11 +283,11 @@ describe('Darwin log contract', () => {
     expect(bulkIndex.mock.calls[1][0]).toEqual([
       expect.objectContaining({ service: 'gateway', nodeID: 'gateway-development' }),
     ]);
-    expect(bulkIndex.mock.calls[1][1]).toEqual({ refresh: 'wait_for' });
+    expect(bulkIndex.mock.calls[1][1]).toEqual({ refresh: undefined });
   });
 
-  it('does not block the capture action response on gateway explorer flush', async () => {
-    const bulkIndex = jest.fn(() => new Promise(() => undefined));
+  it('relies on the regular queue flush for gateway explorer records', async () => {
+    const bulkIndex = jest.fn().mockResolvedValue({ succeededLogs: [], failedLogs: [], errorItems: [] });
     mockedElasticsearchManager.getClient.mockReturnValue({ bulkIndex } as any);
     const star = {
       logger: {
@@ -315,7 +316,12 @@ describe('Darwin log contract', () => {
     } as unknown as Context);
 
     expect(result.data.content).toEqual({ accepted: 1 });
+    expect(bulkIndex).not.toHaveBeenCalled();
+
+    await flushDarwinLogCaptureNow();
+
     expect(bulkIndex).toHaveBeenCalledTimes(1);
+    expect(bulkIndex.mock.calls[0][1]).toEqual({ refresh: undefined });
   });
 
   it('persists forwarded gateway logs to fallback when capture action never becomes available', async () => {
@@ -348,6 +354,53 @@ describe('Darwin log contract', () => {
       'utf8',
     );
     expect(fsPromises.appendFile.mock.calls[0][1]).toContain('capture_action_unavailable');
+  });
+
+  it('persists overflow records instead of allowing the forwarding queue to grow unbounded', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fsPromises.appendFile.mockClear();
+
+    let keepFirstForwardingCallOpen: (() => void) | undefined;
+    const star = {
+      call: jest.fn(() => new Promise((resolve) => {
+        keepFirstForwardingCallOpen = () => resolve({ data: { content: { accepted: 20 } } });
+      })),
+      registry: {
+        actions: {
+          list: jest.fn(() => [{ name: 'logs.v1.capture-darwin', available: true }]),
+        },
+      },
+    };
+    const middleware = createDarwinLogForwardMiddleware()(star);
+
+    for (let index = 0; index < 20; index += 1) {
+      middleware.newLogEntry('info', [`queued log ${index}`], {
+        nodeID: 'gateway-development',
+        namespace: 'darwin-app',
+        mod: 'gateway',
+        svc: 'gateway',
+      });
+    }
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+    expect(keepFirstForwardingCallOpen).toEqual(expect.any(Function));
+
+    for (let index = 20; index < 221; index += 1) {
+      middleware.newLogEntry('info', [`queued log ${index}`], {
+        nodeID: 'gateway-development',
+        namespace: 'darwin-app',
+        mod: 'gateway',
+        svc: 'gateway',
+      });
+    }
+    keepFirstForwardingCallOpen?.();
+    await jest.advanceTimersByTimeAsync(250);
+
+    expect(fsPromises.appendFile.mock.calls.some(([, content]) =>
+      String(content).includes('forward_queue_full'),
+    )).toBe(true);
   });
 
   it('accepts remotely forwarded logs before local capture is started', () => {

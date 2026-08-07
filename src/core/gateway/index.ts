@@ -17,6 +17,7 @@ import {
 import { DatabaseService } from 'db/mysql';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { parseCorsAllowedOrigins } from './cors';
+import { prepareGatewayDispatch } from './dispatch-meta';
 import gatewayMethods, { createWebSocketManager } from './methods';
 
 // 导入模块化的工具类和类型
@@ -37,13 +38,14 @@ import {
 } from './constants';
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
+import { waitForRegisteredService } from './service-discovery';
 
-const GATEWAY_SERVICE_WAIT_TIMEOUT_MS = Number(
-  process.env.GATEWAY_SERVICE_WAIT_TIMEOUT_MS || 20000,
-);
-const GATEWAY_SERVICE_WAIT_INTERVAL_MS = Number(
-  process.env.GATEWAY_SERVICE_WAIT_INTERVAL_MS || 500,
-);
+const parsePositiveTimeout = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const GATEWAY_RPC_TIMEOUT_MS = parsePositiveTimeout(process.env.GATEWAY_RPC_TIMEOUT_MS, 15000);
 const UPLOADS_PUBLIC_PREFIX = '/uploads/';
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 const JSON_BODY_LIMIT = process.env.GATEWAY_JSON_BODY_LIMIT || '16mb';
@@ -86,29 +88,6 @@ const tryServeUploadedAsset = async (req: IncomingRequest, res: GatewayResponse)
     res.end('Not Found');
     return true;
   }
-};
-
-const waitForRegisteredService = async (star: Starlight, service: string) => {
-  const hasService = () =>
-    star.registry?.services?.list?.().some((item: any) => item.name === service);
-
-  if (hasService()) return true;
-
-  try {
-    await star.waitForServices(
-      service,
-      GATEWAY_SERVICE_WAIT_TIMEOUT_MS,
-      GATEWAY_SERVICE_WAIT_INTERVAL_MS,
-    );
-  } catch (error) {
-    star.logger?.warn('Gateway target service wait timed out', {
-      service,
-      timeoutMs: GATEWAY_SERVICE_WAIT_TIMEOUT_MS,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  return hasService();
 };
 
 // 全局状态管理
@@ -806,9 +785,7 @@ async function initializeGatewayService() {
             };
           }
 
-          if (params?.meta) {
-            ctx.meta = { ...ctx.meta, ...params.meta };
-          }
+          const dispatch = prepareGatewayDispatch(ctx.meta, params);
 
           // 确保 userId 被传递到 params 中，作为 ctx.meta 传递失败的兜底
           if ((ctx.meta as any).user?.userId) {
@@ -852,8 +829,12 @@ async function initializeGatewayService() {
             });
           }
 
+          const callOptions = isLogStreamDispatch
+            ? { meta: dispatch.meta }
+            : { meta: dispatch.meta, timeout: GATEWAY_RPC_TIMEOUT_MS };
+
           return ctx
-            .call(`${service}.${version}.${action}`, params, { meta: ctx.meta })
+            .call(`${service}.${version}.${action}`, dispatch.params, callOptions)
             .then((result) => {
               if (isLogStreamDispatch) {
                 star.logger?.info('Gateway log stream dispatch result', {

@@ -24,7 +24,8 @@ const isActionDefinition = (value: unknown): value is ActionDefinitionWithHandle
   Boolean(value && typeof value === 'object' && typeof (value as ActionDefinition).handler === 'function');
 
 const shouldSkipActionMetric = (serviceName: string, actionName: string, ctx: Context) =>
-  serviceName === 'metrics' && actionName === 'v1.topology' && ctx.params?.type === 'observed';
+  (serviceName === 'metrics' && actionName === 'v1.topology' && ctx.params?.type === 'observed') ||
+  (serviceName === 'logs' && actionName === 'v1.capture-darwin');
 
 const resolveStatus = (result: unknown, thrown: boolean) => {
   if (thrown) return '500';

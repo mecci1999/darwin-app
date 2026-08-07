@@ -1,0 +1,5 @@
+FROM ccr.ccs.tencentyun.com/starlight/darwin-app:20260807.3-metrics-logs-backpressure
+
+RUN mkdir -p /app/logs && chown node:node /app/logs
+
+COPY --chown=node:node dist /app/dist

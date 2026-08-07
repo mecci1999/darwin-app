@@ -5,6 +5,7 @@ import { Context, Star } from 'node-universe';
 import { HttpResponseCode } from 'typings';
 import url from 'url';
 import WebSocket from 'ws';
+import { isCurrentWebSocketClient } from './websocket-client-lifecycle';
 
 // WebSocket 相关变量
 let wss: WebSocket.Server | null = null;
@@ -44,14 +45,6 @@ interface WebSocketClient {
   isAuthenticated: boolean;
   token?: string; // 添加token字段
   user?: any;
-}
-
-// WebSocket 消息类型定义
-interface WebSocketMessage {
-  type: 'init' | 'subscribe' | 'unsubscribe' | 'ping' | 'auth' | string; // 添加 init 类型
-  channel?: string; // 频道: metrics, qrcode, alert, etc.
-  data?: any; // 消息数据
-  id?: string; // 消息ID，用于客户端确认
 }
 
 const createWebSocketManager = (
@@ -95,10 +88,10 @@ const createWebSocketManager = (
     return sent;
   };
 
-  const handleClientDisconnect = (clientId: string) => {
-    if (wsClients.has(clientId)) {
-      wsClients.delete(clientId);
-      star.logger?.info(`WebSocket client ${clientId} disconnected`);
+  const handleClientDisconnect = (client: WebSocketClient) => {
+    if (isCurrentWebSocketClient(wsClients.get(client.id), client)) {
+      wsClients.delete(client.id);
+      star.logger?.info(`WebSocket client ${client.id} disconnected`);
     }
   };
 
@@ -135,6 +128,7 @@ const createWebSocketManager = (
     const { type, data } = message;
 
     switch (type) {
+      case 2:
       case 'heartbeat':
       case 'ping':
         sendToClient(client, {
@@ -327,12 +321,12 @@ const createWebSocketManager = (
 
         ws.on('close', (code, reason) => {
           star.logger?.info(`WebSocket client ${clientId} disconnected: ${code} ${reason}`);
-          handleClientDisconnect(clientId);
+          handleClientDisconnect(client);
         });
 
         ws.on('error', (error) => {
           star.logger?.error(`WebSocket client ${clientId} error:`, error);
-          handleClientDisconnect(clientId);
+          handleClientDisconnect(client);
         });
 
         ws.on('pong', () => {

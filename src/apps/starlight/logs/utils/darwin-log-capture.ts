@@ -14,6 +14,7 @@ const MAX_BATCH_SIZE = 100;
 const FORWARD_BATCH_SIZE = 20;
 const FORWARD_FLUSH_MS = 200;
 const FORWARD_UNAVAILABLE_FALLBACK_MS = 5000;
+const MAX_FORWARD_PENDING_RECORDS = 200;
 const MAX_FALLBACK_REPLAY_BYTES = 1024 * 1024;
 const MAX_STORED_MESSAGE_CHARS = 64 * 1024;
 const READ_ONLY_REPLAY_BACKOFF_MS = 60 * 1000;
@@ -744,7 +745,7 @@ export async function flushDarwinLogCaptureNow() {
 }
 
 export async function flushDarwinLogCaptureForSearch() {
-  await flushQueue({ refresh: 'wait_for', drain: true });
+  await flushQueue({ drain: true });
 }
 
 export function createDarwinLogCaptureMiddleware() {
@@ -763,12 +764,13 @@ function hasAvailableAction(star: { registry?: { actions?: { list?: (options?: a
 
 export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.capture-darwin') {
   let forwarding: Promise<void> = Promise.resolve();
+  let forwardingInFlight = false;
   let pendingRecords: DarwinLogRecord[] = [];
   let flushTimer: NodeJS.Timeout | undefined;
   let unavailableSince = 0;
 
   const flushPending = (star: {
-    call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
+    call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }, options?: { timeout?: number }) => Promise<unknown>;
     registry?: { actions?: { list?: (options?: any) => Array<{ name: string; available?: boolean }> } };
     started?: boolean;
   }) => {
@@ -814,27 +816,29 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
       return;
     }
     unavailableSince = 0;
+    if (forwardingInFlight) return;
 
-      const records = pendingRecords.splice(0, FORWARD_BATCH_SIZE);
-      if (records.some(isGatewayExplorerRecord)) {
-        logGatewayForwardDiagnostic('darwin-forward-gateway-flush', 'Darwin gateway log forwarding flushing records', {
-          serviceName,
-          records: records.length,
-          gatewayExplorerRecords: records.filter(isGatewayExplorerRecord).length,
-          remaining: pendingRecords.length,
-          sample: summarizeForwardRecord(records.find(isGatewayExplorerRecord)),
-        });
-      }
-      logForwardDiagnostic('darwin-forward-flush', 'Darwin log forwarding flushing records', {
+    const records = pendingRecords.splice(0, FORWARD_BATCH_SIZE);
+    forwardingInFlight = true;
+    if (records.some(isGatewayExplorerRecord)) {
+      logGatewayForwardDiagnostic('darwin-forward-gateway-flush', 'Darwin gateway log forwarding flushing records', {
         serviceName,
         records: records.length,
+        gatewayExplorerRecords: records.filter(isGatewayExplorerRecord).length,
+        remaining: pendingRecords.length,
+        sample: summarizeForwardRecord(records.find(isGatewayExplorerRecord)),
+      });
+    }
+    logForwardDiagnostic('darwin-forward-flush', 'Darwin log forwarding flushing records', {
+      serviceName,
+      records: records.length,
       remaining: pendingRecords.length,
       sample: summarizeForwardRecord(records[0]),
     });
     forwarding = forwarding
       .catch(() => undefined)
       .then(async () => {
-        const result = await star.call!(serviceName, { records });
+        const result = await star.call!(serviceName, { records }, { timeout: 3000 });
         const accepted = readForwardAcceptedCount(result, records.length);
         if (records.some(isGatewayExplorerRecord)) {
           logGatewayForwardDiagnostic('darwin-forward-gateway-result', 'Darwin gateway log forwarding capture result', {
@@ -857,6 +861,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
       })
       .catch((error) => persistForwardedRecordsToFallback(records, 'forward_call_failure', error))
       .finally(() => {
+        forwardingInFlight = false;
         if (pendingRecords.length > 0 && !flushTimer) {
           flushTimer = setTimeout(() => {
             flushTimer = undefined;
@@ -867,7 +872,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
   };
 
   return function darwinLogForwardMiddleware(star: {
-    call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
+    call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }, options?: { timeout?: number }) => Promise<unknown>;
     registry?: { actions?: { list?: (options?: any) => Array<{ name: string; available?: boolean }> } };
     started?: boolean;
   }) {
@@ -880,11 +885,20 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
         const nextArgs = Array.isArray(args) ? args : [];
         if (shouldIgnoreForwardToLogs(nextArgs, nextBindings)) return;
 
-        pendingRecords.push({
+        const nextRecord = {
           level: typeof type === 'string' ? type : 'info',
           args: nextArgs,
           bindings: nextBindings,
-        });
+        };
+
+        if (pendingRecords.length >= MAX_FORWARD_PENDING_RECORDS) {
+          forwarding = forwarding
+            .catch(() => undefined)
+            .then(() => persistForwardedRecordsToFallback([nextRecord], 'forward_queue_full'));
+          return;
+        }
+
+        pendingRecords.push(nextRecord);
 
         if (pendingRecords.length >= FORWARD_BATCH_SIZE) {
           if (flushTimer) {
@@ -907,7 +921,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
 }
 
 export function registerDarwinLogForwarding(star: {
-  call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }) => Promise<unknown>;
+  call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }, options?: { timeout?: number }) => Promise<unknown>;
   middlewares?: { add?: (middleware: unknown) => void } | null;
   started?: boolean;
 }) {

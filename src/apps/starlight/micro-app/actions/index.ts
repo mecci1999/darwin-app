@@ -3,6 +3,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { instrumentServiceActions } from '../../metrics/utils/action-metrics';
+import { resolveTrailsWorkspaceActor } from '../creator-space-resolver';
 
 type MicroAppVisibility = 'public' | 'tenant' | 'allowlist';
 
@@ -14,6 +15,211 @@ type MicroAppManifest = {
   description?: string;
   permissions?: Record<string, unknown>;
 };
+
+type TrailsWorkspaceOperation =
+  | 'categories.workspace'
+  | 'categories.create'
+  | 'categories.update'
+  | 'categories.archive'
+  | 'categories.reorder'
+  | 'media-assets.workspace-picker'
+  | 'catalog.workspace' | 'media.create' | 'media.transition' | 'editions.create' | 'editions.transition'
+  | 'portfolios.workspace'
+  | 'portfolios.draft'
+  | 'portfolios.update'
+  | 'portfolios.publish'
+  | 'portfolios.unpublish'
+  | 'portfolios.rich-document.read'
+  | 'portfolios.rich-document.save'
+  | 'portfolios.rich-document.preview'
+  | 'journals.workspace'
+  | 'journals.draft'
+  | 'journals.update'
+  | 'journals.publish'
+  | 'journals.unpublish'
+  | 'journals.pin'
+  | 'journals.rich-document.read'
+  | 'journals.rich-document.save'
+  | 'journals.rich-document.preview'
+  | 'publishing-packages.workspace'
+  | 'publishing-packages.create'
+  | 'publishing-packages.transition'
+  | 'publishing-packages.measure'
+  | 'publishing-packages.learn'
+  | 'site-content.workspace' | 'site-content.draft' | 'site-content.publish' | 'site-content.unpublish'
+  | 'trips.workspace' | 'trips.draft' | 'trips.update' | 'trips.publish' | 'trips.unpublish' | 'trips.cancel'
+  | 'trip-registrations.summary' | 'trip-registrations.capacity'
+  | 'video-references.workspace' | 'video-references.draft' | 'video-references.update' | 'video-references.publish' | 'video-references.unpublish' | 'video-references.archive'
+  | 'locations.workspace' | 'locations.draft' | 'locations.update' | 'locations.publish' | 'locations.unpublish' | 'locations.archive'
+  | 'shooting-locations.workspace' | 'shooting-locations.create' | 'shooting-locations.update' | 'shooting-locations.archive'
+  | 'comments.moderation-queue' | 'comments.moderate'
+  | 'analytics.workspace'
+  | 'analytics.content-metrics'
+  | 'hikes.workspace' | 'hikes.create'
+  | 'gear.workspace' | 'gear.create' | 'gear.update' | 'gear.deactivate'
+  | 'packing-plans.workspace' | 'packing-plans.create' | 'packing-plans.update'
+  | 'finance.workspace' | 'finance.create' | 'finance.update' | 'finance.balance.record' | 'finance.balance.current';
+
+type TrailsWorkspaceGrant = {
+  appId: string;
+  version: string;
+  audience: 'darwin:micro-app:trails-workspace';
+  scopes: readonly string[];
+};
+
+type RuntimeTicketClaims = {
+  aud: string;
+  exp: number;
+  jti: string;
+  appId: string;
+  version: string;
+  scopes: readonly string[];
+  userId: string;
+  kind?: string;
+};
+
+type MicroAppSessionClaims = RuntimeTicketClaims & { kind: 'micro-app-session' };
+
+type AtomicTicketCacher = {
+  setIfNotExists?: (key: string, value: string, ttlSeconds: number) => Promise<boolean>;
+  client?: { set: (key: string, value: string, ...args: string[]) => Promise<unknown> };
+};
+
+const TRAILS_WORKSPACE_GRANTS: readonly TrailsWorkspaceGrant[] = [{
+  appId: 'starlight-trails-workspace',
+  version: '1.0.0',
+  audience: 'darwin:micro-app:trails-workspace',
+  scopes: [
+    'trails.v2.categories.workspace', 'trails.v2.categories.create', 'trails.v2.categories.update',
+    'trails.v2.categories.archive', 'trails.v2.categories.reorder', 'trails.v2.media-assets.workspace-picker',
+    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition',     'trails.v2.portfolios.workspace',
+    'trails.v2.portfolios.draft', 'trails.v2.portfolios.update', 'trails.v2.portfolios.publish', 'trails.v2.portfolios.unpublish', 'trails.v2.portfolios.rich-document.read',
+    'trails.v2.portfolios.rich-document.save', 'trails.v2.portfolios.rich-document.preview', 'trails.v2.journals.workspace',
+    'trails.v2.journals.draft', 'trails.v2.journals.update', 'trails.v2.journals.publish', 'trails.v2.journals.unpublish', 'trails.v2.journals.pin', 'trails.v2.journals.rich-document.read',
+    'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.preview', 'trails.v2.publishing-packages.workspace',
+    'trails.v2.publishing-packages.create', 'trails.v2.publishing-packages.transition',
+    'trails.v2.publishing-packages.measure', 'trails.v2.publishing-packages.learn',
+    'trails.v2.site-content.workspace', 'trails.v2.site-content.draft', 'trails.v2.site-content.publish', 'trails.v2.site-content.unpublish',
+    'trails.v2.trips.workspace', 'trails.v2.trips.workspace.draft', 'trails.v2.trips.workspace.update', 'trails.v2.trips.workspace.publish', 'trails.v2.trips.workspace.unpublish', 'trails.v2.trips.workspace.cancel',
+    'trails.v2.trip-registrations.summary', 'trails.v2.trip-registrations.capacity',
+    'trails.v2.video-references.workspace', 'trails.v2.video-references.workspace.draft', 'trails.v2.video-references.workspace.update', 'trails.v2.video-references.workspace.publish', 'trails.v2.video-references.workspace.unpublish', 'trails.v2.video-references.workspace.archive',
+    'trails.v2.locations.workspace', 'trails.v2.locations.workspace.draft', 'trails.v2.locations.workspace.update', 'trails.v2.locations.workspace.publish', 'trails.v2.locations.workspace.unpublish', 'trails.v2.locations.workspace.archive',
+    'trails.v2.shooting-locations.workspace', 'trails.v2.shooting-locations.create', 'trails.v2.shooting-locations.update', 'trails.v2.shooting-locations.archive',
+    'trails.v2.comments.moderation-queue', 'trails.v2.comments.moderate',
+    'trails.v2.analytics.workspace',
+    'trails.v2.hikes.workspace', 'trails.v2.hikes.create',
+    'trails.v2.gear.workspace', 'trails.v2.gear.create', 'trails.v2.gear.update', 'trails.v2.gear.deactivate',
+    'trails.v2.packing-plans.workspace', 'trails.v2.packing-plans.create', 'trails.v2.packing-plans.update',
+    'trails.v2.finance.workspace', 'trails.v2.finance.create', 'trails.v2.finance.update', 'trails.v2.finance.balance.record', 'trails.v2.finance.balance.current',
+  ],
+}, {
+  appId: 'starlight-trails-workspace',
+  version: '1.0.1',
+  audience: 'darwin:micro-app:trails-workspace',
+  scopes: [
+    'trails.v2.categories.workspace', 'trails.v2.categories.create', 'trails.v2.categories.update',
+    'trails.v2.categories.archive', 'trails.v2.categories.reorder', 'trails.v2.media-assets.workspace-picker',
+    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition', 'trails.v2.portfolios.workspace',
+    'trails.v2.portfolios.draft', 'trails.v2.portfolios.update', 'trails.v2.portfolios.publish', 'trails.v2.portfolios.unpublish', 'trails.v2.portfolios.rich-document.read', 'trails.v2.portfolios.rich-document.save', 'trails.v2.portfolios.rich-document.preview',
+    'trails.v2.journals.workspace', 'trails.v2.journals.draft', 'trails.v2.journals.update', 'trails.v2.journals.publish', 'trails.v2.journals.unpublish', 'trails.v2.journals.pin', 'trails.v2.journals.rich-document.read', 'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.preview',
+    'trails.v2.publishing-packages.workspace', 'trails.v2.publishing-packages.create', 'trails.v2.publishing-packages.transition', 'trails.v2.publishing-packages.measure', 'trails.v2.publishing-packages.learn',
+    'trails.v2.site-content.workspace', 'trails.v2.site-content.draft', 'trails.v2.site-content.publish', 'trails.v2.site-content.unpublish',
+    'trails.v2.trips.workspace', 'trails.v2.trips.workspace.draft', 'trails.v2.trips.workspace.update', 'trails.v2.trips.workspace.publish', 'trails.v2.trips.workspace.unpublish', 'trails.v2.trips.workspace.cancel',
+    'trails.v2.trip-registrations.summary', 'trails.v2.trip-registrations.capacity',
+    'trails.v2.video-references.workspace', 'trails.v2.video-references.workspace.draft', 'trails.v2.video-references.workspace.update', 'trails.v2.video-references.workspace.publish', 'trails.v2.video-references.workspace.unpublish', 'trails.v2.video-references.workspace.archive',
+    'trails.v2.locations.workspace', 'trails.v2.locations.workspace.draft', 'trails.v2.locations.workspace.update', 'trails.v2.locations.workspace.publish', 'trails.v2.locations.workspace.unpublish', 'trails.v2.locations.workspace.archive',
+    'trails.v2.shooting-locations.workspace', 'trails.v2.shooting-locations.create', 'trails.v2.shooting-locations.update', 'trails.v2.shooting-locations.archive',
+    'trails.v2.comments.moderation-queue', 'trails.v2.comments.moderate',
+    'trails.v2.analytics.workspace', 'trails.v2.analytics.content-metrics',
+    'trails.v2.hikes.workspace', 'trails.v2.hikes.create', 'trails.v2.gear.workspace', 'trails.v2.gear.create', 'trails.v2.gear.update', 'trails.v2.gear.deactivate',
+    'trails.v2.packing-plans.workspace', 'trails.v2.packing-plans.create', 'trails.v2.packing-plans.update',
+    'trails.v2.finance.workspace', 'trails.v2.finance.create', 'trails.v2.finance.update', 'trails.v2.finance.balance.record', 'trails.v2.finance.balance.current',
+  ],
+}];
+
+const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { action: string; scope: string }>> = {
+  'categories.workspace': { action: 'trails.v2.categories.workspace', scope: 'trails.v2.categories.workspace' },
+  'categories.create': { action: 'trails.v2.categories.create', scope: 'trails.v2.categories.create' },
+  'categories.update': { action: 'trails.v2.categories.update', scope: 'trails.v2.categories.update' },
+  'categories.archive': { action: 'trails.v2.categories.archive', scope: 'trails.v2.categories.archive' },
+  'categories.reorder': { action: 'trails.v2.categories.reorder', scope: 'trails.v2.categories.reorder' },
+  'media-assets.workspace-picker': { action: 'trails.v2.media-assets.workspace-picker', scope: 'trails.v2.media-assets.workspace-picker' },
+  'catalog.workspace': { action: 'trails.v2.commerce.catalog.workspace', scope: 'trails.v2.commerce.catalog.workspace' },
+  'media.create': { action: 'trails.v2.commerce.catalog.media.create', scope: 'trails.v2.commerce.catalog.media.create' },
+  'media.transition': { action: 'trails.v2.commerce.catalog.media.transition', scope: 'trails.v2.commerce.catalog.media.transition' },
+  'editions.create': { action: 'trails.v2.commerce.catalog.editions.create', scope: 'trails.v2.commerce.catalog.editions.create' },
+  'editions.transition': { action: 'trails.v2.commerce.catalog.editions.transition', scope: 'trails.v2.commerce.catalog.editions.transition' },
+  'portfolios.workspace': { action: 'trails.v2.portfolios.workspace', scope: 'trails.v2.portfolios.workspace' },
+  'portfolios.draft': { action: 'trails.v2.portfolios.draft', scope: 'trails.v2.portfolios.draft' },
+  'portfolios.update': { action: 'trails.v2.portfolios.update', scope: 'trails.v2.portfolios.update' },
+  'portfolios.publish': { action: 'trails.v2.portfolios.publish', scope: 'trails.v2.portfolios.publish' },
+  'portfolios.unpublish': { action: 'trails.v2.portfolios.unpublish', scope: 'trails.v2.portfolios.unpublish' },
+  'portfolios.rich-document.read': { action: 'trails.v2.portfolios.rich-document.read', scope: 'trails.v2.portfolios.rich-document.read' },
+  'portfolios.rich-document.save': { action: 'trails.v2.portfolios.rich-document.save', scope: 'trails.v2.portfolios.rich-document.save' },
+  'portfolios.rich-document.preview': { action: 'trails.v2.portfolios.rich-document.preview', scope: 'trails.v2.portfolios.rich-document.preview' },
+  'journals.workspace': { action: 'trails.v2.journals.workspace', scope: 'trails.v2.journals.workspace' },
+  'journals.draft': { action: 'trails.v2.journals.draft', scope: 'trails.v2.journals.draft' },
+  'journals.update': { action: 'trails.v2.journals.update', scope: 'trails.v2.journals.update' },
+  'journals.publish': { action: 'trails.v2.journals.publish', scope: 'trails.v2.journals.publish' },
+  'journals.unpublish': { action: 'trails.v2.journals.unpublish', scope: 'trails.v2.journals.unpublish' },
+  'journals.pin': { action: 'trails.v2.journals.pin', scope: 'trails.v2.journals.pin' },
+  'journals.rich-document.read': { action: 'trails.v2.journals.rich-document.read', scope: 'trails.v2.journals.rich-document.read' },
+  'journals.rich-document.save': { action: 'trails.v2.journals.rich-document.save', scope: 'trails.v2.journals.rich-document.save' },
+  'journals.rich-document.preview': { action: 'trails.v2.journals.rich-document.preview', scope: 'trails.v2.journals.rich-document.preview' },
+  'publishing-packages.workspace': { action: 'trails.v2.publishing-packages.workspace', scope: 'trails.v2.publishing-packages.workspace' },
+  'publishing-packages.create': { action: 'trails.v2.publishing-packages.create', scope: 'trails.v2.publishing-packages.create' },
+  'publishing-packages.transition': { action: 'trails.v2.publishing-packages.transition', scope: 'trails.v2.publishing-packages.transition' },
+  'publishing-packages.measure': { action: 'trails.v2.publishing-packages.measure', scope: 'trails.v2.publishing-packages.measure' },
+  'publishing-packages.learn': { action: 'trails.v2.publishing-packages.learn', scope: 'trails.v2.publishing-packages.learn' },
+  'site-content.workspace': { action: 'trails.v2.site-content.workspace', scope: 'trails.v2.site-content.workspace' },
+  'site-content.draft': { action: 'trails.v2.site-content.draft', scope: 'trails.v2.site-content.draft' },
+  'site-content.publish': { action: 'trails.v2.site-content.publish', scope: 'trails.v2.site-content.publish' },
+  'site-content.unpublish': { action: 'trails.v2.site-content.unpublish', scope: 'trails.v2.site-content.unpublish' },
+  'trips.workspace': { action: 'trails.v2.trips.workspace', scope: 'trails.v2.trips.workspace' },
+  'trips.draft': { action: 'trails.v2.trips.workspace.draft', scope: 'trails.v2.trips.workspace.draft' },
+  'trips.update': { action: 'trails.v2.trips.workspace.update', scope: 'trails.v2.trips.workspace.update' },
+  'trips.publish': { action: 'trails.v2.trips.workspace.publish', scope: 'trails.v2.trips.workspace.publish' },
+  'trips.unpublish': { action: 'trails.v2.trips.workspace.unpublish', scope: 'trails.v2.trips.workspace.unpublish' },
+  'trips.cancel': { action: 'trails.v2.trips.workspace.cancel', scope: 'trails.v2.trips.workspace.cancel' },
+  'trip-registrations.summary': { action: 'trails.v2.trip-registrations.summary', scope: 'trails.v2.trip-registrations.summary' },
+  'trip-registrations.capacity': { action: 'trails.v2.trip-registrations.capacity', scope: 'trails.v2.trip-registrations.capacity' },
+  'video-references.workspace': { action: 'trails.v2.video-references.workspace', scope: 'trails.v2.video-references.workspace' },
+  'video-references.draft': { action: 'trails.v2.video-references.workspace.draft', scope: 'trails.v2.video-references.workspace.draft' },
+  'video-references.update': { action: 'trails.v2.video-references.workspace.update', scope: 'trails.v2.video-references.workspace.update' },
+  'video-references.publish': { action: 'trails.v2.video-references.workspace.publish', scope: 'trails.v2.video-references.workspace.publish' },
+  'video-references.unpublish': { action: 'trails.v2.video-references.workspace.unpublish', scope: 'trails.v2.video-references.workspace.unpublish' },
+  'video-references.archive': { action: 'trails.v2.video-references.workspace.archive', scope: 'trails.v2.video-references.workspace.archive' },
+  'locations.workspace': { action: 'trails.v2.locations.workspace', scope: 'trails.v2.locations.workspace' },
+  'locations.draft': { action: 'trails.v2.locations.workspace.draft', scope: 'trails.v2.locations.workspace.draft' },
+  'locations.update': { action: 'trails.v2.locations.workspace.update', scope: 'trails.v2.locations.workspace.update' },
+  'locations.publish': { action: 'trails.v2.locations.workspace.publish', scope: 'trails.v2.locations.workspace.publish' },
+  'locations.unpublish': { action: 'trails.v2.locations.workspace.unpublish', scope: 'trails.v2.locations.workspace.unpublish' },
+  'locations.archive': { action: 'trails.v2.locations.workspace.archive', scope: 'trails.v2.locations.workspace.archive' },
+  'shooting-locations.workspace': { action: 'trails.v2.shooting-locations.workspace', scope: 'trails.v2.shooting-locations.workspace' },
+  'shooting-locations.create': { action: 'trails.v2.shooting-locations.create', scope: 'trails.v2.shooting-locations.create' },
+  'shooting-locations.update': { action: 'trails.v2.shooting-locations.update', scope: 'trails.v2.shooting-locations.update' },
+  'shooting-locations.archive': { action: 'trails.v2.shooting-locations.archive', scope: 'trails.v2.shooting-locations.archive' },
+  'comments.moderation-queue': { action: 'trails.v2.comments.moderation-queue', scope: 'trails.v2.comments.moderation-queue' },
+  'comments.moderate': { action: 'trails.v2.comments.moderate', scope: 'trails.v2.comments.moderate' },
+  'analytics.workspace': { action: 'trails.v2.analytics.workspace', scope: 'trails.v2.analytics.workspace' },
+  'analytics.content-metrics': { action: 'trails.v2.analytics.content-metrics', scope: 'trails.v2.analytics.content-metrics' },
+  'hikes.workspace': { action: 'trails.v2.hikes.workspace', scope: 'trails.v2.hikes.workspace' },
+  'hikes.create': { action: 'trails.v2.hikes.create', scope: 'trails.v2.hikes.create' },
+  'gear.workspace': { action: 'trails.v2.gear.workspace', scope: 'trails.v2.gear.workspace' },
+  'gear.create': { action: 'trails.v2.gear.create', scope: 'trails.v2.gear.create' },
+  'gear.update': { action: 'trails.v2.gear.update', scope: 'trails.v2.gear.update' },
+  'gear.deactivate': { action: 'trails.v2.gear.deactivate', scope: 'trails.v2.gear.deactivate' },
+  'packing-plans.workspace': { action: 'trails.v2.packing-plans.workspace', scope: 'trails.v2.packing-plans.workspace' },
+  'packing-plans.create': { action: 'trails.v2.packing-plans.create', scope: 'trails.v2.packing-plans.create' },
+  'packing-plans.update': { action: 'trails.v2.packing-plans.update', scope: 'trails.v2.packing-plans.update' },
+  'finance.workspace': { action: 'trails.v2.finance.workspace', scope: 'trails.v2.finance.workspace' },
+  'finance.create': { action: 'trails.v2.finance.create', scope: 'trails.v2.finance.create' },
+  'finance.update': { action: 'trails.v2.finance.update', scope: 'trails.v2.finance.update' },
+  'finance.balance.record': { action: 'trails.v2.finance.balance.record', scope: 'trails.v2.finance.balance.record' },
+  'finance.balance.current': { action: 'trails.v2.finance.balance.current', scope: 'trails.v2.finance.balance.current' },
+};
+
+const forbiddenBridgeIdentityFields = new Set(['tenantId', 'ownerUserId', 'userId', 'isAdmin', 'creatorSpaceRole', 'creatorSpaceOwnerUserId', 'creatorRole', 'creatorOwner']);
 
 export const requireMicroAppTicketSecret = () => {
   const secret = process.env.MICRO_APP_TICKET_SECRET?.trim();
@@ -172,14 +378,103 @@ const signPayload = (payload: Record<string, unknown>) => {
   return `${body}.${signature}`;
 };
 
-const verifyTicket = (ticket: string) => {
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const verifyTicket = (ticket: string): Record<string, unknown> | null => {
   const [body, signature] = ticket.split('.');
   if (!body || !signature) return null;
   const expected = crypto.createHmac('sha256', requireMicroAppTicketSecret()).update(body).digest('base64url');
-  if (expected !== signature) return null;
-  const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-  if (!payload?.exp || Number(payload.exp) < Date.now()) return null;
-  return payload;
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const payload: unknown = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!isRecord(payload) || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+const runtimeTicketKey = (jti: string) => `micro-app:runtime-ticket:${jti}`;
+const registeredTrailsWorkspaceGrant = (appId: string, version: string): TrailsWorkspaceGrant | undefined =>
+  TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === appId && grant.version === version);
+const isRuntimeTicketClaims = (value: Record<string, unknown>): value is RuntimeTicketClaims =>
+  typeof value.aud === 'string' && typeof value.jti === 'string' && typeof value.appId === 'string' && typeof value.version === 'string'
+  && typeof value.userId === 'string' && Array.isArray(value.scopes) && value.scopes.every((scope) => typeof scope === 'string');
+const isMicroAppSessionClaims = (value: Record<string, unknown>): value is MicroAppSessionClaims =>
+  isRuntimeTicketClaims(value) && value.kind === 'micro-app-session';
+
+const consumeRuntimeTicket = async (star: Starlight, claims: RuntimeTicketClaims): Promise<boolean> => {
+  const ttlSeconds = Math.max(1, Math.ceil((claims.exp - Date.now()) / 1000));
+  const cacher = star.cacher as AtomicTicketCacher | undefined;
+  if (!cacher) return false;
+  if (cacher.setIfNotExists) return cacher.setIfNotExists(runtimeTicketKey(claims.jti), 'consumed', ttlSeconds);
+  if (!cacher.client) return false;
+  const result = await cacher.client.set(runtimeTicketKey(claims.jti), 'consumed', 'EX', String(ttlSeconds), 'NX');
+  return result === 'OK';
+};
+
+const containsForbiddenBridgeIdentityField = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(containsForbiddenBridgeIdentityField);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, nested]) => forbiddenBridgeIdentityFields.has(key) || containsForbiddenBridgeIdentityField(nested));
+};
+const isPortfolioWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'portfolios.workspace' ? []
+    : operation === 'portfolios.draft' ? ['title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata']
+      : operation === 'portfolios.update' ? ['id', 'resourceVersion', 'title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata']
+        : ['id', 'resourceVersion'];
+  return Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isJournalWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'journals.workspace' ? []
+    : operation === 'journals.draft' ? ['title', 'excerpt', 'body', 'visibility', 'coverMediaId']
+      : operation === 'journals.update' ? ['id', 'resourceVersion', 'title', 'excerpt', 'body', 'visibility', 'coverMediaId']
+        : operation === 'journals.pin' ? ['id', 'resourceVersion', 'isPinned'] : ['id', 'resourceVersion'];
+  return operation === 'journals.pin'
+    ? Object.keys(payload).length === allowed.length && Object.keys(payload).every((key) => allowed.includes(key)) && typeof payload.isPinned === 'boolean'
+    : Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isHikesWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'hikes.workspace' ? [] : ['title', 'startedAt', 'distanceKm', 'elevationGainM', 'routeLabel'];
+  return Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isGearWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'gear.workspace' ? []
+    : operation === 'gear.create' ? ['name', 'weightGrams', 'quantity']
+      : operation === 'gear.update' ? ['id', 'resourceVersion', 'name', 'weightGrams', 'quantity']
+        : ['id', 'resourceVersion'];
+  return Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isPackingPlanWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'packing-plans.workspace' ? []
+    : operation === 'packing-plans.create' ? ['name', 'gearIds']
+      : ['id', 'resourceVersion', 'name', 'gearIds'];
+  return Object.keys(payload).length === allowed.length && Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isFinanceWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'finance.workspace' ? []
+    : operation === 'finance.create' ? ['occurredOn', 'category', 'amountCents', 'currency']
+      : operation === 'finance.update' ? ['id', 'resourceVersion', 'occurredOn', 'category', 'amountCents', 'currency']
+        : operation === 'finance.balance.record' ? ['balanceCents', 'currency']
+          : ['currency'];
+  return operation === 'finance.balance.current'
+    ? Object.keys(payload).every((key) => allowed.includes(key))
+    : Object.keys(payload).length === allowed.length && Object.keys(payload).every((key) => allowed.includes(key));
+};
+const isAnalyticsWorkspacePayload = (payload: Record<string, unknown>): boolean => Object.keys(payload).length === 2 && typeof payload.from === 'string' && typeof payload.to === 'string';
+const isAnalyticsContentMetricsPayload = (payload: Record<string, unknown>): boolean => {
+  if (Object.keys(payload).length !== 3 || typeof payload.from !== 'string' || typeof payload.to !== 'string' || !isRecord(payload.content) || Object.keys(payload.content).length !== 2 || !Object.keys(payload.content).every(key => key === 'portfolioIds' || key === 'journalIds')) return false;
+  const content = payload.content;
+  const ids = (value: unknown): value is string[] => Array.isArray(value) && value.length <= 100 && value.every(id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(id)) && new Set(value).size === value.length;
+  const portfolioIds = content.portfolioIds; const journalIds = content.journalIds;
+  if (!ids(portfolioIds) || !ids(journalIds)) return false;
+  return portfolioIds.length > 0 || journalIds.length > 0;
+};
+const isTripRegistrationSummaryPayload = (payload: Record<string, unknown>): boolean => Object.keys(payload).length === 1 && typeof payload.tripId === 'string';
+const isTripRegistrationCapacityPayload = (payload: Record<string, unknown>): boolean => Object.keys(payload).length === 3 && typeof payload.tripId === 'string' && typeof payload.capacity === 'number' && typeof payload.mutationId === 'string';
+const isShootingLocationPayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'shooting-locations.workspace' ? [] : operation === 'shooting-locations.archive' ? ['id', 'mutationId', 'expectedResourceVersion'] : ['id', 'name', 'latitude', 'longitude', 'notes', 'mutationId', 'expectedResourceVersion'];
+  return Object.keys(payload).length === allowed.length && Object.keys(payload).every(key => allowed.includes(key));
 };
 
 const publicVersion = (version: any, includePackage = false) => {
@@ -418,6 +713,10 @@ export default function microAppActions(star: Starlight) {
           ? await star.db.microApp.findMicroAppVersion(appId, targetVersion)
           : await star.db.microApp.findLatestPublishedVersion(appId);
         if (!target) return fail('没有可回滚的目标版本');
+        if (!['approved', 'published'].includes(target.status)) return fail('只有审核通过的版本可以回滚发布');
+        if (appId === 'starlight-trails-workspace' && !registeredTrailsWorkspaceGrant(appId, target.version)) {
+          return fail('该 Trails 工作台版本未获服务端授权', HttpResponseCode.NoPermissionError, 403);
+        }
         const next = await star.db.microApp.updateMicroAppVersionStatus(appId, target.version, 'published', {
           publishedAt: new Date(),
         });
@@ -476,13 +775,17 @@ export default function microAppActions(star: Starlight) {
           ? await star.db.microApp.findMicroAppVersion(appId, version)
           : await star.db.microApp.findLatestPublishedVersion(appId);
         if (!record || record.status !== 'published') return fail('该微应用暂无可运行版本');
-        const manifest = JSON.parse(record.manifestJson || '{}');
-        const payload = {
+        const grant = registeredTrailsWorkspaceGrant(appId, record.version);
+        if (appId === 'starlight-trails-workspace' && !grant) {
+          return fail('该 Trails 工作台版本未获服务端授权', HttpResponseCode.NoPermissionError, 403);
+        }
+        const payload: RuntimeTicketClaims = {
           userId: currentUserId(ctx),
-          tenantId: currentTenantId(ctx),
           appId,
           version: record.version,
-          scopes: manifest.permissions || {},
+          jti: crypto.randomUUID(),
+          aud: grant?.audience || 'darwin:micro-app:runtime',
+          scopes: grant ? grant.scopes : [],
           exp: Date.now() + 2 * 60 * 1000,
         };
         const ticket = signPayload(payload);
@@ -504,9 +807,26 @@ export default function microAppActions(star: Starlight) {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         const payload = verifyTicket(String((ctx.params as any).ticket || ''));
         if (!payload) return fail('运行票据无效或已过期', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+        if (payload.appId === 'starlight-trails-workspace' && (!isRuntimeTicketClaims(payload) || !registeredTrailsWorkspaceGrant(payload.appId, payload.version))) {
+          return fail('运行票据应用版本未获服务端授权', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+        }
+        if (isRuntimeTicketClaims(payload) && registeredTrailsWorkspaceGrant(payload.appId, payload.version)) {
+          const grant = registeredTrailsWorkspaceGrant(payload.appId, payload.version);
+          if (!grant || payload.aud !== grant.audience || !payload.scopes.every((scope) => grant.scopes.includes(scope))) {
+            return fail('运行票据受众或授权无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+          }
+          if (!(await consumeRuntimeTicket(star, payload))) return fail('运行票据已使用或当前不可安全换取', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+          const session: MicroAppSessionClaims = { ...payload, kind: 'micro-app-session', exp: Date.now() + 10 * 60 * 1000 };
+          return ok({
+            sessionToken: signPayload(session),
+            user: { userId: payload.userId },
+            app: { appId: payload.appId, version: payload.version, scopes: payload.scopes },
+            expiresIn: 600,
+          }, '微应用会话已换取');
+        }
         return ok({
           sessionToken: signPayload({ ...payload, kind: 'micro-app-session', exp: Date.now() + 10 * 60 * 1000 }),
-          user: { userId: payload.userId, tenantId: payload.tenantId },
+          user: { userId: payload.userId },
           app: { appId: payload.appId, version: payload.version, scopes: payload.scopes },
           expiresIn: 600,
         }, '微应用会话已换取');
@@ -518,6 +838,47 @@ export default function microAppActions(star: Starlight) {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         const session = verifyTicket(String((ctx.params as any).sessionToken || ''));
         if (!session || session.kind !== 'micro-app-session') return fail('微应用会话无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+        if (session.appId === 'starlight-trails-workspace' && (!isMicroAppSessionClaims(session) || !registeredTrailsWorkspaceGrant(session.appId, session.version))) {
+          return fail('微应用会话应用版本未获服务端授权', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+        }
+        if (isMicroAppSessionClaims(session) && registeredTrailsWorkspaceGrant(session.appId, session.version)) {
+          const grant = registeredTrailsWorkspaceGrant(session.appId, session.version);
+          if (!grant || session.aud !== grant.audience || !session.scopes.every((item) => grant.scopes.includes(item))) {
+            return fail('微应用会话受众或授权无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+          }
+          const operationValue: unknown = (ctx.params as Record<string, unknown>).operation;
+          if (typeof operationValue !== 'string' || !Object.prototype.hasOwnProperty.call(TRAILS_WORKSPACE_ACTIONS, operationValue)) {
+            return fail('不支持的 Trails 工作台操作', HttpResponseCode.NoPermissionError, 403);
+          }
+          const operation = operationValue as TrailsWorkspaceOperation;
+          const target = TRAILS_WORKSPACE_ACTIONS[operation];
+          if (!session.scopes.includes(target.scope)) return fail('微应用没有该 API scope 权限', HttpResponseCode.NoPermissionError, 403);
+           const payload: unknown = (ctx.params as Record<string, unknown>).payload;
+           if (!isRecord(payload)) return fail('请求 payload 必须是对象');
+            if (containsForbiddenBridgeIdentityField(payload)) return fail('请求不能包含身份或所有权字段', HttpResponseCode.NoPermissionError, 403);
+            if ((operation === 'portfolios.workspace' || operation === 'portfolios.draft' || operation === 'portfolios.update' || operation === 'portfolios.publish' || operation === 'portfolios.unpublish') && !isPortfolioWorkspacePayload(operation, payload)) return fail('作品集请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'journals.workspace' || operation === 'journals.draft' || operation === 'journals.update' || operation === 'journals.publish' || operation === 'journals.unpublish' || operation === 'journals.pin') && !isJournalWorkspacePayload(operation, payload)) return fail('日志请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+            if ((operation === 'hikes.workspace' || operation === 'hikes.create') && !isHikesWorkspacePayload(operation, payload)) return fail('徒步记录请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+             if ((operation === 'gear.workspace' || operation === 'gear.create' || operation === 'gear.update' || operation === 'gear.deactivate') && !isGearWorkspacePayload(operation, payload)) return fail('装备请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+              if ((operation === 'packing-plans.workspace' || operation === 'packing-plans.create' || operation === 'packing-plans.update') && !isPackingPlanWorkspacePayload(operation, payload)) return fail('装包方案请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'finance.workspace' || operation === 'finance.create' || operation === 'finance.update' || operation === 'finance.balance.record' || operation === 'finance.balance.current') && !isFinanceWorkspacePayload(operation, payload)) return fail('财务请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if (operation === 'analytics.workspace' && !isAnalyticsWorkspacePayload(payload)) return fail('分析请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if (operation === 'analytics.content-metrics' && !isAnalyticsContentMetricsPayload(payload)) return fail('内容指标请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if (operation === 'trip-registrations.summary' && !isTripRegistrationSummaryPayload(payload)) return fail('报名摘要请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if (operation === 'trip-registrations.capacity' && !isTripRegistrationCapacityPayload(payload)) return fail('行摄名额请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'shooting-locations.workspace' || operation === 'shooting-locations.create' || operation === 'shooting-locations.update' || operation === 'shooting-locations.archive') && !isShootingLocationPayload(operation, payload)) return fail('拍摄地点请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+           if (typeof ctx.call !== 'function') return fail('Trails 服务当前不可用', HttpResponseCode.ServiceActionFaild, 503);
+          const trustedActor = await resolveTrailsWorkspaceActor(star.db, session.userId);
+          if (!trustedActor) return fail('当前用户没有有效的 Trails 创作者空间权限', HttpResponseCode.NoPermissionError, 403);
+          return ctx.call(target.action, payload, {
+            meta: {
+              tenantId: trustedActor.tenantId,
+              user: trustedActor.user,
+              creatorSpaceRole: trustedActor.creatorSpaceRole,
+              ...(trustedActor.creatorSpaceOwnerUserId ? { creatorSpaceOwnerUserId: trustedActor.creatorSpaceOwnerUserId } : {}),
+            },
+          }) as Promise<HttpResponseItem>;
+        }
         const scope = String((ctx.params as any).scope || '');
         const scopes = (session.scopes || {}) as any;
         const allowedScopes = Array.isArray(scopes.starlightApiScopes) ? scopes.starlightApiScopes : [];

@@ -12,6 +12,10 @@ import {
 } from '../metrics/utils/duration-metrics';
 import { MEMORY_USAGE_UNIT, normalizeRssMemoryValue } from '../metrics/utils/memory-units';
 import {
+  INFLUXDB_BUCKET,
+  INFLUXDB_ORG,
+  INFLUXDB_TOKEN,
+  INFLUXDB_URL,
   KAFKA_BROKERS,
   KAFKA_PASSWORD,
   KAFKA_USER,
@@ -38,7 +42,10 @@ const createSystemScopeForbidden = (): HttpResponseItem => ({
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
-const normalizeSeries = (rows: any[], normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2)) =>
+const normalizeSeries = (
+  rows: any[],
+  normalizeValue: (value: unknown) => number = (value) => toFixed(Number(value || 0), 2),
+) =>
   rows
     .filter((row) => row?._time && row?._value !== undefined && row?._value !== null)
     .map((row) => ({
@@ -195,11 +202,24 @@ function createMetricsCompatService() {
 
   const compatService = star.createService({
     name: APP_NAME,
-    settings: { multiTenant: true, tenantIdField: 'tenantId' },
+    settings: {
+      multiTenant: true,
+      tenantIdField: 'tenantId',
+      influxdb: {
+        url: INFLUXDB_URL,
+        token: INFLUXDB_TOKEN,
+        org: INFLUXDB_ORG,
+        bucket: INFLUXDB_BUCKET,
+        timeout: 10000,
+        retries: 3,
+      },
+    },
     async created() {
       this.logger.info('Metrics compat service created');
     },
     async started() {
+      await InfluxDBHandler.initialize(this.settings.influxdb, star);
+      this.logger.info('InfluxDB connection initialized');
       this.logger.info('Metrics compat service started successfully');
     },
     async stopped() {
@@ -240,7 +260,6 @@ function createMetricsCompatService() {
               return createSystemScopeForbidden();
             }
             const { serviceId } = ctx.params;
-            const scope = normalizeMetricsScope(ctx.params?.scope);
             const data = await InfluxDBHandler.getRealtimeStats(serviceId, star);
             const cpu = Number(data?.cpu || 0);
             const memory = Number(data?.memory || 0);

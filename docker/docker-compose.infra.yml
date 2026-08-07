@@ -43,13 +43,13 @@ services:
       KAFKA_CFG_MESSAGE_MAX_BYTES: "5242880"
       KAFKA_CFG_LOG_RETENTION_HOURS: "24"
       KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
-      KAFKA_HEAP_OPTS: -Xms320m -Xmx320m
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
     volumes:
       - kafka_data:/bitnami/kafka
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 512m
-    cpus: 0.50
+    mem_limit: 1024m
+    cpus: 0.60
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
@@ -70,8 +70,8 @@ services:
       - mysql_data:/var/lib/mysql
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 384m
-    cpus: 0.50
+    mem_limit: 512m
+    cpus: 0.20
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -90,7 +90,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 96m
-    cpus: 0.20
+    cpus: 0.05
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
@@ -113,7 +113,7 @@ services:
       - influxdb_config:/etc/influxdb2
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 384m
     cpus: 0.35
     logging: *default-logging
     healthcheck:
@@ -129,13 +129,13 @@ services:
       discovery.type: single-node
       xpack.security.enabled: "false"
       xpack.security.transport.ssl.enabled: "false"
-      ES_JAVA_OPTS: -Xms320m -Xmx320m
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 512m
-    cpus: 0.50
+    mem_limit: 1024m
+    cpus: 0.20
     logging: *default-logging
     ulimits:
       nofile:

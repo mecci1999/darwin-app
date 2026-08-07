@@ -10,6 +10,8 @@ import { InfluxDBHandler } from './influxdb-handler';
 export class DataProcessor {
   private static processingTimer: NodeJS.Timeout | null = null;
 
+  private static processing = false;
+
   /**
    * 启动数据处理器
    */
@@ -18,8 +20,8 @@ export class DataProcessor {
       return;
     }
 
-    this.processingTimer = setInterval(async () => {
-      await this.processBatches(star, state);
+    this.processingTimer = setInterval(() => {
+      void this.processBatches(star, state);
     }, FLUSH_INTERVAL);
 
     star.logger?.info('Data processor started');
@@ -143,16 +145,22 @@ export class DataProcessor {
    * 处理所有批次
    */
   public static async processBatches(star: Star, state: MetricsState): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
     const now = Date.now();
-    const batchesToProcess = state.processingQueue.filter(
-      (batch) => now - batch.timestamp >= FLUSH_INTERVAL || batch.data.length >= BATCH_SIZE,
-    );
+    try {
+      const batchesToProcess = state.processingQueue.filter(
+        (batch) => now - batch.timestamp >= FLUSH_INTERVAL || batch.data.length >= BATCH_SIZE,
+      );
 
-    for (const batch of batchesToProcess) {
-      await this.processBatch(batch, star, state);
+      for (const batch of batchesToProcess) {
+        await this.processBatch(batch, star, state);
+      }
+
+      state.lastFlushTime = now;
+    } finally {
+      this.processing = false;
     }
-
-    state.lastFlushTime = now;
   }
 
   /**

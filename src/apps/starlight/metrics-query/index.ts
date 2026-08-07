@@ -46,6 +46,8 @@ import {
 
 const APP_NAME = 'metrics-query';
 const QUERY_CACHE_TTL_MS = 30 * 1000;
+const MAX_CONCURRENT_CARD_QUERIES = 2;
+const CARD_BATCH_EXECUTION_BUDGET_MS = 12 * 1000;
 const queryMemoryCache = new Map<string, { expiresAt: number; value: any }>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
@@ -938,6 +940,45 @@ const setCachedQueryResult = (key: string, value: any) => {
   });
 };
 
+const runWithTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const error = new Error('Card query exceeded the batch execution budget');
+          error.name = 'CardQueryTimeoutError';
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+};
+
+const mapWithConcurrency = async <T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> => {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, () => worker()),
+  );
+  return results;
+};
+
 function createMetricsQueryService() {
   const star = new Star({
     namespace: 'darwin-app',
@@ -1150,15 +1191,30 @@ function createMetricsQueryService() {
 
             const scope = normalizeMetricsScope(ctx.params?.context?.scope || ctx.params?.scope);
             const cards = Array.isArray(ctx.params?.cards) ? ctx.params.cards : [];
+            const batchDeadline = startedAt + CARD_BATCH_EXECUTION_BUDGET_MS;
             const cacheKey = `metrics-query:cards:${JSON.stringify({ scope, cards, refreshGenerationId: String(ctx.params.refreshGenerationId) })}`;
             const cached = getCachedQueryResult(cacheKey);
             if (cached) {
               return cached;
             }
 
-            const items = await Promise.all(
-              cards.map(async (card: any) => {
+            const items = await mapWithConcurrency(
+              cards,
+              MAX_CONCURRENT_CARD_QUERIES,
+              async (card: any) => {
                 const cardStartedAt = Date.now();
+                if (cardStartedAt >= batchDeadline) {
+                  return {
+                    cardId: String(card?.cardId || ''),
+                    status: 'error',
+                    startedAt: cardStartedAt,
+                    finishedAt: cardStartedAt,
+                    error: {
+                      code: 'QUERY_TIMEOUT',
+                      message: 'Card query skipped because the batch execution budget was exhausted',
+                    },
+                  };
+                }
                 try {
                   const validation = validateQuerySpec(
                     { ...(card?.query || {}), scope: card?.query?.scope || scope },
@@ -1173,10 +1229,9 @@ function createMetricsQueryService() {
                       error: { code: 'INVALID_QUERY_SPEC', message: validation.issues.join('; ') },
                     };
                   }
-                  const data = await buildCardDataFromQuery(
-                    validation.normalizedQuery,
-                    star,
-                    this as any,
+                  const data = await runWithTimeout(
+                    buildCardDataFromQuery(validation.normalizedQuery, star, this as any),
+                    Math.max(1, batchDeadline - Date.now()),
                   );
                   if (!data) {
                     return {
@@ -1199,62 +1254,20 @@ function createMetricsQueryService() {
                     cache: { hit: false },
                   };
                 } catch (error: any) {
+                  const isTimeout = error?.name === 'CardQueryTimeoutError';
                   return {
                     cardId: String(card?.cardId || ''),
                     status: 'error',
                     startedAt: cardStartedAt,
                     finishedAt: Date.now(),
                     error: {
-                      code: 'QUERY_EXECUTION_FAILED',
+                      code: isTimeout ? 'QUERY_TIMEOUT' : 'QUERY_EXECUTION_FAILED',
                       message: error?.message || 'Query execution failed',
                     },
                   };
                 }
-              }),
+              },
             );
-
-            // Auto-upsert alert rules from card configs so metrics-alerts evaluator sees them
-            // Deduplicate by metric so multiple cards referencing the same metric don't create duplicate rules
-            const seenMetrics = new Set<string>()
-            const cardsToUpsert = cards
-              .filter((card: any) => card?.query?.alert?.enabled && card?.query?.alert?.ruleId)
-              .filter((card: any) => {
-                const key = `${card.query.metricRef || ''}::${card.query.subject?.type === 'service' ? card.query.subject?.id || 'all' : 'all'}`
-                if (seenMetrics.has(key)) return false
-                seenMetrics.add(key)
-                return true
-              })
-            Promise.allSettled(
-              cardsToUpsert.map(async (card: any) => {
-                  const alert = card.query.alert
-                  const query = card.query
-                  const service =
-                    query.subject?.type === 'service' ? query.subject?.id || 'all' : 'all'
-                  const payload = {
-                    id: alert.ruleId,
-                    name:
-                      alert.name ||
-                      `${query.metricRef || 'unknown'} ${alert.level || 'warning'}阈值告警`,
-                    service,
-                    metric: query.metricRef,
-                    operator: alert.operator || '>',
-                    threshold: Number(alert.threshold ?? 0),
-                    unit: alert.unit || '',
-                    duration: Number(alert.duration || 5),
-                    level: alert.level || 'warning',
-                    enabled: alert.enabled !== false,
-                    channels: alert.channels?.length ? alert.channels : ['Email'],
-                  }
-                  try {
-                    await ctx.call('metrics-alerts.v1.alert-rules/:id', payload)
-                  } catch (err) {
-                    star.logger?.warn(
-                      `[AlertEval] Failed to upsert alert rule ${alert.ruleId} from card ${card.cardId}:`,
-                      err,
-                    )
-                  }
-                }),
-            )
 
             const response = {
               status: 200,

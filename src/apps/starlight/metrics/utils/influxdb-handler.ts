@@ -3,7 +3,6 @@
  */
 import { InfluxDB, Point } from '@influxdata/influxdb-client';
 import { Star } from 'node-universe';
-import { MAX_RETRIES } from '../constants';
 import { InfluxDBConfig, ProcessedMetricsData } from '../types';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
@@ -14,6 +13,14 @@ import {
 import { normalizeRssMemoryValue } from './memory-units';
 
 export class InfluxDBHandler {
+  private static readonly maxConcurrentQueries = 2;
+
+  private static readonly maxQueuedQueries = 32;
+
+  private static activeQueryCount = 0;
+
+  private static queryQueue: Array<() => void> = [];
+
   private static client: InfluxDB | null = null;
 
   private static writeApi: any = null;
@@ -23,6 +30,29 @@ export class InfluxDBHandler {
   private static bucket: string = '';
 
   private static org: string = '';
+
+  private static scheduleQuery<T>(operation: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        this.activeQueryCount += 1;
+        operation()
+          .then(resolve, reject)
+          .finally(() => {
+            this.activeQueryCount -= 1;
+            const next = this.queryQueue.shift();
+            if (next) next();
+          });
+      };
+
+      if (this.activeQueryCount < this.maxConcurrentQueries) {
+        run();
+      } else if (this.queryQueue.length < this.maxQueuedQueries) {
+        this.queryQueue.push(run);
+      } else {
+        reject(new Error('InfluxDB query queue is full'));
+      }
+    });
+  }
 
   /**
    * 初始化InfluxDB连接
@@ -48,7 +78,6 @@ export class InfluxDBHandler {
   static async writeMetrics(
     metrics: ProcessedMetricsData[],
     star: Star,
-    retryCount = 0,
   ): Promise<void> {
     try {
       if (!this.writeApi) {
@@ -89,13 +118,6 @@ export class InfluxDBHandler {
       star.logger?.debug(`Successfully wrote ${metrics.length} metrics to InfluxDB`);
     } catch (error) {
       star.logger?.error('Failed to write metrics to InfluxDB:', error);
-
-      if (retryCount < MAX_RETRIES) {
-        star.logger?.info(`Retrying write operation (${retryCount + 1}/${MAX_RETRIES})`);
-        await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)));
-        return this.writeMetrics(metrics, star, retryCount + 1);
-      }
-
       throw error;
     }
   }
@@ -109,20 +131,23 @@ export class InfluxDBHandler {
         throw new Error('InfluxDB query API not initialized');
       }
 
-      const rows: any[] = [];
-      await new Promise<void>((resolve, reject) => {
-        this.queryApi.queryRows(query, {
-          next(row: any, tableMeta: any) {
-            const o = tableMeta.toObject(row);
-            rows.push(o);
-          },
-          error(error: Error) {
-            reject(error);
-          },
-          complete() {
-            resolve();
-          },
+      const rows = await this.scheduleQuery(async () => {
+        const result: any[] = [];
+        await new Promise<void>((resolve, reject) => {
+          this.queryApi.queryRows(query, {
+            next(row: any, tableMeta: any) {
+              const o = tableMeta.toObject(row);
+              result.push(o);
+            },
+            error(error: Error) {
+              reject(error);
+            },
+            complete() {
+              resolve();
+            },
+          });
         });
+        return result;
       });
 
       star.logger?.debug(`Query executed successfully, returned ${rows.length} rows`);

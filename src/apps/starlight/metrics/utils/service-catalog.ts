@@ -22,6 +22,22 @@ type ServiceRuntimeMetrics = {
   lastSampleAt: string | null;
 };
 
+type ServiceMetricMaps = {
+  qpsMap: Map<string, number>;
+  latencyMap: Map<string, number>;
+  errorRateMap: Map<string, number>;
+  runtimeMap: Map<string, ServiceRuntimeMetrics>;
+};
+
+type ServiceMetricMapCacheEntry = {
+  expiresAt: number;
+  value?: ServiceMetricMaps;
+  inFlight?: Promise<ServiceMetricMaps>;
+};
+
+const SERVICE_METRIC_MAP_CACHE_TTL_MS = 10_000;
+const serviceMetricMapCache = new WeakMap<object, Map<MetricsDatasetScope, ServiceMetricMapCacheEntry>>();
+
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
 const normalizeServiceMetricKey = (value: unknown) => {
@@ -279,6 +295,102 @@ const deriveHealth = (
   return 'healthy';
 };
 
+const buildServiceMetricMaps = async (
+  bucket: string,
+  star: Star,
+  serviceNames: ReadonlySet<string>,
+): Promise<ServiceMetricMaps> => {
+  const [qpsMap, latencyMap, errorRateMap, runtimeMap] = await Promise.all([
+    queryServiceQpsMap(bucket, star)
+      .then(async (map) => {
+        if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
+        const fallback = await queryServiceQpsFallbackMap(bucket, star).catch((error) => {
+          star.logger?.error('metrics.catalog.service-qps-fallback-map-failed', {
+            message: error?.message,
+            stack: error?.stack,
+          });
+          return new Map();
+        });
+        mergeMissingMetricValues(map, fallback);
+        return map;
+      })
+      .catch((error) => {
+        star.logger?.error('metrics.catalog.service-qps-map-failed', {
+          message: error?.message,
+          stack: error?.stack,
+        });
+        return queryServiceQpsFallbackMap(bucket, star).catch(() => new Map());
+      }),
+    queryServiceLatencyMap(bucket, star).catch((error) => {
+      star.logger?.error('metrics.catalog.service-p95-map-failed', {
+        message: error?.message,
+        stack: error?.stack,
+      });
+      return new Map();
+    }),
+    queryServiceErrorRateMap(bucket, star)
+      .then(async (map) => {
+        if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
+        const fallback = await queryServiceErrorRateFallbackMap(bucket, star).catch((error) => {
+          star.logger?.error('metrics.catalog.service-error-rate-fallback-map-failed', {
+            message: error?.message,
+            stack: error?.stack,
+          });
+          return new Map();
+        });
+        mergeMissingMetricValues(map, fallback);
+        return map;
+      })
+      .catch((error) => {
+        star.logger?.error('metrics.catalog.service-error-rate-map-failed', {
+          message: error?.message,
+          stack: error?.stack,
+        });
+        return queryServiceErrorRateFallbackMap(bucket, star).catch(() => new Map());
+      }),
+    queryServiceRuntimeMetricMap(bucket, star).catch((error) => {
+      star.logger?.error('metrics.catalog.service-runtime-map-failed', {
+        message: error?.message,
+        stack: error?.stack,
+      });
+      return new Map();
+    }),
+  ]);
+  return { qpsMap, latencyMap, errorRateMap, runtimeMap };
+};
+
+const getServiceMetricMaps = (
+  bucket: string,
+  star: Star,
+  scope: MetricsDatasetScope,
+  serviceNames: ReadonlySet<string>,
+): Promise<ServiceMetricMaps> => {
+  let scopeEntries = serviceMetricMapCache.get(star);
+  if (!scopeEntries) {
+    scopeEntries = new Map();
+    serviceMetricMapCache.set(star, scopeEntries);
+  }
+
+  const existing = scopeEntries.get(scope);
+  if (existing?.value && existing.expiresAt > Date.now()) return Promise.resolve(existing.value);
+  if (existing?.inFlight) return existing.inFlight;
+
+  const entry: ServiceMetricMapCacheEntry = { expiresAt: 0 };
+  entry.inFlight = buildServiceMetricMaps(bucket, star, serviceNames)
+    .then((value) => {
+      entry.value = value;
+      entry.expiresAt = Date.now() + SERVICE_METRIC_MAP_CACHE_TTL_MS;
+      entry.inFlight = undefined;
+      return value;
+    })
+    .catch((error) => {
+      if (scopeEntries?.get(scope) === entry) scopeEntries.delete(scope);
+      throw error;
+    });
+  scopeEntries.set(scope, entry);
+  return entry.inFlight;
+};
+
 export const buildServiceCatalogSnapshot = async (
   params: {
     page?: number;
@@ -305,64 +417,14 @@ export const buildServiceCatalogSnapshot = async (
     getNodeServiceNames(node).forEach((name: string) => serviceNames.add(name));
   });
 
-  const [qpsMap, latencyMap, errorRateMap, runtimeMap] = bucket
-    ? await Promise.all([
-        queryServiceQpsMap(bucket, star)
-          .then(async (map) => {
-            if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
-            const fallback = await queryServiceQpsFallbackMap(bucket, star).catch((error) => {
-              star.logger?.error('metrics.catalog.service-qps-fallback-map-failed', {
-                message: error?.message,
-                stack: error?.stack,
-              });
-              return new Map();
-            });
-            mergeMissingMetricValues(map, fallback);
-            return map;
-          })
-          .catch((error) => {
-            star.logger?.error('metrics.catalog.service-qps-map-failed', {
-              message: error?.message,
-              stack: error?.stack,
-            });
-            return queryServiceQpsFallbackMap(bucket, star).catch(() => new Map());
-          }),
-        queryServiceLatencyMap(bucket, star).catch((error) => {
-          star.logger?.error('metrics.catalog.service-p95-map-failed', {
-            message: error?.message,
-            stack: error?.stack,
-          });
-          return new Map();
-        }),
-        queryServiceErrorRateMap(bucket, star)
-          .then(async (map) => {
-            if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
-            const fallback = await queryServiceErrorRateFallbackMap(bucket, star).catch((error) => {
-              star.logger?.error('metrics.catalog.service-error-rate-fallback-map-failed', {
-                message: error?.message,
-                stack: error?.stack,
-              });
-              return new Map();
-            });
-            mergeMissingMetricValues(map, fallback);
-            return map;
-          })
-          .catch((error) => {
-            star.logger?.error('metrics.catalog.service-error-rate-map-failed', {
-              message: error?.message,
-              stack: error?.stack,
-            });
-            return queryServiceErrorRateFallbackMap(bucket, star).catch(() => new Map());
-          }),
-        queryServiceRuntimeMetricMap(bucket, star).catch((error) => {
-          star.logger?.error('metrics.catalog.service-runtime-map-failed', {
-            message: error?.message,
-            stack: error?.stack,
-          });
-          return new Map();
-        }),
-      ])
-    : [new Map(), new Map(), new Map(), new Map()];
+  const { qpsMap, latencyMap, errorRateMap, runtimeMap } = bucket
+    ? await getServiceMetricMaps(bucket, star, scope, serviceNames)
+    : {
+        qpsMap: new Map<string, number>(),
+        latencyMap: new Map<string, number>(),
+        errorRateMap: new Map<string, number>(),
+        runtimeMap: new Map<string, ServiceRuntimeMetrics>(),
+      };
 
   star.logger?.info('metrics.catalog.metric-map-summary', {
     bucketInitialized: Boolean(bucket),

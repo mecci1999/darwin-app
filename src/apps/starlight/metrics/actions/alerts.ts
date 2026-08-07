@@ -514,18 +514,7 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
 
   if (rules.length === 0) return results;
 
-  // Deduplicate rules by metric+service: for the same metric, only evaluate the most sensitive one
-  const dedupedRules = new Map<string, StoredAlertRule>()
   for (const rule of rules) {
-    const key = `${rule.metric}::${rule.service}`
-    const existing = dedupedRules.get(key)
-    if (!existing || rule.threshold < existing.threshold) {
-      dedupedRules.set(key, rule)
-    }
-  }
-  const deduped = Array.from(dedupedRules.values())
-
-  for (const rule of deduped) {
     const alertId = `alert-rule-${rule.id}`;
     const previous = (await loadAlertState(serviceContext, alertId)) || {};
     try {
@@ -647,7 +636,7 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
   return results;
 };
 
-export const buildAlerts = async (serviceContext: any, params: any) => {
+export const buildAlerts = async (serviceContext: any, params: any, loadedServices?: any[]) => {
   const scope = normalizeMetricsScope(params?.scope);
   const storedAlerts = await loadAllAlertStates(serviceContext);
   const ruleAlerts = storedAlerts
@@ -674,13 +663,19 @@ export const buildAlerts = async (serviceContext: any, params: any) => {
       mobileTitle: `${alert.level === 'critical' ? '严重告警' : alert.level === 'warning' ? '警告告警' : '提示告警'} · ${alert.service}`,
       mobileBody: alert.message,
     }));
-  const servicesResult = await serviceContext.getServicesList({
-    page: 1,
-    pageSize: 200,
-    keyword: params?.keyword,
-    scope,
-  });
-  const services = Array.isArray(servicesResult?.services) ? servicesResult.services : [];
+  const servicesResult = Array.isArray(loadedServices)
+    ? null
+    : await serviceContext.getServicesList({
+        page: 1,
+        pageSize: 200,
+        keyword: params?.keyword,
+        scope,
+      });
+  const services = Array.isArray(loadedServices)
+    ? loadedServices
+    : Array.isArray(servicesResult?.services)
+      ? servicesResult.services
+      : [];
   const startTime = params?.startTime ? Number(params.startTime) : null;
   const endTime = params?.endTime ? Number(params.endTime) : null;
 

@@ -20,6 +20,7 @@ import * as subscriptionApi from './apis/subscription';
 import * as userApi from './apis/user';
 import * as userLayoutApi from './apis/userLayout';
 import * as microAppApi from './apis/microApp';
+import * as creatorSpaceMembershipApi from './apis/creatorSpaceMembership';
 
 /**
  * 数据库服务配置接口
@@ -133,6 +134,16 @@ export class DatabaseService {
             DataBaseTableNames.MicroAppVersion,
             DataBaseTableNames.MicroAppAuditLog,
             DataBaseTableNames.MicroAppInstall,
+            DataBaseTableNames.CreatorSpaceMembership,
+            DataBaseTableNames.TrailsPortfolioCategory,
+            DataBaseTableNames.TrailsSyncChange,
+            DataBaseTableNames.TrailsSyncMutation,
+            DataBaseTableNames.TrailsDurablePortfolio,
+            DataBaseTableNames.TrailsDurableJournal,
+            DataBaseTableNames.TrailsDurableHike,
+            DataBaseTableNames.TrailsDurableGear,
+            DataBaseTableNames.TrailsDurablePackingPlan,
+            DataBaseTableNames.TrailsDurablePackingPlanItem,
           ],
         },
       );
@@ -220,6 +231,16 @@ export class DatabaseService {
             DataBaseTableNames.MicroAppVersion,
             DataBaseTableNames.MicroAppAuditLog,
             DataBaseTableNames.MicroAppInstall,
+            DataBaseTableNames.CreatorSpaceMembership,
+            DataBaseTableNames.TrailsPortfolioCategory,
+            DataBaseTableNames.TrailsSyncChange,
+            DataBaseTableNames.TrailsSyncMutation,
+            DataBaseTableNames.TrailsDurablePortfolio,
+            DataBaseTableNames.TrailsDurableJournal,
+            DataBaseTableNames.TrailsDurableHike,
+            DataBaseTableNames.TrailsDurableGear,
+            DataBaseTableNames.TrailsDurablePackingPlan,
+            DataBaseTableNames.TrailsDurablePackingPlanItem,
           ],
         },
       );
@@ -307,6 +328,10 @@ export class DatabaseService {
 
   get microApp() {
     return microAppApi;
+  }
+
+  get creatorSpaceMembership() {
+    return creatorSpaceMembershipApi;
   }
 
   /**

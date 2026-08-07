@@ -63,6 +63,10 @@ class MainDatabaseConnection {
         DataBaseTableNames.MicroAppVersion,
         DataBaseTableNames.MicroAppAuditLog,
         DataBaseTableNames.MicroAppInstall,
+        DataBaseTableNames.CreatorSpaceMembership,
+        DataBaseTableNames.TrailsPortfolioCategory,
+        DataBaseTableNames.TrailsSyncChange,
+        DataBaseTableNames.TrailsSyncMutation,
       ],
     });
   }

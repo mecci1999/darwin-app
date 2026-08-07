@@ -288,6 +288,9 @@ npm run start:metrics
 
 # 5. 启动订阅服务
 npm run start:subscription
+
+# 6. 启动 Trails（也包含在 npm run start:all 的本地并发启动中）
+npm run start:trails
 ```
 
 ### 开发模式
@@ -397,7 +400,25 @@ ALIPAY_APP_ID=your-alipay-app-id
 WECHAT_APP_ID=your-wechat-app-id
 ```
 
+### Trails 本地耐久元数据
+
+`start:trails` 可独立运行，`start:all` 也会以现有的本地 staggered 并发方式启动它。若要启用现有 Trails v2 的本地 MySQL 元数据仓储，请先应用所需的 Trails MySQL migration，再设置精确值：
+
+```bash
+TRAILS_DURABLE_PERSISTENCE_ENABLED=true
+```
+
+任何其他值均保持关闭。旧的 `TRAILS_DURABLE_CATEGORY_SYNC` 仅在新变量缺失时兼容；两者同时存在且启用值冲突时，服务保持关闭。关闭或初始化失败时，v2 耐久操作固定返回 503，绝不会回退到 v1 内存数据。现有作用域公开分类/catalog 元数据保持可用；该本地可操作性范围只包含已有 MySQL 私有元数据，公共媒体交付明确延期且不受支持，不得配置 `TRAILS_MEDIA_PUBLIC_DELIVERY_BASE`，没有公共媒体 catalog 或公共媒体 URL。公开作品集最多保留不透明的 `coverMediaId`，绝不解析或返回封面图片、衍生物、URL、尺寸、定位符、对象键或能力。COS 摄入/写入、预检、CDN、支付、下载、履约、邮件、评论、天气和行程效果均不启用。
+
 ## 🧪 测试
+
+Darwin Trails 的本地发布门禁不启动 gateway（其正常启动需要 Kafka、Redis 和数据库）。它直接验证现有 action/config/repository seam：可信 gateway metadata、CORS、公开 owner 配置、v2 分类 action 和耐久分类 repository。
+
+```bash
+pnpm run test:local-release
+```
+
+这会串行运行上述 focused Jest 测试（包括受信 Photoshop 九 codec 私有暂存计划的契约和依赖边界）并执行 `pnpm run build`。该暂存计划是存储前、未注册、未发布的服务器私有数据，不能序列化、记录日志或作为 action 响应；真实 MySQL 耐久层契约仍是可选的 Docker 验证：`pnpm run test:trails:mysql`。
 
 ```bash
 # 运行单元测试

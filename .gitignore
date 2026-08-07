@@ -7,5 +7,9 @@ influxdb_config
 influxdb_data
 elasticsearch_data
 redis.conf
-.env.production
+.env*
+!.env.example
+!.env.production.example
 .vscode
+
+docs/ONLINE_OPERATIONS_AND_MAINTENANCE.md

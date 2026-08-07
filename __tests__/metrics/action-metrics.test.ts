@@ -41,6 +41,36 @@ describe('action metrics instrumentation', () => {
     }));
   });
 
+  it('does not emit raw metrics for internal Darwin log capture', async () => {
+    const star = createStar();
+    const actions = instrumentServiceActions(star as any, 'logs', {
+      'v1.capture-darwin': {
+        async handler() {
+          return { status: 200, data: { success: true } };
+        },
+      },
+    });
+
+    await (actions['v1.capture-darwin'] as any).handler({ params: {}, meta: {} });
+
+    expect(star.emit).not.toHaveBeenCalled();
+  });
+
+  it('retains metrics for public logs actions', async () => {
+    const star = createStar();
+    const actions = instrumentServiceActions(star as any, 'logs', {
+      'v1.search': {
+        async handler() {
+          return { status: 200, data: { success: true } };
+        },
+      },
+    });
+
+    await (actions['v1.search'] as any).handler({ params: {}, meta: {} });
+
+    expect(star.emit).toHaveBeenCalledTimes(2);
+  });
+
   it('marks business failure responses as error metrics', async () => {
     const star = createStar();
     const actions = instrumentServiceActions(star as any, 'user', {

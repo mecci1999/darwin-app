@@ -296,9 +296,9 @@ const buildOverviewSummaryContent = async (
   serviceContext: any,
   scope: 'tenant' | 'system',
 ) => {
-  const servicesResult = await serviceContext.getServicesList({ page: 1, pageSize: 100, scope });
+  const servicesResult = await serviceContext.getServicesList({ page: 1, pageSize: 200, scope });
   const services = Array.isArray(servicesResult?.services) ? servicesResult.services : [];
-  const alerts = await buildAlerts(serviceContext, { scope, timeRange });
+  const alerts = await buildAlerts(serviceContext, { scope, timeRange }, services);
   const activeIncidentMap = new Map<string, number>();
   alerts
     .filter((alert: any) => alert.status === 'active')
@@ -372,13 +372,7 @@ const buildOverviewRiskServicesContent = async (
   serviceContext: any,
   scope: 'tenant' | 'system',
 ) => {
-  const firstPage = await serviceContext.getServicesList({ page: 1, pageSize: 1, scope });
-  const total = Number(firstPage?.total || 0);
-  const fullResult = await serviceContext.getServicesList({
-    page: 1,
-    pageSize: Math.max(total, 1),
-    scope,
-  });
+  const fullResult = await serviceContext.getServicesList({ page: 1, pageSize: 200, scope });
   const services = Array.isArray(fullResult?.services) ? fullResult.services : [];
 
   const ranked = [...services].sort((a: any, b: any) => {
@@ -397,7 +391,7 @@ const buildOverviewRiskServicesContent = async (
     ? services.reduce((sum: number, service: any) => sum + Number(service.latency || 0), 0) /
       services.length
     : 0;
-  const alerts = await buildAlerts(serviceContext, { scope });
+  const alerts = await buildAlerts(serviceContext, { scope }, services);
   const activeIncidentMap = new Map<string, number>();
   alerts
     .filter((alert: any) => alert.status === 'active')
