@@ -11,12 +11,12 @@ services:
     image: ${ZOOKEEPER_IMAGE:?ZOOKEEPER_IMAGE is required}
     environment:
       ALLOW_ANONYMOUS_LOGIN: "yes"
-      ZOO_HEAP_SIZE: "96"
+      ZOO_HEAP_SIZE: "128"
     volumes:
       - zookeeper_data:/bitnami/zookeeper
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 128m
+    mem_limit: 160m
     cpus: 0.25
     logging: *default-logging
     healthcheck:
@@ -48,7 +48,7 @@ services:
       - kafka_data:/bitnami/kafka
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 1024m
+    mem_limit: 1536m
     cpus: 0.60
     logging: *default-logging
     healthcheck:
@@ -70,7 +70,7 @@ services:
       - mysql_data:/var/lib/mysql
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 512m
+    mem_limit: 640m
     cpus: 0.20
     logging: *default-logging
     healthcheck:
@@ -114,7 +114,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 384m
-    cpus: 0.35
+    cpus: 0.50
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "influx ping --host http://localhost:8086 >/dev/null 2>&1"]
@@ -134,7 +134,7 @@ services:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 1024m
+    mem_limit: 1280m
     cpus: 0.20
     logging: *default-logging
     ulimits:

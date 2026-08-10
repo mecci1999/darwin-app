@@ -197,7 +197,7 @@ const isProtocolRequestTotalMetricRef = (metricRef: string) =>
 const queryTimeseries = async (params: {
   measurementFilter: string;
   fieldFilter: string;
-  aggregateFn: 'mean' | 'sum' | 'max' | 'last';
+  aggregateFn: 'mean' | 'sum' | 'max' | 'last' | 'p95';
   timeRange: string;
   stop?: string;
   serviceId?: string;
@@ -213,6 +213,10 @@ const queryTimeseries = async (params: {
   const seriesAggregateFn =
     params.seriesAggregateFn ||
     (params.aggregateFn === 'sum' ? 'sum' : params.aggregateFn === 'max' ? 'max' : 'mean');
+  const aggregateWindowFn =
+    params.aggregateFn === 'p95'
+      ? '(tables=<-, column) => tables |> quantile(q: 0.95, column: column, method: "estimate_tdigest")'
+      : params.aggregateFn;
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: ${params.timeRange}${params.stop ? `, stop: ${params.stop}` : ''})
@@ -221,7 +225,7 @@ const queryTimeseries = async (params: {
       |> filter(fn: (r) => ${params.fieldFilter})
       ${params.normalizeFlux || ''}
       ${params.normalizeFlux === RESPONSE_DURATION_MS_NORMALIZATION_FLUX ? RESPONSE_DURATION_COMPLETED_REQUEST_FILTER : ''}
-      |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${params.aggregateFn}, createEmpty: ${params.createEmpty ? 'true' : 'false'})
+      |> aggregateWindow(every: ${params.every || resolveInterval(params.timeRange)}, fn: ${aggregateWindowFn}, createEmpty: ${params.createEmpty ? 'true' : 'false'})
       |> group(columns: ["_time"])
       |> ${seriesAggregateFn}(column: "_value")
       |> sort(columns: ["_time"])
@@ -292,7 +296,13 @@ const queryExactProtocolDurationSeries = async (params: {
     measurementFilter: `r["_measurement"] == "${params.metricRef}"`,
     fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
     aggregateFn:
-      params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+      params.aggregation === 'latest'
+        ? 'last'
+        : params.aggregation === 'max'
+          ? 'max'
+          : params.aggregation === 'p95'
+            ? 'p95'
+            : 'mean',
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
@@ -313,7 +323,13 @@ const queryProtocolDurationSeries = async (params: {
     measurementFilter: RESPONSE_DURATION_MEASUREMENT_FILTER,
     fieldFilter: RESPONSE_DURATION_FIELD_FILTER,
     aggregateFn:
-      params.aggregation === 'latest' ? 'last' : params.aggregation === 'max' ? 'max' : 'mean',
+      params.aggregation === 'latest'
+        ? 'last'
+        : params.aggregation === 'max'
+          ? 'max'
+          : params.aggregation === 'p95'
+            ? 'p95'
+            : 'mean',
     timeRange: params.timeRange,
     stop: params.stop,
     serviceId: params.serviceId,
@@ -756,7 +772,7 @@ const buildBaseCardDataFromQuery = async (
   }
 
   if (metricRef === 'service.response.time') {
-    const aggregateFn = query?.aggregation === 'max' ? 'max' : 'mean';
+    const aggregateFn = query?.aggregation === 'max' ? 'max' : query?.aggregation === 'p95' ? 'p95' : 'mean';
     const series =
       isSingleValueVisualization && query?.aggregation === 'latest'
         ? await queryLatestDurationWithFallback({ timeRange, stop, serviceId, star })

@@ -4,6 +4,7 @@ const LOCAL_AND_TAURI_ORIGINS = [
   'tauri://localhost',
   'http://tauri.localhost',
   'https://tauri.localhost',
+  'https://localhost',
   'asset://localhost',
 ];
 

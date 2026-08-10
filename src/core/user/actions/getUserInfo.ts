@@ -26,7 +26,7 @@ export default function getUserInfo(star: Star & { db: any }) {
             };
           }
 
-          const cacheKey = `user:profile:${userId}:${ctx.meta?.appId === 'starlight' ? 'starlight' : 'default'}`;
+          const cacheKey = `user:profile:${userId}:v2`;
           if (star.cacher?.get) {
             const cached = await star.cacher.get(cacheKey);
             if (cached) {
@@ -72,10 +72,7 @@ export default function getUserInfo(star: Star & { db: any }) {
             updatedAt: userInfo.updatedAt,
           };
 
-          const isStarlight = ctx.meta?.appId === 'starlight';
-          if (isStarlight) {
-            safeUserInfo.isOnboardingCompleted = userInfo.isOnboardingCompleted ?? false;
-          }
+          safeUserInfo.isOnboardingCompleted = userInfo.isOnboardingCompleted ?? false;
 
           if (star.cacher?.set) {
             await star.cacher.set(cacheKey, safeUserInfo, 60);

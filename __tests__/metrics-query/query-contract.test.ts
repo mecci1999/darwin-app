@@ -38,7 +38,7 @@ describe('metrics-query query contract helpers', () => {
     expect(Math.floor(parseRangeSeconds('-1h') / parseRangeSeconds(resolveInterval('-1h')))).toBe(
       24,
     );
-    expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg']);
+    expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg', 'max', 'p95']);
     expect(resolveInterval('-1d')).toBe('1h');
   });
 
@@ -203,11 +203,30 @@ describe('metrics-query query contract helpers', () => {
   it('derives allowed aggregations from metric and visualization together', () => {
     expect(getAllowedAggregationsForMetric('service.qps', 'line')).toEqual(['sum']);
     expect(getAllowedAggregationsForMetric('service.qps', 'number')).toEqual(['latest']);
-    expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg']);
+    expect(getAllowedAggregationsForMetric('service.response.time', 'line')).toEqual(['avg', 'max', 'p95']);
     expect(getAllowedAggregationsForMetric('service.response.time', 'number')).toEqual([
       'latest',
       'avg',
+      'max',
+      'p95',
     ]);
+  });
+
+  it('accepts P95 response-time number queries used by overview summary widgets', () => {
+    const result = validateQuerySpec(
+      {
+        scope: 'system',
+        sourceKind: 'auto',
+        subject: { type: 'system' },
+        metricRef: 'service.response.time',
+        aggregation: 'p95',
+        visualizationHint: 'number',
+      },
+      (value) => (value === 'system' ? 'system' : 'tenant'),
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.issues).toEqual([]);
   });
 
   it('exposes a consistent metric result-kind and visualization matrix', () => {

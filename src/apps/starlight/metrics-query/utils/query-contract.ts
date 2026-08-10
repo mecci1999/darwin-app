@@ -230,6 +230,9 @@ export const getAllowedAggregationsForMetric = (
   }
 
   if (metricRef === 'service.response.time' || metricRef === 'service.error.rate') {
+    if (metricRef === 'service.response.time') {
+      return visualization === 'number' ? ['latest', 'avg', 'max', 'p95'] : ['avg', 'max', 'p95'];
+    }
     return visualization === 'number' ? ['latest', 'avg', 'max'] : ['avg', 'max'];
   }
 

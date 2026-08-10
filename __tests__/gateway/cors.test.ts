@@ -8,6 +8,7 @@ describe('parseCorsAllowedOrigins', () => {
       'tauri://localhost',
       'http://tauri.localhost',
       'https://tauri.localhost',
+      'https://localhost',
       'asset://localhost',
       'https://app.example.com',
       'https://admin.example.com',
@@ -21,6 +22,7 @@ describe('parseCorsAllowedOrigins', () => {
       'tauri://localhost',
       'http://tauri.localhost',
       'https://tauri.localhost',
+      'https://localhost',
       'asset://localhost',
     ]);
   });
@@ -32,6 +34,7 @@ describe('parseCorsAllowedOrigins', () => {
       'tauri://localhost',
       'http://tauri.localhost',
       'https://tauri.localhost',
+      'https://localhost',
       'asset://localhost',
       'https://app.example.com',
     ]);

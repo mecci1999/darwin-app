@@ -27,6 +27,8 @@ x-app: &app-defaults
 services:
   gateway:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: gateway
     command: ["node", "dist/core/gateway/index.js"]
     mem_limit: 224m
     cpus: 0.22
@@ -45,17 +47,26 @@ services:
 
   auth:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: auth
+    image: ${AUTH_IMAGE:?AUTH_IMAGE is required}
     command: ["node", "dist/core/auth/index.js"]
+    mem_limit: 112m
+    cpus: 0.20
     networks: [app_network, auth_egress_network]
 
   user:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: user
     command: ["node", "dist/core/user/index.js"]
     mem_limit: 112m
     cpus: 0.08
 
   file:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: file
     command: ["node", "dist/core/file/index.js"]
     mem_limit: 112m
     cpus: 0.08
@@ -64,52 +75,72 @@ services:
 
   metrics:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: metrics
     command: ["node", "dist/apps/starlight/metrics/index.js"]
     mem_limit: 144m
-    cpus: 0.12
+    cpus: 0.30
 
   metrics-query:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: metrics-query
     command: ["node", "dist/apps/starlight/metrics-query/index.js"]
-    mem_limit: 96m
-    cpus: 0.03
+    mem_limit: 128m
+    cpus: 0.12
 
   metrics-alerts:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: metrics-alerts
     command: ["node", "dist/apps/starlight/metrics-alerts/index.js"]
-    mem_limit: 96m
+    mem_limit: 128m
     cpus: 0.03
 
   metrics-compat:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: metrics-compat
     command: ["node", "dist/apps/starlight/metrics-compat/index.js"]
+    mem_limit: 112m
     cpus: 0.03
 
   logs:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: logs
     command: ["node", "dist/apps/starlight/logs/index.js"]
-    mem_limit: 96m
+    mem_limit: 128m
     cpus: 0.06
 
   video:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: video
     command: ["node", "dist/apps/starlight/video/index.js"]
-    mem_limit: 64m
+    mem_limit: 96m
     cpus: 0.02
 
   subscription:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: subscription
     command: ["node", "dist/apps/starlight/subscription/index.js"]
+    mem_limit: 112m
     cpus: 0.04
 
   micro-app:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: micro-app
     command: ["node", "dist/apps/starlight/micro-app/index.js"]
-    mem_limit: 64m
+    mem_limit: 96m
     cpus: 0.02
 
   trails:
     <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: trails
     command: ["node", "dist/apps/starlight/trails/index.js"]
     mem_limit: 64m
     cpus: 0.02

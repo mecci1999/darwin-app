@@ -23,6 +23,19 @@ const QR_CODE_PREFIX = 'qr_code:';
 const MAX_SCAN_ATTEMPTS = 5; // 同一IP最大尝试次数
 const SCAN_ATTEMPT_WINDOW = 60 * 60; // 1小时窗口期(秒)
 
+const buildQrLoginUserInfo = (userInfo: any) => ({
+  userId: userInfo.userId,
+  nickname: userInfo.nickname,
+  avatar: userInfo.avatar,
+  status: userInfo.status,
+  source: userInfo.source,
+  isAdmin: userInfo.power === 999,
+  timezone: userInfo.timezone,
+  locale: userInfo.locale,
+  lastActiveAt: userInfo.lastActiveAt,
+  isOnboardingCompleted: userInfo.isOnboardingCompleted ?? false,
+});
+
 export default function qrcode(star: Starlight) {
   return {
     /**
@@ -189,11 +202,26 @@ export default function qrcode(star: Starlight) {
             // 获取用户信息
             const userInfoStr = await star.cacher.get(`${QR_CODE_PREFIX}${code}:user`);
             if (userInfoStr) {
-              const userInfo = JSON.parse(userInfoStr);
+              const qrUser = JSON.parse(userInfoStr);
+              const persistedUserInfo = await star.db.user.findUserByUserId(qrUser.userId);
+              if (!persistedUserInfo) {
+                return {
+                  status: 200,
+                  data: {
+                    content: null,
+                    message: '获取用户信息失败',
+                    code: HttpResponseCode.ServiceActionFaild,
+                    success: false,
+                  },
+                };
+              }
+              const userInfo = buildQrLoginUserInfo(persistedUserInfo);
 
               // 生成token
               const token = await (this as any).generateToken({ userId: userInfo.userId });
-              const refreshToken = await (this as any).generateRefreshToken({ userId: userInfo.userId });
+              const refreshToken = await (this as any).generateRefreshToken({
+                userId: userInfo.userId,
+              });
 
               if (token && refreshToken) {
                 // 设置cookies
@@ -363,10 +391,17 @@ export default function qrcode(star: Starlight) {
           // 安全检查：验证设备信息
           if (deviceInfoStr) {
             const deviceInfo = JSON.parse(deviceInfoStr);
-            if (
-              deviceInfo.deviceId !== (ctx.meta as any).req.deviceType ||
-              deviceInfo.deviceType !== (ctx.meta as any).req.deviceType
-            ) {
+            const requestDeviceId = (ctx.meta as any).req.deviceId;
+            const requestDeviceType = (ctx.meta as any).req.deviceType;
+            const deviceIdMismatch =
+              deviceInfo.deviceId && deviceInfo.deviceId !== 'unknown' && requestDeviceId
+                ? deviceInfo.deviceId !== requestDeviceId
+                : false;
+            const deviceTypeMismatch =
+              deviceInfo.deviceType && deviceInfo.deviceType !== 'unknown' && requestDeviceType
+                ? deviceInfo.deviceType !== requestDeviceType
+                : false;
+            if (deviceIdMismatch || deviceTypeMismatch) {
               star.logger?.warn(`二维码扫码确认安全验证失败: 设备不匹配`);
               return {
                 status: 403,
@@ -465,10 +500,17 @@ export default function qrcode(star: Starlight) {
           // 安全检查：验证设备信息
           if (deviceInfoStr) {
             const deviceInfo = JSON.parse(deviceInfoStr);
-            if (
-              deviceInfo.deviceId !== (ctx.meta as any).req.deviceType ||
-              deviceInfo.deviceType !== (ctx.meta as any).req.deviceType
-            ) {
+            const requestDeviceId = (ctx.meta as any).req.deviceId;
+            const requestDeviceType = (ctx.meta as any).req.deviceType;
+            const deviceIdMismatch =
+              deviceInfo.deviceId && deviceInfo.deviceId !== 'unknown' && requestDeviceId
+                ? deviceInfo.deviceId !== requestDeviceId
+                : false;
+            const deviceTypeMismatch =
+              deviceInfo.deviceType && deviceInfo.deviceType !== 'unknown' && requestDeviceType
+                ? deviceInfo.deviceType !== requestDeviceType
+                : false;
+            if (deviceIdMismatch || deviceTypeMismatch) {
               star.logger?.warn(`二维码扫码取消安全验证失败: 设备不匹配`);
               return {
                 status: 403,
