@@ -144,6 +144,9 @@ export class DatabaseService {
             DataBaseTableNames.TrailsDurableGear,
             DataBaseTableNames.TrailsDurablePackingPlan,
             DataBaseTableNames.TrailsDurablePackingPlanItem,
+            DataBaseTableNames.AlertInstance,
+            DataBaseTableNames.AlertEvent,
+            DataBaseTableNames.AlertNotificationDelivery,
           ],
         },
       );
@@ -241,6 +244,9 @@ export class DatabaseService {
             DataBaseTableNames.TrailsDurableGear,
             DataBaseTableNames.TrailsDurablePackingPlan,
             DataBaseTableNames.TrailsDurablePackingPlanItem,
+            DataBaseTableNames.AlertInstance,
+            DataBaseTableNames.AlertEvent,
+            DataBaseTableNames.AlertNotificationDelivery,
           ],
         },
       );

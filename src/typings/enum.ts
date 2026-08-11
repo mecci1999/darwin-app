@@ -71,6 +71,9 @@ export enum DataBaseTableNames {
   TrailsShootingLocation = 'TrailsShootingLocation',
   TrailsShootingLocationMutation = 'TrailsShootingLocationMutation',
   TrailsShootingLocationAudit = 'TrailsShootingLocationAudit',
+  AlertInstance = 'AlertInstance',
+  AlertEvent = 'AlertEvent',
+  AlertNotificationDelivery = 'AlertNotificationDelivery',
 }
 
 /**

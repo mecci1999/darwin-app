@@ -84,7 +84,7 @@ services:
     image: ${REDIS_IMAGE:?REDIS_IMAGE is required}
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    command: ["sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --maxmemory 72mb --maxmemory-policy allkeys-lru"]
+    command: ["sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --maxmemory 72mb --maxmemory-policy volatile-lru"]
     volumes:
       - redis_data:/data
     networks: [app_network]

@@ -5,6 +5,7 @@ import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import alerts, { evaluateAlertRules } from '../metrics/actions/alerts';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
+import { AlertOutboxRepository, getAlertOutboxRepository, PendingAlertDelivery } from './alert-outbox';
 import { instrumentServiceActions } from '../metrics/utils/action-metrics';
 import '../../../utils/loadEnv';
 import {
@@ -23,6 +24,47 @@ import {
 
 const APP_NAME = 'metrics-alerts';
 const ALERT_EVALUATION_INTERVAL_MS = 60 * 1000;
+const DELIVERY_WORKER_INTERVAL_MS = 5_000;
+const DELIVERY_BATCH_SIZE = 10;
+const DELIVERY_TIMEOUT_MS = 10_000;
+const EVALUATION_LEASE_SECONDS = 55;
+
+type RedisLeaseClient = { set: (key: string, value: string, mode: 'EX', ttl: string, condition: 'NX') => Promise<'OK' | null> };
+type RedisLeaseCacher = { client?: RedisLeaseClient; redis?: RedisLeaseClient; setIfNotExists?: (key: string, value: string, ttl: number) => Promise<boolean> };
+type MetricsAlertsLifecycleService = {
+  redis?: RedisLeaseCacher;
+  alertOutboxRepository?: AlertOutboxRepository;
+  alertEvaluationTimer?: NodeJS.Timeout;
+  alertDeliveryTimer?: NodeJS.Timeout;
+  settings: { influxdb: { url: string; token: string; org: string; bucket: string } };
+  logger: { info: (message: string) => void; warn: (message: string, error?: unknown) => void; error: (message: string, error?: unknown) => void };
+};
+
+const acquireEvaluationLease = async (service: unknown): Promise<boolean> => {
+  const redis = (service as { redis?: RedisLeaseCacher }).redis;
+  if (!redis) return true;
+  const token = `${process.pid}-${Date.now()}`;
+  if (typeof redis.setIfNotExists === 'function') return redis.setIfNotExists('metrics:alerts:evaluation:lease', token, EVALUATION_LEASE_SECONDS);
+  const client = redis.client || redis.redis;
+  if (!client) return true;
+  return (await client.set('metrics:alerts:evaluation:lease', token, 'EX', String(EVALUATION_LEASE_SECONDS), 'NX')) === 'OK';
+};
+
+const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('InApp delivery timed out')), timeoutMs); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+};
+
+const deliverInApp = async (star: Starlight, delivery: PendingAlertDelivery) => {
+  if (delivery.channel !== 'InApp') throw new Error(`No delivery transport configured for ${delivery.channel}`);
+  if (typeof star.call !== 'function') throw new Error('Gateway WebSocket action is unavailable');
+  await withTimeout(star.call('gateway.websocket.trigger', { eventName: 'alert', data: { ...delivery.payload, tenantId: delivery.tenantId, alertId: delivery.alertId, target: delivery.target } }), DELIVERY_TIMEOUT_MS);
+};
 
 function createMetricsAlertsService() {
   const star = new Star({
@@ -100,28 +142,59 @@ function createMetricsAlertsService() {
       },
     },
     async created() {
-      this.logger.info('Metrics alerts service created');
-      (this as any).redis = (star as any).cacher;
+      const service = this as unknown as MetricsAlertsLifecycleService;
+      service.logger.info('Metrics alerts service created');
+      service.redis = star.cacher as unknown as RedisLeaseCacher;
     },
     async started() {
-      await InfluxDBHandler.initialize(this.settings.influxdb, star);
+      const service = this as unknown as MetricsAlertsLifecycleService;
+      await InfluxDBHandler.initialize(service.settings.influxdb, star);
+      service.alertOutboxRepository = await getAlertOutboxRepository();
+      let evaluationInFlight = false;
+      let deliveryInFlight = false;
       const runEvaluation = async () => {
+        if (evaluationInFlight) return;
+        evaluationInFlight = true;
         try {
-          const results = await evaluateAlertRules(this as any, star);
+          if (!(await acquireEvaluationLease(service))) return;
+          await evaluateAlertRules(service, star);
         } catch (error) {
-          this.logger.error('[AlertEval] Metrics alert rule evaluation failed:', error);
+          service.logger.error('[AlertEval] Metrics alert rule evaluation failed:', error);
+        } finally {
+          evaluationInFlight = false;
         }
       };
+      const runDeliveryWorker = async () => {
+        if (deliveryInFlight) return;
+        deliveryInFlight = true;
+        try {
+          const repository = service.alertOutboxRepository;
+          if (!repository) throw new Error('Alert outbox repository is not initialized');
+          const claimed = await repository.claimPendingDeliveries(`${APP_NAME}-${process.pid}`, DELIVERY_BATCH_SIZE);
+          for (const delivery of claimed) {
+            try { await deliverInApp(star, delivery); await repository.completeDelivery(delivery); }
+            catch (error) { await repository.failDelivery(delivery, error); service.logger.warn(`[AlertDelivery] delivery=${delivery.deliveryId} retry scheduled`, error); }
+          }
+        } catch (error) { service.logger.error('[AlertDelivery] worker run failed:', error); }
+        finally { deliveryInFlight = false; }
+      };
       await runEvaluation();
-      (this as any).alertEvaluationTimer = setInterval(runEvaluation, ALERT_EVALUATION_INTERVAL_MS);
-      this.logger.info('Metrics alerts service started successfully');
+      await runDeliveryWorker();
+      service.alertEvaluationTimer = setInterval(runEvaluation, ALERT_EVALUATION_INTERVAL_MS);
+      service.alertDeliveryTimer = setInterval(runDeliveryWorker, DELIVERY_WORKER_INTERVAL_MS);
+      service.logger.info('Metrics alerts service started successfully');
     },
     async stopped() {
-      if ((this as any).alertEvaluationTimer) {
-        clearInterval((this as any).alertEvaluationTimer);
-        (this as any).alertEvaluationTimer = null;
+      const service = this as unknown as MetricsAlertsLifecycleService;
+      if (service.alertEvaluationTimer) {
+        clearInterval(service.alertEvaluationTimer);
+        service.alertEvaluationTimer = undefined;
       }
-      this.logger.info('Metrics alerts service stopped successfully');
+      if (service.alertDeliveryTimer) {
+        clearInterval(service.alertDeliveryTimer);
+        service.alertDeliveryTimer = undefined;
+      }
+      service.logger.info('Metrics alerts service stopped successfully');
     },
     methods: {
       async getServicesList(params: {

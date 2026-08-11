@@ -39,6 +39,7 @@ import {
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
 import { waitForRegisteredService } from './service-discovery';
+import { remapTrailsRoute } from 'apps/starlight/trails/shards';
 
 const parsePositiveTimeout = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -103,6 +104,15 @@ const INTERNAL_ONLY_SERVICES = new Set([
   'metrics-compat',
   'metrics-query',
   'subscription-billing',
+  'trails-community',
+  'trails-content',
+  'trails-workspace',
+  'trails-durable-content',
+  'trails-durable-media',
+  'trails-durable-workspace',
+  'trails-durable-trips',
+  'trails-durable-site',
+  'trails-durable-site-public',
 ]);
 
 const INTERNAL_ONLY_ACTIONS = new Set(['logs.v1.capture-darwin']);
@@ -316,6 +326,25 @@ const remapSubscriptionRoute = (rawService: string, rawAction: string, rawParams
   return { service, action, params };
 };
 
+const remapGatewayRoute = (
+  rawService: string,
+  rawVersion: string,
+  rawAction: string,
+  rawParams: any = {},
+) => {
+  const remappedMetrics = remapMetricsRoute(rawService, rawVersion, rawAction, rawParams);
+  const remappedSubscription = remapSubscriptionRoute(
+    remappedMetrics.service,
+    remappedMetrics.action || '',
+    remappedMetrics.params || {},
+  );
+  const trailsService = remapTrailsRoute(rawService, rawVersion, rawAction);
+  return {
+    ...remappedSubscription,
+    service: trailsService === rawService ? remappedSubscription.service : trailsService,
+  };
+};
+
 const normalizeGatewayRouteParams = (req: IncomingRequest) => {
   const originalUrl = String(req.originalUrl || '');
   const rawPath = originalUrl.split('?')[0] || '';
@@ -508,16 +537,11 @@ async function initializeGatewayService() {
             const actions = star.registry?.actions.list() || [];
             const normalizedVersion =
               routeParams.version === '1' ? 'v1' : String(routeParams.version || '');
-            const remappedMetrics = remapMetricsRoute(
+            const remapped = remapGatewayRoute(
               routeParams.service,
               routeParams.version,
               routeParams.action || '',
               routeParams || {},
-            );
-            const remapped = remapSubscriptionRoute(
-              remappedMetrics.service,
-              remappedMetrics.action || '',
-              remappedMetrics.params || {},
             );
             const actionName = remapped.action
               ? shouldPreserveSlashActionPath(remapped.service)
@@ -629,16 +653,11 @@ async function initializeGatewayService() {
             const actions = star.registry?.actions.list() || [];
             const normalizedVersion =
               routeParams.version === '1' ? 'v1' : String(routeParams.version || '');
-            const remappedMetrics = remapMetricsRoute(
+            const remapped = remapGatewayRoute(
               routeParams.service,
               routeParams.version,
               routeParams.action || '',
               routeParams || {},
-            );
-            const remapped = remapSubscriptionRoute(
-              remappedMetrics.service,
-              remappedMetrics.action || '',
-              remappedMetrics.params || {},
             );
             const actionName = remapped.action
               ? shouldPreserveSlashActionPath(remapped.service)
@@ -744,12 +763,7 @@ async function initializeGatewayService() {
           let params = ctx.params || {};
           version = version === '1' ? 'v1' : version;
 
-          const remappedMetrics = remapMetricsRoute(service, version, action || '', params);
-          const remapped = remapSubscriptionRoute(
-            remappedMetrics.service,
-            remappedMetrics.action || '',
-            remappedMetrics.params || {},
-          );
+          const remapped = remapGatewayRoute(service, version, action || '', params);
           service = remapped.service;
           action = remapped.action;
           params = remapped.params;

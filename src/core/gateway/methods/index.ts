@@ -5,6 +5,7 @@ import { Context, Star } from 'node-universe';
 import { HttpResponseCode } from 'typings';
 import url from 'url';
 import WebSocket from 'ws';
+import { canReceiveGatewayAlert, isGatewayAlertPayload } from './alert-delivery';
 import { isCurrentWebSocketClient } from './websocket-client-lifecycle';
 
 // WebSocket 相关变量
@@ -45,6 +46,8 @@ interface WebSocketClient {
   isAuthenticated: boolean;
   token?: string; // 添加token字段
   user?: any;
+  userId?: string;
+  tenantId?: string;
 }
 
 const createWebSocketManager = (
@@ -100,6 +103,9 @@ const createWebSocketManager = (
       const ctx = { meta: {} } as Context;
       await authorizeFn(ctx, token);
       client.user = (ctx.meta as any).user;
+      client.userId = String(client.user?.userId || client.user?.id || '');
+      client.tenantId = String((ctx.meta as any).tenantId || '');
+      if (!client.userId || !client.tenantId) throw new UnAuthorizedError();
       client.isAuthenticated = true;
 
       sendToClient(client, {
@@ -107,13 +113,13 @@ const createWebSocketManager = (
         data: {
           message: '认证成功',
           user: {
-            id: client.user.id,
+            id: client.userId,
             username: client.user.username,
           },
         },
       });
 
-      star.logger?.info(`Client ${client.id} authenticated as user ${client.user.id}`);
+      star.logger?.info(`Client ${client.id} authenticated as user ${client.userId}`);
     } catch (error) {
       star.logger?.error(`Client ${client.id} authentication error:`, error);
       client.isAuthenticated = false;
@@ -243,6 +249,21 @@ const createWebSocketManager = (
     };
     star.localBus?.on('logs', logsListener);
     eventListeners.set('logs', logsListener);
+
+    const alertListener = (alert: unknown) => {
+      if (!isGatewayAlertPayload(alert)) {
+        star.logger?.warn('Dropped malformed or unscoped WebSocket alert event');
+        return;
+      }
+
+      let count = 0;
+      wsClients.forEach((client) => {
+        if (canReceiveGatewayAlert(client, alert) && sendToClient(client, { type: 'alert', data: alert })) count++;
+      });
+      star.logger?.debug(`Delivered alert ${alert.alertId} to ${count} authenticated scoped clients`);
+    };
+    star.localBus?.on('alert', alertListener);
+    eventListeners.set('alert', alertListener);
   };
 
   const initWebSocketServer = () => {

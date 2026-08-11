@@ -3,6 +3,7 @@ import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { queryAllUsers } from 'db/mysql/apis/user';
 import { normalizeMetricsScope } from '../utils/system-telemetry';
 import { InfluxDBHandler } from '../utils/influxdb-handler';
+import { AlertOutboxRepository, DeliveryChannel } from '../../metrics-alerts/alert-outbox';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
   RESPONSE_DURATION_FIELD_FILTER,
@@ -33,7 +34,7 @@ type StoredAlertRule = {
   updatedAt: number;
 };
 
-type AlertEvaluationState = {
+type AlertEvaluationState = Record<string, unknown> & {
   id: string;
   ruleId: string;
   source: 'rule';
@@ -67,7 +68,7 @@ type AlertNotification = {
   ruleId: string;
   type: AlertLevel;
   channel: string;
-  status: 'sent' | 'delivered' | 'failed';
+  status: 'pending' | 'processing' | 'delivered' | 'retrying' | 'failed';
   target: string;
   content: string;
   sentAt: string;
@@ -162,18 +163,18 @@ const normalizeNotificationChannels = (rule: any): string[] => {
     ? rule.channels
     : Array.isArray(rule.notificationChannels)
       ? rule.notificationChannels
-      : ['Email'];
+       : ['InApp'];
   const normalizedChannels = channels.map(normalizeNotificationChannel).filter(Boolean) as string[];
   return normalizedChannels.length
     ? (Array.from(new Set<string>(normalizedChannels)) as string[])
-    : ['Email'];
+    : ['InApp'];
 };
 
 const resolveNotificationTarget = (channel: string) => {
   const normalizedChannel = normalizeNotificationChannel(channel);
-  if (normalizedChannel === 'Webhook') return 'https://hooks.starlight.local/alerts';
+  if (normalizedChannel === 'Webhook') return '';
   if (normalizedChannel === 'InApp') return 'in-app';
-  return 'ops@starlight.local';
+  return '';
 };
 
 const levelFromHealth = (health: string) => {
@@ -190,6 +191,15 @@ const statusFromHealth = (health: string) => {
 
 const getRedisStore = (serviceContext: any) =>
   serviceContext.redis?.client || serviceContext.redis?.redis || serviceContext.redis;
+
+const getDurableRedisStore = (serviceContext: any) =>
+  serviceContext.redis?.client || serviceContext.redis?.redis || null;
+
+const getDurableRedisKey = (serviceContext: any, key: string) => {
+  const prefix = String(serviceContext.redis?.prefix || '');
+  if (!prefix) return key;
+  return `${prefix}${prefix.endsWith(':') ? '-' : ':'}${key}`;
+};
 
 const getRedisKeys = async (serviceContext: any, pattern: string): Promise<string[]> => {
   const logicalPrefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
@@ -279,13 +289,69 @@ const saveNotificationState = async (serviceContext: any, notificationId: string
 };
 
 const loadAlertRules = async (serviceContext: any) => {
+  const durableStore = getDurableRedisStore(serviceContext);
+  if (durableStore && typeof durableStore.scan === 'function') {
+    const durablePrefix = getDurableRedisKey(serviceContext, ALERT_RULE_PREFIX);
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const result = await durableStore.scan(cursor, 'MATCH', `${durablePrefix}*`, 'COUNT', 100);
+      cursor = String(result?.[0] || '0');
+      if (Array.isArray(result?.[1])) keys.push(...result[1]);
+    } while (cursor !== '0');
+
+    const values = await Promise.all(
+      keys.map(async (key) => {
+        const raw = await durableStore.get(key);
+        if (!raw) return null;
+        return typeof raw === 'string' ? JSON.parse(raw) : raw;
+      }),
+    );
+    return values.filter(Boolean);
+  }
+
   const keys = await getRedisKeys(serviceContext, `${ALERT_RULE_PREFIX}*`);
   const values = await Promise.all(keys.map((key: string) => redisGetJson(serviceContext, key)));
   return values.filter(Boolean);
 };
 
+const loadAlertRule = async (serviceContext: any, ruleId: string) => {
+  const durableStore = getDurableRedisStore(serviceContext);
+  if (durableStore && typeof durableStore.get === 'function') {
+    try {
+      const raw = await durableStore.get(getDurableRedisKey(serviceContext, `${ALERT_RULE_PREFIX}${ruleId}`));
+      if (raw) return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      return null;
+    }
+  }
+  return redisGetJson(serviceContext, `${ALERT_RULE_PREFIX}${ruleId}`);
+};
+
 const saveAlertRule = async (serviceContext: any, rule: any) => {
+  const durableStore = getDurableRedisStore(serviceContext);
+  if (durableStore && typeof durableStore.set === 'function') {
+    try {
+      await durableStore.set(getDurableRedisKey(serviceContext, `${ALERT_RULE_PREFIX}${rule.id}`), JSON.stringify(rule));
+      return true;
+    } catch {
+      return false;
+    }
+  }
   return redisSetJson(serviceContext, `${ALERT_RULE_PREFIX}${rule.id}`, rule);
+};
+
+const deleteAlertRule = async (serviceContext: any, ruleId: string) => {
+  const durableStore = getDurableRedisStore(serviceContext);
+  if (durableStore && typeof durableStore.del === 'function') {
+    try {
+      await durableStore.del(getDurableRedisKey(serviceContext, `${ALERT_RULE_PREFIX}${ruleId}`));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return redisDelete(serviceContext, `${ALERT_RULE_PREFIX}${ruleId}`);
 };
 
 const normalizeAlertRule = (rule: any): StoredAlertRule => ({
@@ -492,7 +558,7 @@ const createNotificationPayloads = (
     ruleId: alert.ruleId,
     type: alert.level,
     channel,
-    status: 'sent',
+    status: 'pending',
     target: resolveNotificationTarget(channel),
     content: alert.message,
     sentAt: new Date(now).toISOString(),
@@ -508,6 +574,7 @@ const createNotificationPayloads = (
   }));
 
 export const evaluateAlertRules = async (serviceContext: any, star: Starlight) => {
+  const tenantId = String(serviceContext.tenantId || serviceContext.meta?.tenantId || '').trim();
   const rules = await loadNormalizedAlertRules(serviceContext);
   const now = Date.now();
   const results: AlertEvaluationState[] = [];
@@ -573,57 +640,46 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
         nextAlert.status = 'suppressed';
       }
 
-      const stateSaved = await saveAlertState(serviceContext, alertId, nextAlert);
-      if (!stateSaved) {
-        star.logger?.warn(`[AlertEval] rule=${rule.id} saveAlertState FAILED (Redis write error)`);
-      }
+       const repository = serviceContext.alertOutboxRepository as AlertOutboxRepository | undefined;
+       const shouldQueueNotification = nextAlert.status === 'active' &&
+         (!previous.lastNotificationAt || now - Number(previous.lastNotificationAt) >= ALERT_NOTIFICATION_COOLDOWN_MS);
+       if (repository && !shouldQueueNotification) {
+         await repository.saveInstance({
+           tenantId: String(serviceContext.tenantId || 'default'),
+           alertId,
+           ruleId: rule.id,
+           status: nextAlert.status,
+           payload: nextAlert,
+           lastNotificationAt: previous.lastNotificationAt ? Number(previous.lastNotificationAt) : undefined,
+         });
+         const stateSaved = await saveAlertState(serviceContext, alertId, nextAlert);
+         if (!stateSaved) star.logger?.warn(`[AlertEval] rule=${rule.id} Redis state projection failed`);
+       }
+       if (!repository) {
+         const stateSaved = await saveAlertState(serviceContext, alertId, nextAlert);
+         if (!stateSaved) star.logger?.warn(`[AlertEval] rule=${rule.id} saveAlertState FAILED (Redis write error)`);
+       }
 
-      const cooldownRemaining =
-        previous.lastNotificationAt
-          ? ALERT_NOTIFICATION_COOLDOWN_MS - (now - Number(previous.lastNotificationAt))
-          : 0;
-      if (
-        nextAlert.status === 'active' &&
-        (!previous.lastNotificationAt ||
-          now - Number(previous.lastNotificationAt) >= ALERT_NOTIFICATION_COOLDOWN_MS)
-      ) {
-        const notifications = createNotificationPayloads(nextAlert, now);
-        const notifResults = await Promise.all(
-          notifications.map((notification) =>
-            saveNotificationState(serviceContext, notification.id, notification),
-          ),
-        );
-        const failedCount = notifResults.filter((ok) => !ok).length;
-        star.logger?.info(
-          `[AlertEval] rule=${rule.id} NOTIFICATIONS created=${notifications.length} saved=${notifications.length - failedCount} failed=${failedCount} channels=[${notifications.map((n) => n.channel).join(', ')}]`,
-        );
-        await saveAlertState(serviceContext, alertId, { ...nextAlert, lastNotificationAt: now });
-
-        // Push real-time notification via WebSocket for InApp delivery
-        try {
-          if (typeof star.call === 'function') {
-            await star.call('gateway.websocket.trigger', {
-              eventName: 'alert',
-              data: {
-                ruleId: rule.id,
-                alertId,
-                name: rule.name || `${nextAlert.service} ${nextAlert.metric} ${nextAlert.operator} ${nextAlert.threshold}`,
-                level: nextAlert.level,
-                service: nextAlert.service,
-                metric: nextAlert.metric,
-                value: nextAlert.value,
-                threshold: nextAlert.threshold,
-                operator: nextAlert.operator,
-                unit: nextAlert.unit,
-                status: nextAlert.status,
-                message: nextAlert.message,
-                time: nextAlert.time,
-              },
-            })
-          }
-          } catch (err) {
-          star.logger?.warn(`[AlertEval] rule=${rule.id} WebSocket push failed:`, err)
+       if (shouldQueueNotification) {
+        if (repository) {
+          const created = await repository.saveInstanceAndCreateNotificationEvent({
+            tenantId: String(serviceContext.tenantId || 'default'),
+            alertId,
+            ruleId: rule.id,
+            status: nextAlert.status,
+            payload: nextAlert,
+            lastNotificationAt: now,
+            eventKey: `${rule.id}:${Math.floor(now / ALERT_NOTIFICATION_COOLDOWN_MS)}`,
+            channels: [{ channel: 'InApp', target: 'in-app' }],
+          });
+          await saveAlertState(serviceContext, alertId, { ...nextAlert, lastNotificationAt: now });
+          star.logger?.info(`[AlertEval] rule=${rule.id} durable InApp delivery event ${created ? 'created' : 'already exists'}`);
+        } else {
+          const notifications = createNotificationPayloads(nextAlert, now).filter(notification => notification.channel === 'InApp');
+          await Promise.all(notifications.map(notification => saveNotificationState(serviceContext, notification.id, notification)));
+          await saveAlertState(serviceContext, alertId, { ...nextAlert, lastNotificationAt: now });
         }
+
       } else if (nextAlert.status === 'active') {
       }
 
@@ -754,7 +810,7 @@ const buildAlertRules = async (serviceContext: any, params: any) => {
               ? 'critical'
               : 'warning',
           enabled: true,
-          channels: ['Email', 'Webhook'],
+           channels: ['InApp'],
           updatedAt: Date.now(),
         }),
       ),
@@ -781,7 +837,10 @@ export const buildNotifications = async (serviceContext: any, params: any) => {
     startTime: params?.startTime ? Number(params.startTime) : null,
     endTime: params?.endTime ? Number(params.endTime) : null,
   };
-  const storedNotifications = await loadAllNotificationStates(serviceContext);
+  const repository = serviceContext.alertOutboxRepository as AlertOutboxRepository | undefined;
+  const storedNotifications = repository
+    ? await repository.listNotifications(200)
+    : await loadAllNotificationStates(serviceContext);
   return storedNotifications
     .filter((notification: any) => notification?.alertId)
     .filter((notification: any) => {
@@ -809,7 +868,10 @@ export const buildNotifications = async (serviceContext: any, params: any) => {
 const alerts = (star: Starlight) => ({
   'internal.evaluate-rules': {
     async handler(ctx: Context): Promise<any> {
-      const content = await evaluateAlertRules(this as any, star);
+      const content = await evaluateAlertRules(
+        Object.assign(Object.create(this), { tenantId: String(ctx.meta?.tenantId || '') }),
+        star,
+      );
       return { evaluated: content.length, items: content };
     },
   },
@@ -965,8 +1027,7 @@ const alerts = (star: Starlight) => ({
       const updated: any[] = [];
 
       for (const id of ids) {
-        const key = `${ALERT_RULE_PREFIX}${id}`;
-        const prev = (await redisGetJson(this as any, key)) || {};
+        const prev = (await loadAlertRule(this as any, id)) || {};
         const next = { ...prev, enabled, updatedAt: Date.now() };
         const success = await saveAlertRule(this as any, next);
         if (success) updated.push(next);
@@ -1029,8 +1090,7 @@ const alerts = (star: Starlight) => ({
     metadata: { auth: true },
     params: { id: { type: 'string', required: true } },
     async handler(ctx: Context): Promise<HttpResponseItem> {
-      const key = `${ALERT_RULE_PREFIX}${ctx.params.id}`;
-      const prev = (await redisGetJson(this as any, key)) || {};
+      const prev = (await loadAlertRule(this as any, ctx.params.id)) || {};
       const next = { ...prev, ...(ctx.params || {}), updatedAt: Date.now() };
       const success = await saveAlertRule(this as any, next);
       if (!success) {
@@ -1059,7 +1119,7 @@ const alerts = (star: Starlight) => ({
     metadata: { auth: true },
     params: { id: { type: 'string', required: true } },
     async handler(ctx: Context): Promise<HttpResponseItem> {
-      const success = await redisDelete(this as any, `${ALERT_RULE_PREFIX}${ctx.params.id}`);
+      const success = await deleteAlertRule(this as any, ctx.params.id);
       if (!success) {
         return {
           status: 500,
@@ -1225,10 +1285,10 @@ const alerts = (star: Starlight) => ({
     metadata: { auth: true },
     params: { id: { type: 'string', required: true } },
     async handler(ctx: Context): Promise<HttpResponseItem> {
-      const success = await saveNotificationState(this as any, ctx.params.id, {
-        status: 'sent',
-        updatedAt: Date.now(),
-      });
+      const repository = (this as { alertOutboxRepository?: AlertOutboxRepository }).alertOutboxRepository;
+      const success = repository
+        ? await repository.requeueDelivery(ctx.params.id)
+        : await saveNotificationState(this as any, ctx.params.id, { status: 'pending', updatedAt: Date.now() });
       if (!success) {
         return {
           status: 500,
@@ -1244,8 +1304,8 @@ const alerts = (star: Starlight) => ({
         status: 200,
         data: {
           code: HttpResponseCode.Success,
-          content: { success: true, id: ctx.params.id, status: 'sent' },
-          message: '通知已重新发送',
+            content: { success: true, id: ctx.params.id, status: 'pending' },
+            message: '通知已重新排队发送',
           success: true,
         },
       };

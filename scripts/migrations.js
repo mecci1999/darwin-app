@@ -37,6 +37,7 @@ const TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID = '034-trails-durable-analy
 const TRAILS_SHOOTING_LOCATION_MIGRATION_ID = '035-trails-shooting-location-v2';
 const TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID = '036-trails-content-metrics-aggregates-v1';
 const TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID = '037-trails-durable-journal-pinning-v1';
+const ALERT_DURABLE_OUTBOX_MIGRATION_ID = '038-alert-durable-outbox-v1';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -647,6 +648,27 @@ const migrations = [
       await ensureIndex(queryInterface, 'TrailsDurableJournal', ['tenant_id', 'owner_user_id', 'visibility', 'lifecycle', 'is_pinned', 'published_at', 'id'], { name: 'trails_durable_journal_public_pinned' });
     },
   },
+  {
+    id: ALERT_DURABLE_OUTBOX_MIGRATION_ID,
+    // MySQL DDL implicitly commits, so every table and index operation is independently retry-safe.
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'AlertInstance', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, alert_id: { type: DataTypes.STRING(192), allowNull: false, primaryKey: true }, rule_id: { type: DataTypes.STRING(160), allowNull: false }, status: { type: DataTypes.ENUM('active', 'resolved', 'suppressed', 'pending'), allowNull: false }, payload_json: { type: DataTypes.TEXT('long'), allowNull: false }, last_notification_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'AlertInstance', ['tenant_id', 'status', 'updated_at'], { name: 'alert_instance_tenant_status_updated' });
+      await ensureTable(queryInterface, 'AlertEvent', {
+        event_id: { type: DataTypes.STRING(192), allowNull: false, primaryKey: true }, tenant_id: { type: DataTypes.STRING(64), allowNull: false }, alert_id: { type: DataTypes.STRING(192), allowNull: false }, event_key: { type: DataTypes.STRING(255), allowNull: false }, event_type: { type: DataTypes.ENUM('notification-requested'), allowNull: false }, payload_json: { type: DataTypes.TEXT('long'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'AlertEvent', ['tenant_id', 'alert_id', 'event_key'], { unique: true, name: 'alert_event_idempotency' });
+      await ensureTable(queryInterface, 'AlertNotificationDelivery', {
+        delivery_id: { type: DataTypes.STRING(192), allowNull: false, primaryKey: true }, tenant_id: { type: DataTypes.STRING(64), allowNull: false }, event_id: { type: DataTypes.STRING(192), allowNull: false }, alert_id: { type: DataTypes.STRING(192), allowNull: false }, channel: { type: DataTypes.ENUM('InApp', 'Email', 'Webhook'), allowNull: false }, status: { type: DataTypes.ENUM('pending', 'processing', 'delivered', 'retrying', 'failed'), allowNull: false }, target_json: { type: DataTypes.TEXT, allowNull: false }, payload_json: { type: DataTypes.TEXT('long'), allowNull: false }, attempts: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 }, next_attempt_at: { type: DataTypes.DATE, allowNull: false }, lease_token: { type: DataTypes.STRING(160), allowNull: true }, lease_expires_at: { type: DataTypes.DATE, allowNull: true }, last_error: { type: DataTypes.TEXT, allowNull: true }, delivered_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'AlertNotificationDelivery', ['status', 'next_attempt_at', 'lease_expires_at'], { name: 'alert_delivery_claim' });
+      await ensureIndex(queryInterface, 'AlertNotificationDelivery', ['event_id', 'channel'], { unique: true, name: 'alert_delivery_event_channel' });
+    },
+  },
 ];
 
 // Numeric migration IDs are the deployment ordering authority; keep append-only migrations ordered even when their definitions are grouped by resource.
@@ -700,6 +722,7 @@ module.exports = {
   TRAILS_SHOOTING_LOCATION_MIGRATION_ID,
   TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID,
   TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID,
+  ALERT_DURABLE_OUTBOX_MIGRATION_ID,
   BASELINE_MIGRATION_ID,
   getModelTableNames,
   getProductionModels,

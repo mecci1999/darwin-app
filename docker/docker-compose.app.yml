@@ -137,13 +137,23 @@ services:
     mem_limit: 96m
     cpus: 0.02
 
-  trails:
+  trails-v1:
     <<: *app-defaults
     environment:
-      NODE_INSTANCE_ID: trails
+      NODE_INSTANCE_ID: trails-v1
+      TRAILS_RUNTIME: v1
     command: ["node", "dist/apps/starlight/trails/index.js"]
-    mem_limit: 64m
-    cpus: 0.02
+    mem_limit: 96m
+    cpus: 0.04
+
+  trails-v2:
+    <<: *app-defaults
+    environment:
+      NODE_INSTANCE_ID: trails-v2
+      TRAILS_RUNTIME: v2
+    command: ["node", "dist/apps/starlight/trails/index.js"]
+    mem_limit: 160m
+    cpus: 0.08
 
 networks:
   app_network:

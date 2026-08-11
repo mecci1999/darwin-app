@@ -45,6 +45,27 @@ const createRedisMock = () => {
       const prefix = pattern.replace('*', '');
       return Array.from(store.keys()).filter((key) => key.startsWith(prefix));
     },
+    async scan(cursor: string, _match: string, pattern: string) {
+      const prefix = pattern.replace('*', '');
+      return [cursor === '0' ? '0' : cursor, Array.from(store.keys()).filter((key) => key.startsWith(prefix))];
+    },
+  };
+};
+
+const createDurableRedisContext = () => {
+  const client = createRedisMock();
+  return {
+    redis: {
+      client,
+      prefix: 'metrics-alerts:',
+      async get(key: string) {
+        return client.get(`metrics-alerts:-${key}`);
+      },
+      async set(key: string, value: unknown) {
+        return client.set(`metrics-alerts:-${key}`, value);
+      },
+    },
+    client,
   };
 };
 
@@ -99,7 +120,11 @@ describe('metrics alert evaluation', () => {
     const star = {
       logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
     } as any;
-    const results = await evaluateAlertRules({ redis }, star);
+    const outbox = {
+      saveInstance: jest.fn(async () => undefined),
+      saveInstanceAndCreateNotificationEvent: jest.fn(async () => true),
+    };
+    const results = await evaluateAlertRules({ redis, tenantId: 'tenant-a', alertOutboxRepository: outbox }, star);
 
     expect(results).toHaveLength(2);
     expect(results.map((item) => item.status)).toEqual(['active', 'active']);
@@ -112,27 +137,12 @@ describe('metrics alert evaluation', () => {
       value: 95,
       threshold: 90,
     });
-    const notificationKeys = await redis.keys('metrics:alerts:notification:*');
-    expect(notificationKeys).toHaveLength(4);
-    const notifications = await Promise.all(
-      notificationKeys.map(async (key) => parseStoredValue(await redis.get(key))),
-    );
-    expect(notifications.map((item) => item.type).sort()).toEqual([
-      'critical',
-      'critical',
-      'critical',
-      'warning',
-    ]);
-    expect(notifications.map((item) => item.channel).sort()).toEqual([
-      'Email',
-      'InApp',
-      'InApp',
-      'Webhook',
-    ]);
-    expect(notifications.find((item) => item.channel === 'Webhook')?.target).toBe(
-      'https://hooks.starlight.local/alerts',
-    );
-    expect(notifications.every((item) => item.mobileTitle && item.mobileBody)).toBe(true);
+    expect(await redis.keys('metrics:alerts:notification:*')).toEqual([]);
+    expect(outbox.saveInstanceAndCreateNotificationEvent).toHaveBeenCalledTimes(2);
+    expect(outbox.saveInstanceAndCreateNotificationEvent).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 'tenant-a',
+      channels: [{ channel: 'InApp', target: 'in-app' }],
+    }));
   });
 
   it('returns an empty notification list for blank status without building fallback alerts', async () => {
@@ -229,4 +239,36 @@ describe('metrics alert evaluation', () => {
       channels: ['Email'],
     });
   });
+
+  it('stores alert rules as durable Redis keys without relying on the cacher ttl', async () => {
+    const { redis, client } = createDurableRedisContext();
+    const star = {
+      logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
+    } as any;
+    const actions = createAlertActions(star) as any;
+    const serviceContext = {
+      redis,
+      getServicesList: jest.fn(async () => ({ services: [] })),
+    };
+
+    await actions['v1.alert-rules/create'].handler.call(serviceContext, {
+      params: {
+        name: '持久化 CPU 告警',
+        service: 'gateway',
+        metric: 'service.cpu.usage',
+        operator: '>',
+        threshold: 80,
+        level: 'warning',
+        enabled: true,
+        channels: ['InApp'],
+      },
+    });
+
+    const keys = await client.keys('metrics-alerts:-metrics:alerts:rule:*');
+    expect(keys).toHaveLength(1);
+    const response = await actions['v1.alert-rules'].handler.call(serviceContext, { params: {} });
+    expect(response.data.content).toHaveLength(1);
+    expect(response.data.content[0]).toMatchObject({ name: '持久化 CPU 告警', metric: 'service.cpu.usage' });
+  });
+
 });

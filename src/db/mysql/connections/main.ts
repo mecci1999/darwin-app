@@ -67,6 +67,9 @@ class MainDatabaseConnection {
         DataBaseTableNames.TrailsPortfolioCategory,
         DataBaseTableNames.TrailsSyncChange,
         DataBaseTableNames.TrailsSyncMutation,
+        DataBaseTableNames.AlertInstance,
+        DataBaseTableNames.AlertEvent,
+        DataBaseTableNames.AlertNotificationDelivery,
       ],
     });
   }
