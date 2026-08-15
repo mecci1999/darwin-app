@@ -1,5 +1,5 @@
-import { Actor, DurableGearItem } from '../../src/apps/starlight/trails/types';
-import { DurableGearModel, MySqlDurableGearRepository, TrailsDurableGearStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableGear';
+import { Actor, DurableGearItem } from '../../src/apps/trails/types';
+import { DurableGearModel, MySqlDurableGearRepository, TrailsDurableGearStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableGear';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false };
 const sameTenantAdmin: Actor = { tenantId: actor.tenantId, userId: 'owner-2', isAdmin: true, creatorSpaceRole: 'creator-space-owner' };

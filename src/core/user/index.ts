@@ -4,12 +4,14 @@ import { isTransportDebugEnabled, pinoLoggerOptions } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import { LogLevel } from 'apps/starlight/logs/types';
 import userActions from './actions';
 
 // 导入基本类型和常量
 import { APP_NAME } from './constants';
 import { EventHandler } from './utils';
+import { createServiceReadiness } from 'core/readiness/service-readiness';
 
 async function initializeUserService() {
   // const pinoOptions = await pinoLoggerOptions(APP_NAME);
@@ -71,6 +73,8 @@ async function initializeUserService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
+  const readiness = createServiceReadiness(star, { serviceName: APP_NAME });
 
   star.createService({
     name: APP_NAME,
@@ -95,6 +99,7 @@ async function initializeUserService() {
         eventHandler.initialize(star);
 
         star.logger?.info('User service started successfully');
+        readiness.markStarted();
       } catch (error) {
         star.logger?.error('Failed to start User service:', error);
         throw error;
@@ -102,6 +107,7 @@ async function initializeUserService() {
     },
 
     async stopped() {
+      readiness.markStopping();
       try {
         star.logger?.info('Stopping User service...');
 
@@ -117,9 +123,14 @@ async function initializeUserService() {
   });
 
   // 启动微服务
-  star.start().then(() => {
+  await readiness.start();
+  try {
+    await star.start();
     star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
-  });
+  } catch (error) {
+    await readiness.stop();
+    throw error;
+  }
 }
 
 // 启动应用

@@ -1,0 +1,6 @@
+services:
+  gateway:
+    image: darwin-app:gateway-registry-alerts-20260813.5
+
+  metrics-alerts:
+    image: darwin-app:metrics-alerts-registry-alerts-20260813.3

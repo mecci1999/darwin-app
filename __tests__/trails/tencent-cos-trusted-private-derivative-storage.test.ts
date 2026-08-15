@@ -5,8 +5,8 @@ import {
   TencentCosPrivateDerivativeClientFactory,
   TencentCosTrustedPrivateDerivativeStorage,
   TencentCosTrustedPrivateDerivativeStorageError,
-} from '../../src/apps/starlight/trails/utils/tencent-cos-trusted-private-derivative-storage';
-import { TrustedPhotoshopDerivativeStagedArtifact } from '../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-staging-plan';
+} from '../../src/apps/trails/utils/tencent-cos-trusted-private-derivative-storage';
+import { TrustedPhotoshopDerivativeStagedArtifact } from '../../src/apps/trails/utils/trusted-photoshop-derivative-staging-plan';
 
 jest.mock('cos-nodejs-sdk-v5', () => jest.fn());
 
@@ -162,9 +162,9 @@ describe('Tencent COS trusted private derivative storage', () => {
   });
 
   it('keeps the COS dependency and server-only adapter isolated from actions, lifecycle, and state', () => {
-    const adapterPath = require.resolve('../../src/apps/starlight/trails/utils/tencent-cos-trusted-private-derivative-storage');
+    const adapterPath = require.resolve('../../src/apps/trails/utils/tencent-cos-trusted-private-derivative-storage');
     const adapterSource = readFileSync(adapterPath, 'utf8');
-    const trailsRoot = join(__dirname, '../../src/apps/starlight/trails');
+const trailsRoot = join(__dirname, '../../src/apps/trails');
     const otherSources = filesBelow(trailsRoot)
       .filter(file => file.endsWith('.ts') && file !== adapterPath)
       .map(file => readFileSync(file, 'utf8')).join('\n');

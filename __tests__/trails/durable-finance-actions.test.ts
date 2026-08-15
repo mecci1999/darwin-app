@@ -1,8 +1,8 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableFinanceBalanceSnapshot, DurableFinanceEntry, DurableFinanceStore } from '../../src/apps/starlight/trails/types';
-import { TrailsDurableFinanceStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableFinance';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableFinanceBalanceSnapshot, DurableFinanceEntry, DurableFinanceStore } from '../../src/apps/trails/types';
+import { TrailsDurableFinanceStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableFinance';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false };
 const other: Actor = { tenantId: actor.tenantId, userId: 'owner-2', isAdmin: true, creatorSpaceRole: 'creator-space-owner' };

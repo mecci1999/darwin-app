@@ -1,4 +1,4 @@
-import { createTrailsCosVerifier, TrailsCosVerificationStatus } from '../src/apps/starlight/trails/cos-verification';
+import { createTrailsCosVerifier, TrailsCosVerificationStatus } from '../src/apps/trails/cos-verification';
 
 const unavailable = (): TrailsCosVerificationStatus => ({ available: false, reason: 'unavailable' });
 

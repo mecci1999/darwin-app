@@ -1,7 +1,7 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, ShootSession, TrailsState } from '../../src/apps/starlight/trails/types';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, ShootSession, TrailsState } from '../../src/apps/trails/types';
 
 const owner: Actor = { tenantId: 'tenant-owner', userId: 'owner', isAdmin: false };
 const admin: Actor = { tenantId: 'tenant-owner', userId: 'admin', isAdmin: true };

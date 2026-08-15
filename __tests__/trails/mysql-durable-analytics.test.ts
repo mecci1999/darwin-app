@@ -1,5 +1,5 @@
-import { Actor, PublicAnalyticsEvent } from '../../src/apps/starlight/trails/types';
-import { MySqlDurableAnalyticsRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableAnalytics';
+import { Actor, PublicAnalyticsEvent } from '../../src/apps/trails/types';
+import { MySqlDurableAnalyticsRepository } from '../../src/apps/trails/repository/mysqlDurableAnalytics';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const timestamp = '2026-08-05T10:00:00.000Z';

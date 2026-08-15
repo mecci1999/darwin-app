@@ -9,6 +9,7 @@ import { AlertNotificationDeliveryTable } from 'db/mysql/models/alertNotificatio
 export type DeliveryChannel = 'InApp' | 'Email' | 'Webhook';
 export type DeliveryStatus = 'pending' | 'processing' | 'delivered' | 'retrying' | 'failed';
 export type AlertInstanceStatus = 'active' | 'resolved' | 'suppressed' | 'pending';
+export type AlertOutboxTransaction = { LOCK: { UPDATE: string } };
 
 export type DurableAlertInstance = { tenantId: string; alertId: string; ruleId: string; status: AlertInstanceStatus; payload: Record<string, unknown>; lastNotificationAt?: number };
 export type PendingAlertDelivery = { deliveryId: string; tenantId: string; eventId: string; alertId: string; channel: DeliveryChannel; target: Record<string, unknown>; payload: Record<string, unknown>; attempts: number; leaseToken: string };
@@ -39,6 +40,11 @@ const MAX_DELIVERY_ATTEMPTS = 5;
 const DELIVERY_LEASE_MS = 30_000;
 const retryDelayMs = (attempts: number) => Math.min(15 * 60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
 const stableId = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+const isUniqueConflict = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown; original?: { code?: unknown }; parent?: { code?: unknown } };
+  return candidate.name === 'SequelizeUniqueConstraintError' || candidate.original?.code === 'ER_DUP_ENTRY' || candidate.parent?.code === 'ER_DUP_ENTRY';
+};
 
 const parseJson = (value: unknown): Record<string, unknown> => {
   if (typeof value !== 'string') return {};
@@ -104,27 +110,41 @@ export class AlertOutboxRepository {
       for (const candidate of input.channels) {
         const target = normalizeDeliveryTarget(candidate.channel, candidate.target);
         if (!target) continue;
-        await this.models.deliveries.create({ deliveryId: `alert-delivery-${stableId(`${eventId}:${candidate.channel}`).slice(0, 40)}`, tenantId: input.tenantId, eventId, alertId: input.alertId, channel: candidate.channel, status: 'pending', targetJson: JSON.stringify(target), payloadJson: JSON.stringify(input.payload), attempts: 0, nextAttemptAt: new Date() }, { transaction });
+        const targetKey = stableId(JSON.stringify(target));
+        await this.models.deliveries.create({ deliveryId: `alert-delivery-${stableId(`${eventId}:${candidate.channel}:${targetKey}`).slice(0, 40)}`, tenantId: input.tenantId, eventId, alertId: input.alertId, channel: candidate.channel, targetKey, status: 'pending', targetJson: JSON.stringify(target), payloadJson: JSON.stringify(input.payload), attempts: 0, nextAttemptAt: new Date() }, { transaction });
       }
       return true;
     });
   }
 
+  async createNotificationEventInTransaction(transaction: AlertOutboxTransaction, input: { tenantId?: string; alertId: string; eventKey: string; payload: Record<string, unknown>; channels: Array<{ channel: DeliveryChannel; target: unknown }> }): Promise<boolean> {
+    const tenantId = input.tenantId || DEFAULT_TENANT_ID;
+    const existing = await this.models.events.findOne({ where: { tenantId, alertId: input.alertId, eventKey: input.eventKey }, transaction, lock: transaction.LOCK.UPDATE });
+    if (existing) return false;
+    const eventId = `alert-event-${stableId(`${tenantId}:${input.alertId}:${input.eventKey}`).slice(0, 40)}`;
+    try {
+      await this.models.events.create({ eventId, tenantId, alertId: input.alertId, eventKey: input.eventKey, eventType: 'notification-requested', payloadJson: JSON.stringify(input.payload) }, { transaction });
+    } catch (error) {
+      if (isUniqueConflict(error)) return false;
+      throw error;
+    }
+    for (const candidate of input.channels) {
+      const target = normalizeDeliveryTarget(candidate.channel, candidate.target);
+      if (!target) continue;
+      const targetKey = stableId(JSON.stringify(target));
+      const deliveryId = `alert-delivery-${stableId(`${eventId}:${candidate.channel}:${targetKey}`).slice(0, 40)}`;
+      try {
+        await this.models.deliveries.create({ deliveryId, tenantId, eventId, alertId: input.alertId, channel: candidate.channel, targetKey, status: 'pending', targetJson: JSON.stringify(target), payloadJson: JSON.stringify(input.payload), attempts: 0, nextAttemptAt: new Date() }, { transaction });
+      } catch (error) {
+        if (!isUniqueConflict(error)) throw error;
+      }
+    }
+    return true;
+  }
+
   async createNotificationEvent(input: { tenantId?: string; alertId: string; eventKey: string; payload: Record<string, unknown>; channels: Array<{ channel: DeliveryChannel; target: unknown }> }): Promise<boolean> {
     const tenantId = input.tenantId || DEFAULT_TENANT_ID;
-    return this.sequelize.transaction(async transaction => {
-      const existing = await this.models.events.findOne({ where: { tenantId, alertId: input.alertId, eventKey: input.eventKey }, transaction, lock: transaction.LOCK.UPDATE });
-      if (existing) return false;
-      const eventId = `alert-event-${stableId(`${tenantId}:${input.alertId}:${input.eventKey}`).slice(0, 40)}`;
-      await this.models.events.create({ eventId, tenantId, alertId: input.alertId, eventKey: input.eventKey, eventType: 'notification-requested', payloadJson: JSON.stringify(input.payload) }, { transaction });
-      for (const candidate of input.channels) {
-        const target = normalizeDeliveryTarget(candidate.channel, candidate.target);
-        if (!target) continue;
-        const deliveryId = `alert-delivery-${stableId(`${eventId}:${candidate.channel}`).slice(0, 40)}`;
-        await this.models.deliveries.create({ deliveryId, tenantId, eventId, alertId: input.alertId, channel: candidate.channel, status: 'pending', targetJson: JSON.stringify(target), payloadJson: JSON.stringify(input.payload), attempts: 0, nextAttemptAt: new Date() }, { transaction });
-      }
-      return true;
-    });
+    return this.sequelize.transaction(transaction => this.createNotificationEventInTransaction(transaction, { ...input, tenantId }));
   }
 
   async listNotifications(limit = 50): Promise<DurableNotification[]> {

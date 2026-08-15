@@ -21,6 +21,7 @@ import { isTransportDebugEnabled } from 'config';
 import { DatabaseService } from 'db/mysql';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import authActions from './actions/index';
 import authEvents from './events';
 import authMethods from './methods/index';
@@ -28,6 +29,7 @@ import authMethods from './methods/index';
 // 导入基础工具类和类型
 import { AuthState } from './types';
 import { AuthUtils } from './utils';
+import { createServiceReadiness } from 'core/readiness/service-readiness';
 
 // 应用名称
 const APP_NAME = 'auth';
@@ -105,6 +107,8 @@ async function initializeAuthService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
+  const readiness = createServiceReadiness(star, { serviceName: APP_NAME });
 
   // 创建认证服务
   star.createService({
@@ -141,6 +145,7 @@ async function initializeAuthService() {
         }, 60000); // 每分钟清理一次
 
         star.logger?.info('Auth service started successfully');
+        readiness.markStarted();
       } catch (error) {
         star.logger?.error('Failed to start auth service:', error);
         throw error;
@@ -148,6 +153,7 @@ async function initializeAuthService() {
     },
 
     async stopped() {
+      readiness.markStopping();
       try {
         // 清理状态数据
         state.loginAttempts.clear();
@@ -161,8 +167,14 @@ async function initializeAuthService() {
   });
 
   // 启动服务
-  await star.start();
-  star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
+  await readiness.start();
+  try {
+    await star.start();
+    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
+  } catch (error) {
+    await readiness.stop();
+    throw error;
+  }
 }
 
 // 启动应用

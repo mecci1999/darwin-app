@@ -1,11 +1,11 @@
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import sharp from 'sharp';
-import { Actor, DurableMediaAsset, DurableMediaAssetRegistryStore } from '../../src/apps/starlight/trails/types';
-import { TrustedPhotoshopIngestionOperation, TrustedPhotoshopIngestionPhase, TrustedPhotoshopStorageWriteFenceGrant, TrustedPhotoshopStorageWriteFenceSlot } from '../../src/apps/starlight/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
-import { TrustedPhotoshopIngestionOperationStore } from '../../src/apps/starlight/trails/repository/trustedPhotoshopIngestionOperationStore';
-import { InMemoryTrustedPhotoshopIngestionPrivateStorage, TrustedPhotoshopIngestionPrivateStorage } from '../../src/apps/starlight/trails/utils/trusted-photoshop-ingestion-private-storage';
-import { ingestTrustedPhotoshopPublication, TrustedPhotoshopPublicationIngestionCoordinatorError } from '../../src/apps/starlight/trails/utils/trusted-photoshop-publication-ingestion-coordinator';
+import { Actor, DurableMediaAsset, DurableMediaAssetRegistryStore } from '../../src/apps/trails/types';
+import { TrustedPhotoshopIngestionOperation, TrustedPhotoshopIngestionPhase, TrustedPhotoshopStorageWriteFenceGrant, TrustedPhotoshopStorageWriteFenceSlot } from '../../src/apps/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
+import { TrustedPhotoshopIngestionOperationStore } from '../../src/apps/trails/repository/trustedPhotoshopIngestionOperationStore';
+import { InMemoryTrustedPhotoshopIngestionPrivateStorage, TrustedPhotoshopIngestionPrivateStorage } from '../../src/apps/trails/utils/trusted-photoshop-ingestion-private-storage';
+import { ingestTrustedPhotoshopPublication, TrustedPhotoshopPublicationIngestionCoordinatorError } from '../../src/apps/trails/utils/trusted-photoshop-publication-ingestion-coordinator';
 
 const actor: Actor = { tenantId: 'tenant_a', userId: 'owner_a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
@@ -54,7 +54,7 @@ class LoggedStorage implements TrustedPhotoshopIngestionPrivateStorage {
   async storeMaster(input: Parameters<TrustedPhotoshopIngestionPrivateStorage['storeMaster']>[0]) { this.fenceFlow.push({ kind: 'storage', slot: 'master', grant: input.grant }); return this.storage.storeMaster(input); }
   async storeArtifact(input: Parameters<TrustedPhotoshopIngestionPrivateStorage['storeArtifact']>[0]) { this.fenceFlow.push({ kind: 'storage', slot: input.slot, grant: input.grant }); return this.storage.storeArtifact(input); }
 }
-const registry = (register = jest.fn().mockResolvedValue(asset('asset_a', '2')), persistArtifacts = jest.fn().mockResolvedValue(asset('asset_a', '3'))): DurableMediaAssetRegistryStore => ({ register, persistArtifacts, registerVariant: jest.fn(), publish: jest.fn(), listWorkspacePicker: jest.fn().mockResolvedValue([]) });
+const registry = (register = jest.fn().mockResolvedValue(asset('asset_a', '2')), persistArtifacts = jest.fn().mockResolvedValue(asset('asset_a', '3'))): DurableMediaAssetRegistryStore => ({ register, persistArtifacts, publish: jest.fn(), listWorkspacePicker: jest.fn().mockResolvedValue([]), listPublic: jest.fn().mockResolvedValue([]), approvePublicDerivatives: jest.fn().mockResolvedValue(asset()) });
 const input = async () => ({ actor, operationId: 'operation_a', ownerUserId: actor.userId, assetId: 'asset_a', workerId: 'worker_a', leaseMs: 60_000, entries: await packageEntries() });
 const expectRedacted = (error: unknown) => { expect(error).toBeInstanceOf(TrustedPhotoshopPublicationIngestionCoordinatorError); expect(error).toMatchObject({ message: 'Trusted Photoshop publication ingestion failed', name: 'TrustedPhotoshopPublicationIngestionCoordinatorError' }); expect(error).not.toHaveProperty('cause'); };
 
@@ -100,7 +100,7 @@ describe('trusted Photoshop publication ingestion coordinator', () => {
 
   it.each(['master', 'artifacts'] as const)('blocks ambiguous %s registry outcomes without cleanup, variants, or publishing', async (stage) => {
     const operations = new MemoryOperations(); const storage = new InMemoryTrustedPhotoshopIngestionPrivateStorage(); const register = stage === 'master' ? jest.fn().mockRejectedValue(new Error('timeout')) : jest.fn().mockResolvedValue(asset('asset_a', '2')); const persist = stage === 'artifacts' ? jest.fn().mockRejectedValue(new Error('timeout')) : jest.fn().mockResolvedValue(asset('asset_a', '3')); const services = registry(register, persist);
-    expectRedacted(await ingestTrustedPhotoshopPublication(await input(), operations, storage, services).catch(error => error)); expect(operations.current?.phase).toBe('blocked_ambiguous'); expect(services.registerVariant).not.toHaveBeenCalled(); expect(services.publish).not.toHaveBeenCalled(); expect(storage.countForTest()).toBe(10);
+    expectRedacted(await ingestTrustedPhotoshopPublication(await input(), operations, storage, services).catch(error => error)); expect(operations.current?.phase).toBe('blocked_ambiguous'); expect(services.publish).not.toHaveBeenCalled(); expect(storage.countForTest()).toBe(10);
   });
 
   it('resumes storage_pending after storage_recorded transition failure without repeating storage', async () => {
@@ -127,7 +127,7 @@ describe('trusted Photoshop publication ingestion coordinator', () => {
   });
 
   it('has no action, public storage, provider, COS, Tencent, or legacy persistence dependency', () => {
-    const source = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-photoshop-publication-ingestion-coordinator'), 'utf8');
+    const source = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-photoshop-publication-ingestion-coordinator'), 'utf8');
     expect(source).not.toMatch(/from ['"].*(actions|delivery|cos|tencent|trusted-private-derivative-storage|trusted-photoshop-derivative-persistence-orchestrator)|registerVariant|\.publish\(/i);
   });
 });

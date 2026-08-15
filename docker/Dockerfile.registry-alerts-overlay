@@ -1,0 +1,15 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# This release overlays the registry-missing alert evaluator and Gateway
+# discovery/readiness modules onto an already verified immutable application image.
+COPY dist/apps/starlight/metrics-alerts /app/dist/apps/starlight/metrics-alerts
+COPY dist/apps/starlight/metrics/actions/alerts.js /app/dist/apps/starlight/metrics/actions/alerts.js
+COPY dist/core/gateway/index.js /app/dist/core/gateway/index.js
+COPY dist/core/gateway/gateway-registry-alerts.js /app/dist/core/gateway/gateway-registry-alerts.js
+COPY dist/core/gateway/metrics-route-remap.js /app/dist/core/gateway/metrics-route-remap.js
+COPY dist/core/gateway/registry-readiness.js /app/dist/core/gateway/registry-readiness.js
+COPY shared/trails-contract /shared/trails-contract
+COPY dist/db/mysql /app/dist/db/mysql
+COPY dist/typings /app/dist/typings
+COPY scripts/migrations.js /app/scripts/migrations.js

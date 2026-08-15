@@ -1,0 +1,14 @@
+services:
+  gateway:
+    image: darwin-app:gateway-registry-readiness-20260813.1
+    environment:
+      GATEWAY_REQUIRED_SERVICES: gateway,auth,user,file,metrics,metrics-query,metrics-alerts,metrics-compat,metrics-lifecycle,logs,subscription,subscription-billing,micro-app,video,trails-durable-content,trails-durable-media,trails-durable-workspace,trails-durable-trips,trails-durable-site,trails-durable-site-public
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "require('http').get('http://127.0.0.1:6670/api/ready', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s

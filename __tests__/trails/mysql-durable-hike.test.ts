@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { MySqlDurableHikeRepository, DurableHikeModel } from '../../src/apps/starlight/trails/repository/mysqlDurableHike';
+import { Actor } from '../../src/apps/trails/types';
+import { MySqlDurableHikeRepository, DurableHikeModel } from '../../src/apps/trails/repository/mysqlDurableHike';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false };
 const sameTenantOther: Actor = { tenantId: actor.tenantId, userId: 'owner-2', isAdmin: true };

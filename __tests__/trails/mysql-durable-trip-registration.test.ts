@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { MySqlDurableTripRegistrationRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableTripRegistration';
+import { Actor } from '../../src/apps/trails/types';
+import { MySqlDurableTripRegistrationRepository } from '../../src/apps/trails/repository/mysqlDurableTripRegistration';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const participant: Actor = { tenantId: 'tenant-a', userId: 'participant-a', isAdmin: false, creatorSpaceRole: 'participant' };

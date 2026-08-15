@@ -1,0 +1,9 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# This release changes only the three services that previously lost registry
+# visibility and their shared private loopback readiness implementation.
+COPY dist/core/readiness/service-readiness.js /app/dist/core/readiness/service-readiness.js
+COPY dist/apps/starlight/metrics/index.js /app/dist/apps/starlight/metrics/index.js
+COPY dist/core/user/index.js /app/dist/core/user/index.js
+COPY dist/core/auth/index.js /app/dist/core/auth/index.js

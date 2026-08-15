@@ -7,6 +7,7 @@ import { isTransportDebugEnabled, pinoLoggerOptions } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import fileActions from './actions';
 
 // 导入基本类型和常量
@@ -77,6 +78,7 @@ async function initializeFileService() {
       },
     }) as Starlight;
     registerDarwinLogForwarding(star);
+      installDarwinKafkaRecoveryLifecycle(star);
 
     star.createService({
       name: APP_NAME,

@@ -1,5 +1,5 @@
 import COS from 'cos-nodejs-sdk-v5';
-import { createTrailsCosVerifier } from '../../src/apps/starlight/trails/cos-verification';
+import { createTrailsCosVerifier } from '../../src/apps/trails/cos-verification';
 
 jest.mock('cos-nodejs-sdk-v5', () => jest.fn());
 

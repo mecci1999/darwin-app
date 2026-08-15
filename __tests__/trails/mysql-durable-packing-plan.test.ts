@@ -1,5 +1,8 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { DurablePackingPlanModels, MySqlDurablePackingPlanRepository, TrailsDurablePackingPlanStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurablePackingPlan';
+import { Actor } from '../../src/apps/trails/types';
+import { DurablePackingPlanModels, MySqlDurablePackingPlanRepository, TrailsDurablePackingPlanStaleVersionError } from '../../src/apps/trails/repository/mysqlDurablePackingPlan';
+
+type PlanRow = Parameters<DurablePackingPlanModels['createPlan']>[0];
+type ItemRow = Parameters<DurablePackingPlanModels['replaceItems']>[0]['items'][number];
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false };
 const other: Actor = { tenantId: actor.tenantId, userId: 'owner-2', isAdmin: true };
@@ -8,8 +11,8 @@ const gear = (id: string, overrides: Partial<{ ownerUserId: string; weightGrams:
 
 describe('MySqlDurablePackingPlanRepository', () => {
   it('creates direct-owner private plans with ordered immutable gear snapshots and rejects inactive/cross-owner selections', async () => {
-    const plans: Array<{ id: string; tenantId: string; ownerUserId: string; name: string; visibility: 'private'; lifecycle: 'draft'; resourceVersion: string; createdAt: Date; updatedAt: Date }> = [];
-    const items: Array<{ tenantId: string; planId: string; gearId: string; snapshotWeightGrams: number; sortOrder: number; createdAt: Date; updatedAt: Date }> = [];
+    const plans: PlanRow[] = [];
+    const items: ItemRow[] = [];
     const models: DurablePackingPlanModels = {
       createPlan: jest.fn(async (created) => { plans.push(created); return created; }),
       findPlan: jest.fn(async ({ id }) => plans.find((current) => current.id === id)),
@@ -28,8 +31,8 @@ describe('MySqlDurablePackingPlanRepository', () => {
   });
 
   it('captures one unit weight per unique selected Gear despite inventory quantity, and retains snapshots after later changes', async () => {
-    const plans: Array<{ id: string; tenantId: string; ownerUserId: string; name: string; visibility: 'private'; lifecycle: 'draft'; resourceVersion: string; createdAt: Date; updatedAt: Date }> = [];
-    const items: Array<{ tenantId: string; planId: string; gearId: string; snapshotWeightGrams: number; sortOrder: number; createdAt: Date; updatedAt: Date }> = [];
+    const plans: PlanRow[] = [];
+    const items: ItemRow[] = [];
     const gearRows = new Map([['gear-1', gear('gear-1', { weightGrams: 500 })]]);
     const models: DurablePackingPlanModels = {
       createPlan: jest.fn(async created => { plans.push(created); return created; }), findPlan: jest.fn(), listPlans: jest.fn(async () => plans), listItems: jest.fn(async () => items),
@@ -45,8 +48,8 @@ describe('MySqlDurablePackingPlanRepository', () => {
   });
 
   it('uses canonical CAS and full item replacement atomically, retaining prior snapshots despite later gear deactivation', async () => {
-    const plans = [{ id: 'plan-1', tenantId: actor.tenantId, ownerUserId: actor.userId, name: 'Old', visibility: 'private' as const, lifecycle: 'draft' as const, resourceVersion: '1', createdAt: timestamp, updatedAt: timestamp }];
-    const items = [{ tenantId: actor.tenantId, planId: 'plan-1', gearId: 'old', snapshotWeightGrams: 500, sortOrder: 0, createdAt: timestamp, updatedAt: timestamp }];
+    const plans: PlanRow[] = [{ id: 'plan-1', tenantId: actor.tenantId, ownerUserId: actor.userId, name: 'Old', visibility: 'private', lifecycle: 'draft', resourceVersion: '1', createdAt: timestamp, updatedAt: timestamp }];
+    const items: ItemRow[] = [{ tenantId: actor.tenantId, planId: 'plan-1', gearId: 'old', snapshotWeightGrams: 500, sortOrder: 0, createdAt: timestamp, updatedAt: timestamp }];
     const models: DurablePackingPlanModels = {
       createPlan: jest.fn(), findPlan: jest.fn(async () => plans[0]), listPlans: jest.fn(async ({ ownerUserId }) => ownerUserId === actor.userId ? plans : []), listItems: jest.fn(async () => items), lockGear: jest.fn(async ({ ids }) => ids.map((id) => gear(id, { weightGrams: 700 }))), replaceItems: jest.fn(async ({ items: next }) => { items.splice(0, items.length, ...next); }), compareAndSwapPlan: jest.fn(async ({ expectedVersion, next }) => { if (plans[0].resourceVersion !== expectedVersion) return undefined; plans[0] = next; return next; }),
     };

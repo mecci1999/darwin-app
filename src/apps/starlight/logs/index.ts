@@ -7,6 +7,7 @@ import { DatabaseService } from 'db/mysql';
 import { DEFAULT_LOG_CATEGORY_ENABLED, isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import '../../../utils/loadEnv';
 import createActions from './actions';
 import {
@@ -142,6 +143,7 @@ function createLogsService() {
       }
     },
   }) as Starlight;
+  installDarwinKafkaRecoveryLifecycle(star);
 
   // 创建日志处理服务
   const logsService = star.createService({

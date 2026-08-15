@@ -1,8 +1,8 @@
 import { HttpResponseItem, Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableExternalVideoReference, DurableExternalVideoReferenceStore, TrailsState } from '../../src/apps/starlight/trails/types';
-import { TrailsSyncInputError } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableExternalVideoReference, DurableExternalVideoReferenceStore, TrailsState } from '../../src/apps/trails/types';
+import { TrailsSyncInputError } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const reference: DurableExternalVideoReference = { id: 'video_1', portfolioId: 'portfolio_1', title: '晨雾', summary: '外部作品链接', canonicalUrl: 'https://www.bilibili.com/video/BV1Q541167Qg', sortOrder: 0, tenantId: owner.tenantId, ownerUserId: owner.userId, status: 'draft', resourceVersion: '1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };

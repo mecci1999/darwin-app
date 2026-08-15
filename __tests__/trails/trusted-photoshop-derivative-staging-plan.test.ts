@@ -1,12 +1,12 @@
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import sharp from 'sharp';
-import { processTrustedPhotoshopPackageDerivatives } from '../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator';
+import { processTrustedPhotoshopPackageDerivatives } from '../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator';
 import {
   stageTrustedPhotoshopPackageDerivatives,
   TRUSTED_PHOTOSHOP_DERIVATIVE_STAGING_PLAN_CONTRACT,
   TrustedPhotoshopDerivativeStagingPlanError,
-} from '../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-staging-plan';
+} from '../../src/apps/trails/utils/trusted-photoshop-derivative-staging-plan';
 
 const jpeg = (width: number, height: number) => sharp({
   create: { width, height, channels: 3, background: 'navy' },
@@ -90,7 +90,7 @@ describe('Trails trusted Photoshop derivative staging plan', () => {
   });
 
   it('depends only on crypto and trusted in-memory derivative contracts', () => {
-    const source = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-staging-plan'), 'utf8');
+    const source = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-photoshop-derivative-staging-plan'), 'utf8');
     expect(source).toMatch(/from ['"]crypto['"]/);
     expect(source).toMatch(/from ['"]\.\/trusted-photoshop-package-derivative-orchestrator['"]/);
     expect(source).not.toMatch(/from ['"](?:fs|path|stream|fflate|sequelize|.*registry|.*actions|.*storage|.*delivery|.*cos)['"]/i);

@@ -1,9 +1,9 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DEFAULT_PUBLIC_SITE_CHROME, DurableGuestComment, DurableGuestCommentStore, DurablePublicSiteContent, DurablePublicSiteContentStore, publicChromeTargets, TrailsState } from '../../src/apps/starlight/trails/types';
-import { TrailsGuestCommentStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlGuestComment';
-import { TrailsPublicSiteContentStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlPublicSiteContent';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DEFAULT_PUBLIC_SITE_CHROME, DurableGuestComment, DurableGuestCommentStore, DurablePublicSiteContent, DurablePublicSiteContentStore, publicChromeTargets, TrailsState } from '../../src/apps/trails/types';
+import { TrailsGuestCommentStaleVersionError } from '../../src/apps/trails/repository/mysqlGuestComment';
+import { TrailsPublicSiteContentStaleVersionError } from '../../src/apps/trails/repository/mysqlPublicSiteContent';
 
 const owner: Actor = { tenantId: 'tenant-public', userId: 'owner-public', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const participant: Actor = { tenantId: owner.tenantId, userId: 'participant', isAdmin: false, creatorSpaceRole: 'participant' };

@@ -1,7 +1,7 @@
 import { HttpResponseItem, Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurablePublishingPackage, DurablePublishingPackageStore, TrailsState } from '../../src/apps/starlight/trails/types';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurablePublishingPackage, DurablePublishingPackageStore, TrailsState } from '../../src/apps/trails/types';
 
 const actor = { userId: 'owner', tenantId: 'tenant', creatorSpaceRole: 'creator-space-owner' };
 const star = { emit: jest.fn() } as unknown as Starlight;
@@ -28,7 +28,7 @@ describe('v2 durable publishing package actions', () => {
     expect(responseStatus(await handler(actions, 'v2.publishing-packages.workspace')(context({}, { user: { userId: 'p', creatorSpaceRole: 'participant' }, tenantId: 'tenant' })))).toBe(403);
   });
   it('rejects prohibited fields before calling the durable store and maps stale to 409', async () => {
-    const create = jest.fn(async () => { throw new Error('unexpected create'); }); const transition = jest.fn(async () => { const { TrailsDurablePublishingPackageStaleVersionError } = require('../../src/apps/starlight/trails/repository/mysqlDurablePublishingPackage'); throw new TrailsDurablePublishingPackageStaleVersionError(); });
+    const create = jest.fn(async () => { throw new Error('unexpected create'); }); const transition = jest.fn(async () => { const { TrailsDurablePublishingPackageStaleVersionError } = require('../../src/apps/trails/repository/mysqlDurablePublishingPackage'); throw new TrailsDurablePublishingPackageStaleVersionError(); });
     const store: DurablePublishingPackageStore = { ...unavailableStore(), create, transition };
     const actions = trailsActions(star, state(store));
     expect(responseStatus(await handler(actions, 'v2.publishing-packages.create')(context({ ...createInput, destinationUrl: 'https://forbidden.example' })))).toBe(400); expect(create).not.toHaveBeenCalled();

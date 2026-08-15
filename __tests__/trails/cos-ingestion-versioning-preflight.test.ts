@@ -1,13 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import COS from 'cos-nodejs-sdk-v5';
-import { createTrailsCosIngestionVersioningPreflight } from '../../src/apps/starlight/trails/cos-ingestion-versioning-preflight';
+import { createTrailsCosIngestionVersioningPreflight } from '../../src/apps/trails/cos-ingestion-versioning-preflight';
 
 jest.mock('cos-nodejs-sdk-v5', () => jest.fn());
 
 const mockedCos = jest.mocked(COS);
 const projectRoot = path.resolve(__dirname, '../..');
-const preflightSource = path.join(projectRoot, 'src/apps/starlight/trails/cos-ingestion-versioning-preflight.ts');
+const preflightSource = path.join(projectRoot, 'src/apps/trails/cos-ingestion-versioning-preflight.ts');
 const validEnvironment = (): NodeJS.ProcessEnv => ({
   NODE_ENV: 'development',
   TRAILS_COS_INGESTION_VERSIONING_PREFLIGHT_ENABLED: 'true',
@@ -48,7 +48,7 @@ describe('Trails COS ingestion versioning preflight boundary', () => {
     expect(mockedCos).not.toHaveBeenCalled();
   });
 
-  it('uses only the fixed request and approves only explicit NoSuchVersioningConfiguration', async () => {
+  it('uses only the fixed request and approves explicit NoSuchVersioningConfiguration', async () => {
     const getBucketVersioning = jest.fn().mockRejectedValue({ Code: 'NoSuchVersioningConfiguration', provider: 'private-value' });
     const createClient = jest.fn().mockReturnValue({ getBucketVersioning });
 
@@ -62,14 +62,23 @@ describe('Trails COS ingestion versioning preflight boundary', () => {
   it.each([
     [{ Status: 'Enabled' }],
     [{ Status: 'Suspended' }],
-    [{}],
-    [undefined],
-  ])('rejects versioning responses that are enabled, suspended, malformed, or unknown', async (response) => {
+  ])('approves versioning responses that preserve immutable object keys', async (response) => {
     const getBucketVersioning = jest.fn().mockResolvedValue(response);
     mockedCos.mockImplementation(() => ({ getBucketVersioning }) as unknown as COS);
 
     await expect(createTrailsCosIngestionVersioningPreflight(validEnvironment()).check())
-      .resolves.toEqual({ eligible: false, reason: 'versioning-not-disabled' });
+      .resolves.toEqual({ eligible: true, reason: 'ready' });
+  });
+
+  it.each([
+    [{}],
+    [undefined],
+  ])('fails closed for malformed or unknown versioning responses', async (response) => {
+    const getBucketVersioning = jest.fn().mockResolvedValue(response);
+    mockedCos.mockImplementation(() => ({ getBucketVersioning }) as unknown as COS);
+
+    await expect(createTrailsCosIngestionVersioningPreflight(validEnvironment()).check())
+      .resolves.toEqual({ eligible: false, reason: 'unavailable' });
   });
 
   it('fails closed and redacts non-versioning errors', async () => {

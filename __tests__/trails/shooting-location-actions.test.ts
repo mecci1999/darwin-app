@@ -1,7 +1,7 @@
 import { HttpResponseItem, Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, ShootingLocation, ShootingLocationStore, TrailsState } from '../../src/apps/starlight/trails/types';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, ShootingLocation, ShootingLocationStore, TrailsState } from '../../src/apps/trails/types';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const location: ShootingLocation = { id: 'shoot_1', tenantId: owner.tenantId, ownerUserId: owner.userId, name: 'Ridge', latitude: 30.1, longitude: 120.1, notes: 'Private note', status: 'active', resourceVersion: '1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };

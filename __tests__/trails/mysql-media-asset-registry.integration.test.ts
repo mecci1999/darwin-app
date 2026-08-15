@@ -3,9 +3,9 @@ import initializeTrailsMediaAssetRegistry, { TrailsMediaAssetRegistryTable } fro
 import initializeTrailsMediaAssetVariant, { TrailsMediaAssetVariantTable } from '../../src/db/mysql/models/trailsMediaAssetVariant';
 import initializeTrailsMediaAssetArtifact, { TrailsMediaAssetArtifactTable } from '../../src/db/mysql/models/trailsMediaAssetArtifact';
 import initializeTrailsMediaAssetRegistryMutation, { TrailsMediaAssetRegistryMutationTable } from '../../src/db/mysql/models/trailsMediaAssetRegistryMutation';
-import { Actor, DurableMediaAssetArtifactDescriptor } from '../../src/apps/starlight/trails/types';
-import { createSequelizeMediaAssetRegistryModels, MySqlMediaAssetRegistryRepository } from '../../src/apps/starlight/trails/repository/mysqlMediaAssetRegistry';
-import { SequelizeTrailsSyncConnection } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
+import { Actor, DurableMediaAssetArtifactDescriptor } from '../../src/apps/trails/types';
+import { createSequelizeMediaAssetRegistryModels, MySqlMediaAssetRegistryRepository } from '../../src/apps/trails/repository/mysqlMediaAssetRegistry';
+import { SequelizeTrailsSyncConnection } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
 
 const enabled = process.env.TRAILS_MYSQL_INTEGRATION === '1';
 const describeIntegration = enabled ? describe : describe.skip;
@@ -44,27 +44,24 @@ describeIntegration('durable media asset registry MySQL schema', () => {
     expect(await TrailsMediaAssetVariantTable.count({ where: { tenantId: owner.tenantId, assetId: registered.id } })).toBe(0);
     expect(JSON.stringify(persisted)).not.toMatch(/mysql_artifact_master|grid-800_avif|https?:\/\//);
   });
-  it('persists and replays register, variant, and publish mutations exactly once', async () => {
+  it('persists and replays register, approved derivative, and publish mutations exactly once', async () => {
     const register = { mutationId: 'mysql-register', expectedResourceVersion: null, id: 'mysql-media-asset', mimeType: 'image/jpeg', privateMasterLocator: 'mysql_master_locator' };
     const firstRegister = await repository.register(owner, register);
     const replayRegister = await repository.register(owner, register);
     expect(replayRegister).toEqual(firstRegister);
-    let current = firstRegister;
-    for (const [name, reference] of [['grid-800', 'mysql_grid'], ['cover-1600', 'mysql_cover'], ['preview-2048', 'mysql_preview']] as const) {
-      const input = { mutationId: `mysql-${name}`, expectedResourceVersion: current.resourceVersion, assetId: current.id, name, publicReference: reference, width: 800, height: 600, state: 'ready' as const };
-      const firstVariant = await repository.registerVariant(owner, input);
-      const replayVariant = await repository.registerVariant(owner, input);
-      expect(replayVariant).toEqual(firstVariant);
-      current = firstVariant;
-    }
+    const artifacts: DurableMediaAssetArtifactDescriptor[] = (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as DurableMediaAssetArtifactDescriptor['mimeType'], privateLocator: `${logicalRendition}_${codec}_approval`, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+    const persisted = await repository.persistArtifacts(owner, { mutationId: 'mysql-persist', expectedResourceVersion: firstRegister.resourceVersion, assetId: firstRegister.id, artifacts });
+    const approval = { mutationId: 'mysql-approval', expectedResourceVersion: persisted.resourceVersion, assetId: persisted.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' as const } };
+    const current = await repository.approvePublicDerivatives(owner, approval);
+    expect(await repository.approvePublicDerivatives(owner, approval)).toEqual(current);
     const publish = { mutationId: 'mysql-publish', expectedResourceVersion: current.resourceVersion, id: current.id };
     const firstPublish = await repository.publish(owner, publish);
     const replayPublish = await repository.publish(owner, publish);
-    expect(firstPublish).toEqual(expect.objectContaining({ status: 'published', resourceVersion: '5' }));
+    expect(firstPublish).toEqual(expect.objectContaining({ status: 'published', resourceVersion: '4' }));
     expect(replayPublish).toEqual(firstPublish);
     expect(await TrailsMediaAssetRegistryTable.count({ where: { tenantId: owner.tenantId, id: current.id } })).toBe(1);
     expect(await TrailsMediaAssetVariantTable.count({ where: { tenantId: owner.tenantId, assetId: current.id } })).toBe(3);
-    expect(await TrailsMediaAssetRegistryMutationTable.count({ where: { tenantId: owner.tenantId, actorUserId: owner.userId } })).toBe(5);
+    expect(await TrailsMediaAssetRegistryMutationTable.count({ where: { tenantId: owner.tenantId, actorUserId: owner.userId } })).toBe(4);
     expect(JSON.stringify(firstPublish)).not.toMatch(/mysql_master_locator|https?:\/\/|publicReference|privateLocator/);
     expect('getPublicById' in repository).toBe(false);
   });

@@ -4,6 +4,10 @@
 
 本文档是对旧部署文档的完整替换。所有命令都按照当前仓库实际情况编写；生产 Dockerfile、生产启动脚本和拆分 Compose 文件均已实现，但部署前仍必须完成本机构建、镜像构建和配置校验。
 
+每次部署、单服务替换或基础设施重启后，必须执行并记录
+[`POST_DEPLOYMENT_SERVICE_VERIFICATION.md`](./POST_DEPLOYMENT_SERVICE_VERIFICATION.md)。Docker `healthy`
+不等于 Node-Universe 已注册；该手册以 Gateway 实时注册表、路由探测和错误日志窗口作为发布完成门槛。
+
 ---
 
 ## 0. 你的腾讯云服务器规格与部署结论

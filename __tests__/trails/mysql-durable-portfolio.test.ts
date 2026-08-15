@@ -1,6 +1,6 @@
-import { MySqlDurablePortfolioRepository, DurablePortfolioCategoryLookup, DurablePortfolioModel } from '../../src/apps/starlight/trails/repository/mysqlDurablePortfolio';
-import { Actor, PhotoTechnicalMetadata } from '../../src/apps/starlight/trails/types';
-import { RichDocumentPublishValidator } from '../../src/apps/starlight/trails/repository/mysqlRichDocument';
+import { MySqlDurablePortfolioRepository, DurablePortfolioCategoryLookup, DurablePortfolioModel } from '../../src/apps/trails/repository/mysqlDurablePortfolio';
+import { Actor, PhotoTechnicalMetadata } from '../../src/apps/trails/types';
+import { RichDocumentPublishValidator } from '../../src/apps/trails/repository/mysqlRichDocument';
 
 const owner: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const timestamp = new Date('2026-07-31T00:00:00.000Z');

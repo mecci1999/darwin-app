@@ -39,7 +39,7 @@ services:
     volumes:
       - uploads_data:/app/uploads
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6670/api/health', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6670/api/ready', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 20s
       timeout: 5s
       retries: 6
@@ -54,6 +54,12 @@ services:
     mem_limit: 112m
     cpus: 0.20
     networks: [app_network, auth_egress_network]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   user:
     <<: *app-defaults
@@ -62,6 +68,12 @@ services:
     command: ["node", "dist/core/user/index.js"]
     mem_limit: 112m
     cpus: 0.08
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   file:
     <<: *app-defaults
@@ -80,6 +92,12 @@ services:
     command: ["node", "dist/apps/starlight/metrics/index.js"]
     mem_limit: 144m
     cpus: 0.30
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   metrics-query:
     <<: *app-defaults
@@ -93,6 +111,7 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: metrics-alerts
+    networks: [app_network, auth_egress_network]
     command: ["node", "dist/apps/starlight/metrics-alerts/index.js"]
     mem_limit: 128m
     cpus: 0.03
@@ -137,21 +156,13 @@ services:
     mem_limit: 96m
     cpus: 0.02
 
-  trails-v1:
+  trails:
     <<: *app-defaults
+    image: ${TRAILS_IMAGE:?TRAILS_IMAGE is required}
     environment:
-      NODE_INSTANCE_ID: trails-v1
-      TRAILS_RUNTIME: v1
-    command: ["node", "dist/apps/starlight/trails/index.js"]
-    mem_limit: 96m
-    cpus: 0.04
-
-  trails-v2:
-    <<: *app-defaults
-    environment:
-      NODE_INSTANCE_ID: trails-v2
-      TRAILS_RUNTIME: v2
-    command: ["node", "dist/apps/starlight/trails/index.js"]
+      NODE_INSTANCE_ID: trails
+      NODE_PATH: /app/dist
+    command: ["node", "dist/apps/trails/index.js"]
     mem_limit: 160m
     cpus: 0.08
 

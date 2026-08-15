@@ -1,7 +1,7 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableHike, DurableHikeStore } from '../../src/apps/starlight/trails/types';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableHike, DurableHikeStore } from '../../src/apps/trails/types';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'field-user-1', isAdmin: false };
 const sameTenantActor: Actor = { tenantId: actor.tenantId, userId: 'field-user-2', isAdmin: true, creatorSpaceRole: 'creator-space-owner' };

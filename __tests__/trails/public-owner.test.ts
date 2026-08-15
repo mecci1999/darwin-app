@@ -1,4 +1,4 @@
-import { createPublicOwnerResolver } from '../../src/apps/starlight/trails/utils/public-owner';
+import { createPublicOwnerResolver } from '../../src/apps/trails/utils/public-owner';
 
 describe('public owner resolver', () => {
   it('uses only complete server-owned deployment configuration', () => {

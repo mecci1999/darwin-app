@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { createSequelizeGuestCommentStorage, MySqlGuestCommentRepository, GuestCommentStorage, TrailsGuestCommentStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlGuestComment';
-import { Actor, DurableGuestComment } from '../../src/apps/starlight/trails/types';
+import { createSequelizeGuestCommentStorage, MySqlGuestCommentRepository, GuestCommentStorage, TrailsGuestCommentStaleVersionError } from '../../src/apps/trails/repository/mysqlGuestComment';
+import { Actor, DurableGuestComment } from '../../src/apps/trails/types';
 import { TrailsGuestCommentTable } from '../../src/db/mysql/models/trailsGuestComment';
 import { TrailsGuestCommentAuditTable } from '../../src/db/mysql/models/trailsGuestCommentAudit';
 import { ITrailsGuestCommentNotificationTableAttributes, TrailsGuestCommentNotificationTable } from '../../src/db/mysql/models/trailsGuestCommentNotification';

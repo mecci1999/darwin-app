@@ -3,6 +3,7 @@ import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
@@ -199,6 +200,7 @@ function createMetricsCompatService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
 
   const compatService = star.createService({
     name: APP_NAME,

@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { MySqlDurablePublishingPackageRepository, PublishingAuditModel, PublishingMutationModel, PublishingPackageModel, TrailsDurablePublishingPackageStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurablePublishingPackage';
+import { Actor } from '../../src/apps/trails/types';
+import { MySqlDurablePublishingPackageRepository, PublishingAuditModel, PublishingMutationModel, PublishingPackageModel, TrailsDurablePublishingPackageStaleVersionError } from '../../src/apps/trails/repository/mysqlDurablePublishingPackage';
 
 const actor: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: 'tenant-a', userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'owner-a' };

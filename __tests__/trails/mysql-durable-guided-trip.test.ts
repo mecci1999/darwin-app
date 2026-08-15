@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { GuidedTripAuditModel, GuidedTripModel, GuidedTripMutationModel, MySqlDurableGuidedTripRepository, TrailsDurableGuidedTripStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableGuidedTrip';
+import { Actor } from '../../src/apps/trails/types';
+import { GuidedTripAuditModel, GuidedTripModel, GuidedTripMutationModel, MySqlDurableGuidedTripRepository, TrailsDurableGuidedTripStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableGuidedTrip';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: 'tenant-a', userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'owner-a' };

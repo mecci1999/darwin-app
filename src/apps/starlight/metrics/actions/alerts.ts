@@ -4,6 +4,7 @@ import { queryAllUsers } from 'db/mysql/apis/user';
 import { normalizeMetricsScope } from '../utils/system-telemetry';
 import { InfluxDBHandler } from '../utils/influxdb-handler';
 import { AlertOutboxRepository, DeliveryChannel } from '../../metrics-alerts/alert-outbox';
+import { RegistryMissingAlertRepository, normalizeEmailRecipients, normalizeRegistryMissingRule } from '../../metrics-alerts/registry-missing';
 import {
   RESPONSE_DURATION_COMPLETED_REQUEST_FILTER,
   RESPONSE_DURATION_FIELD_FILTER,
@@ -31,6 +32,8 @@ type StoredAlertRule = {
   level: AlertLevel;
   enabled: boolean;
   channels: string[];
+  emailRecipients: string[];
+  notifyOnRecovery: boolean;
   updatedAt: number;
 };
 
@@ -145,8 +148,11 @@ const formatAlertMessage = (params: {
   rule: StoredAlertRule;
   value: number;
   serviceName: string;
+  status: AlertStatus;
 }) =>
-  `${params.serviceName} ${params.rule.metric} 当前值 ${toFixed(params.value)}${params.rule.unit || ''} ${params.rule.operator} ${params.rule.threshold}${params.rule.unit || ''}，级别 ${params.rule.level}`;
+  params.status === 'resolved'
+    ? `${params.serviceName} ${params.rule.metric} 已恢复，当前值 ${toFixed(params.value)}${params.rule.unit || ''}`
+    : `${params.serviceName} ${params.rule.metric} 当前值 ${toFixed(params.value)}${params.rule.unit || ''} ${params.rule.operator} ${params.rule.threshold}${params.rule.unit || ''}，级别 ${params.rule.level}`;
 
 const normalizeNotificationChannel = (channel: unknown): string => {
   const value = String(channel || '').trim();
@@ -168,6 +174,21 @@ const normalizeNotificationChannels = (rule: any): string[] => {
   return normalizedChannels.length
     ? (Array.from(new Set<string>(normalizedChannels)) as string[])
     : ['InApp'];
+};
+
+const validateMetricRuleDelivery = (channels: string[], emailRecipients: string[]) => {
+  if (channels.includes('Email') && emailRecipients.length === 0) {
+    throw new Error('Email rules require at least one valid email recipient');
+  }
+};
+
+const metricRuleChannels = (rule: StoredAlertRule): Array<{ channel: DeliveryChannel; target: unknown }> => {
+  const targets: Array<{ channel: DeliveryChannel; target: unknown }> = [];
+  if (rule.channels.includes('InApp')) targets.push({ channel: 'InApp', target: 'in-app' });
+  if (rule.channels.includes('Email')) {
+    rule.emailRecipients.forEach(target => targets.push({ channel: 'Email', target }));
+  }
+  return targets;
 };
 
 const resolveNotificationTarget = (channel: string) => {
@@ -354,40 +375,39 @@ const deleteAlertRule = async (serviceContext: any, ruleId: string) => {
   return redisDelete(serviceContext, `${ALERT_RULE_PREFIX}${ruleId}`);
 };
 
-const normalizeAlertRule = (rule: any): StoredAlertRule => ({
-  id: rule.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  name: rule.name || '未命名规则',
-  service: rule.service || 'all',
-  metric: metricAliases[rule.metric] || rule.metric || 'service.error.rate',
-  operator: operatorMap[String(rule.operator || rule.condition || '>')] || '>',
-  threshold: Number(rule.threshold || 0),
-  unit: rule.unit || '',
-  duration: Number(rule.duration || 5),
-  level: ['critical', 'warning', 'info'].includes(String(rule.level)) ? rule.level : 'warning',
-  enabled: rule.enabled !== false,
-  channels: normalizeNotificationChannels(rule),
-  updatedAt: Number(rule.updatedAt || Date.now()),
-});
+const normalizeAlertRule = (rule: any): StoredAlertRule => {
+  const channels = normalizeNotificationChannels(rule);
+  const emailRecipients = normalizeEmailRecipients(rule.emailRecipients);
+  return {
+    id: rule.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: rule.name || '未命名规则',
+    service: rule.service || 'all',
+    metric: metricAliases[rule.metric] || rule.metric || 'service.error.rate',
+    operator: operatorMap[String(rule.operator || rule.condition || '>')] || '>',
+    threshold: Number(rule.threshold || 0),
+    unit: rule.unit || '',
+    duration: Number(rule.duration || 5),
+    level: ['critical', 'warning', 'info'].includes(String(rule.level)) ? rule.level : 'warning',
+    enabled: rule.enabled !== false,
+    channels,
+    emailRecipients,
+    notifyOnRecovery: rule.notifyOnRecovery !== false,
+    updatedAt: Number(rule.updatedAt || Date.now()),
+  };
+};
 
 const loadNormalizedAlertRules = async (serviceContext: any): Promise<StoredAlertRule[]> => {
   const rules = await loadAlertRules(serviceContext);
   return rules.map(normalizeAlertRule).filter((rule: StoredAlertRule) => rule.enabled);
 };
 
-const normalizeImportedRule = (rule: any) => ({
-  id: rule.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  name: rule.name || '未命名规则',
-  service: rule.service || 'all',
-  metric: rule.metric || '错误率',
-  operator: rule.operator || '>',
-  threshold: Number(rule.threshold || 0),
-  unit: rule.unit || '',
-  duration: Number(rule.duration || 5),
-  level: rule.level || 'warning',
-  enabled: rule.enabled !== false,
-  channels: normalizeNotificationChannels(rule),
-  updatedAt: Date.now(),
-});
+const normalizeImportedRule = (rule: any): StoredAlertRule =>
+  normalizeAlertRule({
+    ...rule,
+    id: rule.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    metric: rule.metric || '错误率',
+    updatedAt: Date.now(),
+  });
 
 const queryLatestSeriesValue = async (params: {
   star: Starlight;
@@ -624,7 +644,9 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
         duration: formatDuration(rule.duration),
         durationMinutes: Math.max(1, Number(rule.duration || 5)),
         channels: rule.channels,
-        message: formatAlertMessage({ rule, value, serviceName }),
+        emailRecipients: rule.emailRecipients,
+        notifyOnRecovery: rule.notifyOnRecovery,
+        message: formatAlertMessage({ rule, value, serviceName, status: nextStatus }),
         time: new Date(sustained ? Number(previous.firstTriggeredAt || now) : now).toISOString(),
         firstTriggeredAt: sustained
           ? Number(previous.firstTriggeredAt || now)
@@ -641,9 +663,11 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
       }
 
        const repository = serviceContext.alertOutboxRepository as AlertOutboxRepository | undefined;
-       const shouldQueueNotification = nextAlert.status === 'active' &&
+       const shouldQueueActiveNotification = nextAlert.status === 'active' &&
          (!previous.lastNotificationAt || now - Number(previous.lastNotificationAt) >= ALERT_NOTIFICATION_COOLDOWN_MS);
-       if (repository && !shouldQueueNotification) {
+       const shouldQueueRecoveryNotification = previousStatus === 'active' &&
+         nextAlert.status === 'resolved' && rule.notifyOnRecovery;
+       if (repository && !shouldQueueActiveNotification && !shouldQueueRecoveryNotification) {
          await repository.saveInstance({
            tenantId: String(serviceContext.tenantId || 'default'),
            alertId,
@@ -660,20 +684,23 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
          if (!stateSaved) star.logger?.warn(`[AlertEval] rule=${rule.id} saveAlertState FAILED (Redis write error)`);
        }
 
-       if (shouldQueueNotification) {
+       if (shouldQueueActiveNotification || shouldQueueRecoveryNotification) {
         if (repository) {
+          const recovery = shouldQueueRecoveryNotification;
           const created = await repository.saveInstanceAndCreateNotificationEvent({
             tenantId: String(serviceContext.tenantId || 'default'),
             alertId,
             ruleId: rule.id,
             status: nextAlert.status,
             payload: nextAlert,
-            lastNotificationAt: now,
-            eventKey: `${rule.id}:${Math.floor(now / ALERT_NOTIFICATION_COOLDOWN_MS)}`,
-            channels: [{ channel: 'InApp', target: 'in-app' }],
+            lastNotificationAt: recovery ? Number(previous.lastNotificationAt) || undefined : now,
+            eventKey: recovery
+              ? `recovered:${rule.id}:${Number(previous.firstTriggeredAt || previous.conditionStartedAt || now)}`
+              : `${rule.id}:${Math.floor(now / ALERT_NOTIFICATION_COOLDOWN_MS)}`,
+            channels: metricRuleChannels(rule),
           });
-          await saveAlertState(serviceContext, alertId, { ...nextAlert, lastNotificationAt: now });
-          star.logger?.info(`[AlertEval] rule=${rule.id} durable InApp delivery event ${created ? 'created' : 'already exists'}`);
+          await saveAlertState(serviceContext, alertId, recovery ? nextAlert : { ...nextAlert, lastNotificationAt: now });
+          star.logger?.info(`[AlertEval] rule=${rule.id} durable ${recovery ? 'recovery' : 'active'} delivery event ${created ? 'created' : 'already exists'}`);
         } else {
           const notifications = createNotificationPayloads(nextAlert, now).filter(notification => notification.channel === 'InApp');
           await Promise.all(notifications.map(notification => saveNotificationState(serviceContext, notification.id, notification)));
@@ -786,6 +813,15 @@ const buildAlertAssignees = async () => {
     isAdmin: user.power === 999,
   }));
 };
+
+const registryRuleRepository = (serviceContext: unknown): RegistryMissingAlertRepository | undefined => (serviceContext as { registryMissingAlertRepository?: RegistryMissingAlertRepository }).registryMissingAlertRepository;
+export const isSystemAdministrator = (meta: unknown) => {
+  const user = (meta as { user?: { isAdmin?: boolean; power?: number } } | undefined)?.user;
+  return Boolean(user?.isAdmin || user?.power === 999);
+};
+const isSystemAdmin = (ctx: Context) => isSystemAdministrator(ctx.meta);
+const forbidden = (): HttpResponseItem => ({ status: 403, data: { code: HttpResponseCode.NoPermissionError, content: null, message: 'System administrator permission required', success: false } });
+const unavailable = (): HttpResponseItem => ({ status: 503, data: { code: HttpResponseCode.ServiceActionFaild, content: null, message: 'Registry alert persistence is unavailable', success: false } });
 
 const buildAlertRules = async (serviceContext: any, params: any) => {
   const scope = normalizeMetricsScope(params?.scope);
@@ -989,14 +1025,69 @@ const alerts = (star: Starlight) => ({
       }
     },
   },
+  'v1.registry-missing-alert-rules': {
+    metadata: { auth: true },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      if (!isSystemAdmin(ctx)) return forbidden();
+      const repository = registryRuleRepository(this);
+      if (!repository) return unavailable();
+      return { status: 200, data: { code: HttpResponseCode.Success, content: await repository.listRules(), message: '获取注册缺失告警规则成功', success: true } };
+    },
+  },
+  'v1.registry-missing-alert-rules/create': {
+    metadata: { auth: true },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      if (!isSystemAdmin(ctx)) return forbidden();
+      const repository = registryRuleRepository(this);
+      if (!repository) return unavailable();
+      try {
+        const rule = normalizeRegistryMissingRule(ctx.params as Record<string, unknown>);
+        await repository.saveRule(rule);
+        return { status: 200, data: { code: HttpResponseCode.Success, content: rule, message: '创建注册缺失告警规则成功', success: true } };
+      } catch (error) {
+        return { status: 400, data: { code: HttpResponseCode.ParamsError, content: null, message: error instanceof Error ? error.message : '告警规则参数无效', success: false } };
+      }
+    },
+  },
+  'v1.registry-missing-alert-rules/:id': {
+    metadata: { auth: true },
+    params: { id: { type: 'string', required: true } },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      if (!isSystemAdmin(ctx)) return forbidden();
+      const repository = registryRuleRepository(this);
+      if (!repository) return unavailable();
+      const previous = await repository.getRule(ctx.params.id);
+      if (!previous) return { status: 404, data: { code: HttpResponseCode.BAD_REQUEST, content: null, message: '告警规则不存在', success: false } };
+      try {
+        const rule = normalizeRegistryMissingRule({ ...previous, ...(ctx.params as Record<string, unknown>), ruleId: previous.ruleId });
+        await repository.saveRule(rule);
+        return { status: 200, data: { code: HttpResponseCode.Success, content: rule, message: '更新注册缺失告警规则成功', success: true } };
+      } catch (error) {
+        return { status: 400, data: { code: HttpResponseCode.ParamsError, content: null, message: error instanceof Error ? error.message : '告警规则参数无效', success: false } };
+      }
+    },
+  },
+  'v1.registry-missing-alert-rules/:id/delete': {
+    metadata: { auth: true },
+    params: { id: { type: 'string', required: true } },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      if (!isSystemAdmin(ctx)) return forbidden();
+      const repository = registryRuleRepository(this);
+      if (!repository) return unavailable();
+      const deleted = await repository.deleteRule(ctx.params.id);
+      return deleted ? { status: 200, data: { code: HttpResponseCode.Success, content: { id: ctx.params.id }, message: '删除注册缺失告警规则成功', success: true } } : { status: 404, data: { code: HttpResponseCode.BAD_REQUEST, content: null, message: '告警规则不存在', success: false } };
+    },
+  },
   'v1.alert-rules/create': {
     metadata: { auth: true },
     async handler(ctx: Context): Promise<HttpResponseItem> {
-      const payload = {
-        ...(ctx.params || {}),
-        id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        updatedAt: Date.now(),
-      };
+      let payload: StoredAlertRule;
+      try {
+        payload = normalizeImportedRule({ ...(ctx.params || {}), id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+        validateMetricRuleDelivery(payload.channels, payload.emailRecipients);
+      } catch (error) {
+        return { status: 400, data: { code: HttpResponseCode.ParamsError, content: null, message: error instanceof Error ? error.message : '告警规则参数无效', success: false } };
+      }
       const success = await saveAlertRule(this as any, payload);
       if (!success) {
         return {
@@ -1069,9 +1160,15 @@ const alerts = (star: Starlight) => ({
     metadata: { auth: true },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       const rules = Array.isArray((ctx.params as any)?.rules) ? (ctx.params as any).rules : [];
-      const imported: any[] = [];
-      for (const rule of rules) {
-        const normalized = normalizeImportedRule(rule);
+      let normalizedRules: StoredAlertRule[];
+      try {
+        normalizedRules = rules.map(normalizeImportedRule);
+        normalizedRules.forEach(rule => validateMetricRuleDelivery(rule.channels, rule.emailRecipients));
+      } catch (error) {
+        return { status: 400, data: { code: HttpResponseCode.ParamsError, content: null, message: error instanceof Error ? error.message : '告警规则参数无效', success: false } };
+      }
+      const imported: StoredAlertRule[] = [];
+      for (const normalized of normalizedRules) {
         const success = await saveAlertRule(this as any, normalized);
         if (success) imported.push(normalized);
       }
@@ -1091,7 +1188,13 @@ const alerts = (star: Starlight) => ({
     params: { id: { type: 'string', required: true } },
     async handler(ctx: Context): Promise<HttpResponseItem> {
       const prev = (await loadAlertRule(this as any, ctx.params.id)) || {};
-      const next = { ...prev, ...(ctx.params || {}), updatedAt: Date.now() };
+      let next: StoredAlertRule;
+      try {
+        next = normalizeImportedRule({ ...prev, ...(ctx.params || {}), id: ctx.params.id });
+        validateMetricRuleDelivery(next.channels, next.emailRecipients);
+      } catch (error) {
+        return { status: 400, data: { code: HttpResponseCode.ParamsError, content: null, message: error instanceof Error ? error.message : '告警规则参数无效', success: false } };
+      }
       const success = await saveAlertRule(this as any, next);
       if (!success) {
         return {
@@ -1206,6 +1309,38 @@ const alerts = (star: Starlight) => ({
           code: HttpResponseCode.Success,
           content: { success: true, id: ctx.params.id, status: 'resolved' },
           message: '告警已标记为已解决',
+          success: true,
+        },
+      };
+    },
+  },
+  'v1.alerts/:id/ack': {
+    metadata: { auth: true },
+    params: { id: { type: 'string', required: true } },
+    async handler(ctx: Context): Promise<HttpResponseItem> {
+      const prev = (await loadAlertState(this as any, ctx.params.id)) || {};
+      const success = await saveAlertState(this as any, ctx.params.id, {
+        ...prev,
+        status: 'acknowledged',
+        updatedAt: Date.now(),
+      });
+      if (!success) {
+        return {
+          status: 500,
+          data: {
+            code: HttpResponseCode.ServiceActionFaild,
+            content: null,
+            message: '告警状态更新失败',
+            success: false,
+          },
+        };
+      }
+      return {
+        status: 200,
+        data: {
+          code: HttpResponseCode.Success,
+          content: { success: true, id: ctx.params.id, status: 'acknowledged' },
+          message: '告警已确认',
           success: true,
         },
       };

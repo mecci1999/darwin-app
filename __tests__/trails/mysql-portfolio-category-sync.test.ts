@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { AsyncPortfolioCategoryMutation, CategoryRow, ChangeRow, ChangeWrite, MySqlPortfolioCategorySyncRepository, MutationRow, TrailsPortfolioCategorySyncModels, TrailsSyncConnection, TrailsSyncTransaction } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
+import { Actor } from '../../src/apps/trails/types';
+import { AsyncPortfolioCategoryMutation, CategoryRow, ChangeRow, ChangeWrite, MySqlPortfolioCategorySyncRepository, MutationRow, TrailsPortfolioCategorySyncModels, TrailsSyncConnection, TrailsSyncTransaction } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
 
 const owner: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const otherOwner: Actor = { tenantId: 'tenant-2', userId: 'owner-2', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };

@@ -57,4 +57,13 @@ describe('alert outbox repository', () => {
     expect(normalizeDeliveryTarget('Webhook', 'not-a-url')).toBeNull();
     expect(normalizeDeliveryTarget('Email', 'ops@example.test')).toEqual({ address: 'ops@example.test' });
   });
+
+  it('creates one durable Email delivery per normalized recipient for an event', async () => {
+    const instanceRows: Row[] = []; const eventRows: Row[] = []; const deliveryRows: Row[] = [];
+    const sequelize = { transaction: async <T>(callback: (transaction: { LOCK: { UPDATE: string } }) => Promise<T>) => callback({ LOCK: { UPDATE: 'UPDATE' } }) } as unknown as Sequelize;
+    const repository = new AlertOutboxRepository(sequelize, { instances: createModel(instanceRows), events: createModel(eventRows), deliveries: createModel(deliveryRows) });
+    await repository.createNotificationEvent({ tenantId: 'system', alertId: 'auth-absent', eventKey: 'opened:1', payload: { message: 'auth absent' }, channels: [{ channel: 'Email', target: 'ops-a@example.test' }, { channel: 'Email', target: 'ops-b@example.test' }] });
+    expect(deliveryRows).toHaveLength(2);
+    expect(new Set(deliveryRows.map(delivery => String(delivery.targetKey))).size).toBe(2);
+  });
 });

@@ -3,6 +3,7 @@ import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import {
   INFLUXDB_BUCKET,
   INFLUXDB_ORG,
@@ -43,12 +44,15 @@ import {
   buildGatewayRequestUrlDistributionItems,
   buildRequestStatsDistributionItems,
 } from './utils/request-stats';
+import { buildCardBatchCacheKey } from './utils/card-batch-cache';
 
 const APP_NAME = 'metrics-query';
 const QUERY_CACHE_TTL_MS = 30 * 1000;
+const QUERY_MEMORY_CACHE_MAX_ENTRIES = 120;
 const MAX_CONCURRENT_CARD_QUERIES = 2;
 const CARD_BATCH_EXECUTION_BUDGET_MS = 12 * 1000;
 const queryMemoryCache = new Map<string, { expiresAt: number; value: any }>();
+const inFlightCardBatches = new Map<string, Promise<HttpResponseItem>>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
@@ -946,15 +950,36 @@ const getCachedQueryResult = (key: string) => {
     queryMemoryCache.delete(key);
     return null;
   }
+  queryMemoryCache.delete(key);
+  queryMemoryCache.set(key, cached);
   return cached.value;
 };
 
 const setCachedQueryResult = (key: string, value: any) => {
+  for (const [cacheKey, cached] of queryMemoryCache) {
+    if (cached.expiresAt <= Date.now()) queryMemoryCache.delete(cacheKey);
+  }
+  while (queryMemoryCache.size >= QUERY_MEMORY_CACHE_MAX_ENTRIES) {
+    const oldestKey = queryMemoryCache.keys().next().value;
+    if (!oldestKey) break;
+    queryMemoryCache.delete(oldestKey);
+  }
   queryMemoryCache.set(key, {
     value,
     expiresAt: Date.now() + QUERY_CACHE_TTL_MS,
   });
 };
+
+const withRefreshGenerationId = (response: HttpResponseItem, refreshGenerationId: string): HttpResponseItem => ({
+  ...response,
+  data: {
+    ...response.data,
+    content: {
+      ...(response.data.content as Record<string, unknown>),
+      refreshGenerationId,
+    },
+  },
+});
 
 const runWithTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
   let timeoutHandle: NodeJS.Timeout | undefined;
@@ -1042,6 +1067,7 @@ function createMetricsQueryService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
 
   const queryService = star.createService({
     name: APP_NAME,
@@ -1208,30 +1234,48 @@ function createMetricsQueryService() {
             const scope = normalizeMetricsScope(ctx.params?.context?.scope || ctx.params?.scope);
             const cards = Array.isArray(ctx.params?.cards) ? ctx.params.cards : [];
             const batchDeadline = startedAt + CARD_BATCH_EXECUTION_BUDGET_MS;
-            const cacheKey = `metrics-query:cards:${JSON.stringify({ scope, cards, refreshGenerationId: String(ctx.params.refreshGenerationId) })}`;
+            const refreshGenerationId = String(ctx.params.refreshGenerationId);
+            const tenantId = typeof ctx.meta?.tenantId === 'string' ? ctx.meta.tenantId : undefined;
+            const cacheKey = buildCardBatchCacheKey({ scope, tenantId, cards });
             const cached = getCachedQueryResult(cacheKey);
             if (cached) {
-              return cached;
+              star.logger?.debug('Metrics card batch cache hit', {
+                scope,
+                cardCount: cards.length,
+                durationMs: Date.now() - startedAt,
+              });
+              return withRefreshGenerationId(cached, refreshGenerationId);
             }
 
-            const items = await mapWithConcurrency(
-              cards,
-              MAX_CONCURRENT_CARD_QUERIES,
-              async (card: any) => {
-                const cardStartedAt = Date.now();
-                if (cardStartedAt >= batchDeadline) {
-                  return {
-                    cardId: String(card?.cardId || ''),
-                    status: 'error',
-                    startedAt: cardStartedAt,
-                    finishedAt: cardStartedAt,
-                    error: {
-                      code: 'QUERY_TIMEOUT',
-                      message: 'Card query skipped because the batch execution budget was exhausted',
-                    },
-                  };
-                }
-                try {
+            const inFlight = inFlightCardBatches.get(cacheKey);
+            if (inFlight) {
+              star.logger?.debug('Metrics card batch joined in-flight request', {
+                scope,
+                cardCount: cards.length,
+                durationMs: Date.now() - startedAt,
+              });
+              return withRefreshGenerationId(await inFlight, refreshGenerationId);
+            }
+
+            const batch = (async (): Promise<HttpResponseItem> => {
+              const items = await mapWithConcurrency(
+                cards,
+                MAX_CONCURRENT_CARD_QUERIES,
+                async (card: any) => {
+                  const cardStartedAt = Date.now();
+                  if (cardStartedAt >= batchDeadline) {
+                    return {
+                      cardId: String(card?.cardId || ''),
+                      status: 'error',
+                      startedAt: cardStartedAt,
+                      finishedAt: cardStartedAt,
+                      error: {
+                        code: 'QUERY_TIMEOUT',
+                        message: 'Card query skipped because the batch execution budget was exhausted',
+                      },
+                    };
+                  }
+                  try {
                   const validation = validateQuerySpec(
                     { ...(card?.query || {}), scope: card?.query?.scope || scope },
                     normalizeMetricsScope,
@@ -1269,38 +1313,52 @@ function createMetricsQueryService() {
                     data,
                     cache: { hit: false },
                   };
-                } catch (error: any) {
-                  const isTimeout = error?.name === 'CardQueryTimeoutError';
-                  return {
-                    cardId: String(card?.cardId || ''),
-                    status: 'error',
-                    startedAt: cardStartedAt,
-                    finishedAt: Date.now(),
-                    error: {
-                      code: isTimeout ? 'QUERY_TIMEOUT' : 'QUERY_EXECUTION_FAILED',
-                      message: error?.message || 'Query execution failed',
-                    },
-                  };
-                }
-              },
-            );
-
-            const response = {
-              status: 200,
-              data: {
-                code: HttpResponseCode.Success,
-                content: {
-                  refreshGenerationId: String(ctx.params.refreshGenerationId),
-                  items,
-                  startedAt,
-                  finishedAt: Date.now(),
+                  } catch (error: any) {
+                    const isTimeout = error?.name === 'CardQueryTimeoutError';
+                    return {
+                      cardId: String(card?.cardId || ''),
+                      status: 'error',
+                      startedAt: cardStartedAt,
+                      finishedAt: Date.now(),
+                      error: {
+                        code: isTimeout ? 'QUERY_TIMEOUT' : 'QUERY_EXECUTION_FAILED',
+                        message: error?.message || 'Query execution failed',
+                      },
+                    };
+                  }
                 },
-                message: '查询卡片数据成功',
-                success: true,
-              },
-            };
-            setCachedQueryResult(cacheKey, response);
-            return response;
+              );
+
+              const response = {
+                status: 200,
+                data: {
+                  code: HttpResponseCode.Success,
+                  content: {
+                    items,
+                    startedAt,
+                    finishedAt: Date.now(),
+                  },
+                  message: '查询卡片数据成功',
+                  success: true,
+                },
+              };
+              setCachedQueryResult(cacheKey, response);
+              star.logger?.info('Metrics card batch completed', {
+                scope,
+                cardCount: cards.length,
+                durationMs: Date.now() - startedAt,
+                successfulCards: items.filter((item) => item.status === 'success').length,
+                failedCards: items.filter((item) => item.status !== 'success').length,
+                cacheEntries: queryMemoryCache.size,
+              });
+              return response;
+            })();
+            inFlightCardBatches.set(cacheKey, batch);
+            try {
+              return withRefreshGenerationId(await batch, refreshGenerationId);
+            } finally {
+              inFlightCardBatches.delete(cacheKey);
+            }
           } catch (error) {
             star.logger?.error('Query metric cards failed:', error);
             return {

@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import {
   processTrustedPhotoshopPackageDerivatives,
   TrustedPhotoshopPackageDerivativeOrchestrationError,
-} from '../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator';
+} from '../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator';
 
 const jpeg = (width: number, height: number) => sharp({
   create: { width, height, channels: 3, background: 'navy' },
@@ -29,7 +29,7 @@ const packageEntries = async () => [
 
 describe('Trails trusted Photoshop package derivative orchestrator', () => {
   afterEach(() => {
-    jest.dontMock('../../src/apps/starlight/trails/utils/trusted-jpeg-processor');
+    jest.dontMock('../../src/apps/trails/utils/trusted-jpeg-processor');
     jest.resetModules();
   });
 
@@ -75,14 +75,14 @@ describe('Trails trusted Photoshop package derivative orchestrator', () => {
 
   it('redacts an encoder rejection atomically', async () => {
     jest.resetModules();
-    jest.doMock('../../src/apps/starlight/trails/utils/trusted-jpeg-processor', () => {
-      const actual = jest.requireActual<typeof import('../../src/apps/starlight/trails/utils/trusted-jpeg-processor')>(
-        '../../src/apps/starlight/trails/utils/trusted-jpeg-processor',
+    jest.doMock('../../src/apps/trails/utils/trusted-jpeg-processor', () => {
+      const actual = jest.requireActual<typeof import('../../src/apps/trails/utils/trusted-jpeg-processor')>(
+        '../../src/apps/trails/utils/trusted-jpeg-processor',
       );
       return { ...actual, processTrustedJpegDerivatives: jest.fn().mockRejectedValue(new Error('private encoder detail')) };
     });
-    const { processTrustedPhotoshopPackageDerivatives: processWithRejectedEncoder }: typeof import('../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator') = require('../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator');
-    const { processTrustedJpegDerivatives }: typeof import('../../src/apps/starlight/trails/utils/trusted-jpeg-processor') = require('../../src/apps/starlight/trails/utils/trusted-jpeg-processor');
+    const { processTrustedPhotoshopPackageDerivatives: processWithRejectedEncoder }: typeof import('../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator') = require('../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator');
+    const { processTrustedJpegDerivatives }: typeof import('../../src/apps/trails/utils/trusted-jpeg-processor') = require('../../src/apps/trails/utils/trusted-jpeg-processor');
 
     await expect(processWithRejectedEncoder(await packageEntries())).rejects.toMatchObject({
       name: 'TrustedPhotoshopPackageDerivativeOrchestrationError',
@@ -92,7 +92,7 @@ describe('Trails trusted Photoshop package derivative orchestrator', () => {
   });
 
   it('depends only on the importer and trusted JPEG processor', () => {
-    const source = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator'), 'utf8');
+    const source = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator'), 'utf8');
     expect(source).toMatch(/from ['"]\.\/trusted-photoshop-publication-package-importer['"]/);
     expect(source).toMatch(/from ['"]\.\/trusted-jpeg-processor['"]/);
     expect(source).not.toMatch(/from ['"](?:fs|path|stream|fflate|.*registry|.*actions|.*storage|.*delivery)['"]/);

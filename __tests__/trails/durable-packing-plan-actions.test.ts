@@ -1,8 +1,8 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurablePackingPlan, DurablePackingPlanStore } from '../../src/apps/starlight/trails/types';
-import { TrailsDurablePackingPlanStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurablePackingPlan';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurablePackingPlan, DurablePackingPlanStore } from '../../src/apps/trails/types';
+import { TrailsDurablePackingPlanStaleVersionError } from '../../src/apps/trails/repository/mysqlDurablePackingPlan';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'field-user-1', isAdmin: false };
 const admin: Actor = { tenantId: actor.tenantId, userId: 'field-user-2', isAdmin: true, creatorSpaceRole: 'creator-space-owner' };

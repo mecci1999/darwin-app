@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { LocationCardAuditModel, LocationCardModel, LocationCardMutationModel, MySqlDurableLocationCardRepository, TrailsDurableLocationCardStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableLocationCard';
+import { Actor } from '../../src/apps/trails/types';
+import { LocationCardAuditModel, LocationCardModel, LocationCardMutationModel, MySqlDurableLocationCardRepository, TrailsDurableLocationCardStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableLocationCard';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: owner.tenantId, userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: owner.userId };

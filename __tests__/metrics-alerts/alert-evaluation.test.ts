@@ -1,7 +1,7 @@
 jest.mock(
   'typings',
   () => ({
-    HttpResponseCode: { Success: 0, ServiceActionFaild: 500 },
+    HttpResponseCode: { Success: 0, ParamsError: 400, ServiceActionFaild: 500 },
   }),
   { virtual: true },
 );
@@ -158,6 +158,70 @@ describe('metrics alert evaluation', () => {
     expect(serviceContext.getServicesList).not.toHaveBeenCalled();
   });
 
+  it('fans out normalized Email recipients with InApp delivery through the durable outbox', async () => {
+    const redis = createRedisMock();
+    const now = Date.now();
+    await redis.set('metrics:alerts:rule:fanout-rule', JSON.stringify({
+      id: 'fanout-rule', name: 'Fan out', service: 'gateway', metric: 'service.cpu.usage',
+      operator: '>', threshold: 80, duration: 1, level: 'critical', enabled: true,
+      channels: ['InApp', 'Email'], emailRecipients: [' OPS@example.test ', 'ops@example.test', 'other@example.test'],
+      notifyOnRecovery: true,
+    }));
+    await redis.set('metrics:alerts:state:alert-rule-fanout-rule', JSON.stringify({ conditionStartedAt: now - 2 * 60 * 1000 }));
+    jest.spyOn(InfluxDBHandler, 'getBucketName').mockReturnValue('metrics');
+    jest.spyOn(InfluxDBHandler, 'queryMetrics').mockResolvedValue([{ _value: 0.95 }]);
+    const outbox = { saveInstance: jest.fn(async () => undefined), saveInstanceAndCreateNotificationEvent: jest.fn(async () => true) };
+
+    await evaluateAlertRules({ redis, tenantId: 'tenant-a', alertOutboxRepository: outbox }, { logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } } as any);
+
+    expect(outbox.saveInstanceAndCreateNotificationEvent).toHaveBeenCalledWith(expect.objectContaining({
+      channels: [
+        { channel: 'InApp', target: 'in-app' },
+        { channel: 'Email', target: 'ops@example.test' },
+        { channel: 'Email', target: 'other@example.test' },
+      ],
+    }));
+  });
+
+  it('emits exactly one recovery event only for an active-to-resolved rule with recovery enabled', async () => {
+    const redis = createRedisMock();
+    const activeSince = Date.now() - 10 * 60 * 1000;
+    await redis.set('metrics:alerts:rule:recovery-rule', JSON.stringify({
+      id: 'recovery-rule', name: 'Recovery', service: 'gateway', metric: 'service.cpu.usage',
+      operator: '>', threshold: 80, duration: 1, level: 'warning', enabled: true,
+      channels: ['InApp', 'Email'], emailRecipients: ['Ops@example.test'], notifyOnRecovery: true,
+    }));
+    await redis.set('metrics:alerts:state:alert-rule-recovery-rule', JSON.stringify({
+      status: 'active', firstTriggeredAt: activeSince, conditionStartedAt: activeSince, lastNotificationAt: activeSince,
+    }));
+    jest.spyOn(InfluxDBHandler, 'getBucketName').mockReturnValue('metrics');
+    jest.spyOn(InfluxDBHandler, 'queryMetrics').mockResolvedValue([{ _value: 0.2 }]);
+    const outbox = { saveInstance: jest.fn(async () => undefined), saveInstanceAndCreateNotificationEvent: jest.fn(async () => true) };
+    const context = { redis, tenantId: 'tenant-a', alertOutboxRepository: outbox };
+    const star = { logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } } as any;
+
+    await evaluateAlertRules(context, star);
+    await evaluateAlertRules(context, star);
+
+    expect(outbox.saveInstanceAndCreateNotificationEvent).toHaveBeenCalledTimes(1);
+    expect(outbox.saveInstanceAndCreateNotificationEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'resolved', eventKey: `recovered:recovery-rule:${activeSince}`,
+      channels: [{ channel: 'InApp', target: 'in-app' }, { channel: 'Email', target: 'ops@example.test' }],
+    }));
+  });
+
+  it('rejects Email rules without recipients on create, import, and update', async () => {
+    const redis = createRedisMock();
+    const actions = createAlertActions({ logger: { error: jest.fn() } } as any) as any;
+    const context = { redis, getServicesList: jest.fn(async () => ({ services: [] })) };
+    const invalid = { name: 'No recipient', service: 'gateway', metric: 'service.cpu.usage', operator: '>', threshold: 80, duration: 1, level: 'warning', channels: ['Email'] };
+
+    await expect(actions['v1.alert-rules/create'].handler.call(context, { params: invalid })).resolves.toMatchObject({ status: 400 });
+    await expect(actions['v1.alert-rules/import'].handler.call(context, { params: { rules: [invalid] } })).resolves.toMatchObject({ status: 400 });
+    await redis.set('metrics:alerts:rule:existing', JSON.stringify({ ...invalid, id: 'existing', channels: ['InApp'] }));
+    await expect(actions['v1.alert-rules/:id'].handler.call(context, { params: { id: 'existing', channels: ['Email'], emailRecipients: [] } })).resolves.toMatchObject({ status: 400 });
+  });
+
   it('keeps existing alert rules when updating a single rule', async () => {
     const redis = createRedisMock();
     await redis.set(
@@ -172,6 +236,7 @@ describe('metrics alert evaluation', () => {
         level: 'warning',
         enabled: true,
         channels: ['Email'],
+        emailRecipients: ['ops@example.test'],
       }),
     );
     await redis.set(
@@ -186,6 +251,7 @@ describe('metrics alert evaluation', () => {
         level: 'warning',
         enabled: true,
         channels: ['Webhook'],
+        emailRecipients: ['ops@example.test'],
       }),
     );
     await redis.set(
@@ -226,6 +292,7 @@ describe('metrics alert evaluation', () => {
         level: 'warning',
         enabled: true,
         channels: ['Email'],
+        emailRecipients: ['ops@example.test'],
       },
     });
 

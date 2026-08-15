@@ -3,6 +3,7 @@ import { isTransportDebugEnabled } from 'config';
 import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import microAppActions, { requireMicroAppTicketSecret } from './actions';
 
 const APP_NAME = 'micro-app';
@@ -46,6 +47,7 @@ async function initializeMicroAppService() {
     }) as Starlight;
 
     registerDarwinLogForwarding(star);
+      installDarwinKafkaRecoveryLifecycle(star);
 
     star.createService({
       name: APP_NAME,

@@ -1,5 +1,5 @@
-import { Actor, DEFAULT_PUBLIC_SITE_CHROME, EffectivePublicSiteContent } from '../../src/apps/starlight/trails/types';
-import { MySqlPublicSiteContentRepository, PublicSiteContentModel } from '../../src/apps/starlight/trails/repository/mysqlPublicSiteContent';
+import { Actor, DEFAULT_PUBLIC_SITE_CHROME, EffectivePublicSiteContent } from '../../src/apps/trails/types';
+import { MySqlPublicSiteContentRepository, PublicSiteContentModel } from '../../src/apps/trails/repository/mysqlPublicSiteContent';
 
 const actor: Actor = { tenantId: 'tenant-site', userId: 'owner-site', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const timestamp = new Date('2026-08-01T00:00:00.000Z');

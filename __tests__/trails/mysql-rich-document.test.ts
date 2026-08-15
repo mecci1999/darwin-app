@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { createRichDocumentMediaValidator, MySqlRichDocumentRepository, RichDocumentModel, RichDocumentRevisionModel, validateRichDocument } from '../../src/apps/starlight/trails/repository/mysqlRichDocument';
+import { Actor } from '../../src/apps/trails/types';
+import { createRichDocumentMediaValidator, MySqlRichDocumentRepository, RichDocumentModel, RichDocumentRevisionModel, validateRichDocument } from '../../src/apps/trails/repository/mysqlRichDocument';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const doc = { type: 'doc' as const, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'One.' }] }] };

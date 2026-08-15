@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { MySqlShootingLocationRepository, ShootingLocationAuditModel, ShootingLocationModel, ShootingLocationMutationModel, TrailsShootingLocationStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlShootingLocation';
+import { Actor } from '../../src/apps/trails/types';
+import { MySqlShootingLocationRepository, ShootingLocationAuditModel, ShootingLocationModel, ShootingLocationMutationModel, TrailsShootingLocationStaleVersionError } from '../../src/apps/trails/repository/mysqlShootingLocation';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: owner.tenantId, userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: owner.userId };

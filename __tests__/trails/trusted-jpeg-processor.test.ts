@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import {
   processTrustedJpegDerivatives,
   TrustedJpegProcessingError,
-} from '../../src/apps/starlight/trails/utils/trusted-jpeg-processor';
+} from '../../src/apps/trails/utils/trusted-jpeg-processor';
 
 const buildJpeg = (width: number, height: number, options: { orientation?: number; withMetadata?: boolean } = {}) => {
   let pipeline = sharp({

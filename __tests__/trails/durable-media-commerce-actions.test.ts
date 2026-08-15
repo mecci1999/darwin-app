@@ -1,8 +1,8 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableMediaAssetRegistryStore, DurableMediaCommerceStore } from '../../src/apps/starlight/trails/types';
-import { TrailsDurableMediaCommerceStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableMediaCommerce';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableMediaAssetRegistryStore, DurableMediaCommerceStore } from '../../src/apps/trails/types';
+import { TrailsDurableMediaCommerceStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableMediaCommerce';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const buyer: Actor = { tenantId: owner.tenantId, userId: 'buyer-a', isAdmin: false };
@@ -12,7 +12,7 @@ const store = (overrides: Partial<DurableMediaCommerceStore> = {}): DurableMedia
   createMedia: jest.fn(async () => ({ id: 'media-1', tenantId: owner.tenantId, ownerUserId: owner.userId, title: 'Night', summary: 'Sky', status: 'draft' as const, publicDerivativeReferences: [], resourceVersion: '1', createdAt: '', updatedAt: '' })), transitionMedia: jest.fn(), createEdition: jest.fn(async () => ({ id: 'edition-1', tenantId: owner.tenantId, ownerUserId: owner.userId, mediaId: 'media-1', title: 'Paper', description: 'Fine', currency: 'USD', priceMinor: 0, status: 'draft' as const, resourceVersion: '1', createdAt: '', updatedAt: '' })), transitionEdition: jest.fn(), inquireCommercial: jest.fn(), requestDownloadLicense: jest.fn(), decideDownloadLicense: jest.fn(), createOrder: jest.fn(), transitionOrder: jest.fn(), listPublic: jest.fn(async () => ({ media: [{ id: 'media-1', tenantId: owner.tenantId, ownerUserId: owner.userId, title: 'Night', summary: 'Sky', status: 'published' as const, publicDerivativeReferences: [{ reference: 'preview_1' }], resourceVersion: '2', createdAt: '', updatedAt: '' }], editions: [{ id: 'edition-1', tenantId: owner.tenantId, ownerUserId: owner.userId, mediaId: 'media-1', title: 'Paper', description: 'Fine', currency: 'USD', priceMinor: 1200, status: 'sellable' as const, resourceVersion: '2', createdAt: '', updatedAt: '' }] })), listBuyer: jest.fn(async () => ({ inquiries: [], requests: [], entitlements: [], orders: [] })), listOwner: jest.fn(async () => ({ media: [], editions: [], inquiries: [], requests: [], entitlements: [], orders: [] })), ...overrides,
 });
 const registry = (overrides: Partial<DurableMediaAssetRegistryStore> = {}): DurableMediaAssetRegistryStore => ({
-  listWorkspacePicker: jest.fn(async () => [{ id: 'asset-1', lifecycle: 'published' as const, readiness: 'ready' as const, mimeType: 'image/jpeg', renditions: [{ name: 'grid-800' as const, width: 800, height: 600, reference: 'grid_ref' }]}]), register: jest.fn(), registerVariant: jest.fn(), persistArtifacts: jest.fn(), publish: jest.fn(), ...overrides,
+  listWorkspacePicker: jest.fn(async () => [{ id: 'asset-1', lifecycle: 'published' as const, readiness: 'ready' as const, mimeType: 'image/jpeg', renditions: [{ name: 'grid-800' as const, width: 800, height: 600, reference: 'grid_ref' }]}]), listPublic: jest.fn(async () => []), register: jest.fn(), approvePublicDerivatives: jest.fn(), persistArtifacts: jest.fn(), publish: jest.fn(), ...overrides,
 });
 
 describe('v2 durable media commerce actions', () => {

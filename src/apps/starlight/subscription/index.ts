@@ -8,6 +8,7 @@ import { isTransportDebugEnabled } from 'config';
 import { Context, Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import '../../../utils/loadEnv';
 import createActions from './actions';
 import billingActions from './actions/billing';
@@ -131,6 +132,7 @@ function createSubscriptionService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
 
   // 创建订阅管理服务
   const subscriptionService = star.createService({

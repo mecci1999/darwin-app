@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import {
   importTrustedPhotoshopPublicationPackage,
   TrustedPhotoshopPublicationPackageImportError,
-} from '../../src/apps/starlight/trails/utils/trusted-photoshop-publication-package-importer';
+} from '../../src/apps/trails/utils/trusted-photoshop-publication-package-importer';
 
 const jpeg = (width: number, height: number, orientation?: number) => {
   let image = sharp({ create: { width, height, channels: 3, background: 'navy' } });
@@ -110,7 +110,7 @@ describe('Trails trusted Photoshop website publication package importer', () => 
   });
 
   it('has no filesystem, archive, request, storage, registry, processing, or delivery dependency', () => {
-    const source = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-photoshop-publication-package-importer'), 'utf8');
+    const source = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-photoshop-publication-package-importer'), 'utf8');
     expect(source).not.toMatch(/from ['"](?:fs|path|stream|fflate|sharp.*processor|.*registry|.*actions|.*delivery)['"]/);
     expect(source).not.toMatch(/(?:processTrustedJpegDerivatives|createReadStream\(|readFile\(|writeFile\(|\.upload\()/);
   });

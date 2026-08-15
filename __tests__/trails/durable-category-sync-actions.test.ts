@@ -1,8 +1,8 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { TrailsSyncDuplicateSlugError, TrailsSyncPersistenceError } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
-import { Actor, DurablePortfolioCategoryPushConflict, DurablePortfolioCategoryPushResult, DurablePortfolioCategorySync, TrailsState } from '../../src/apps/starlight/trails/types';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { TrailsSyncDuplicateSlugError, TrailsSyncPersistenceError } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
+import { Actor, DurablePortfolioCategoryPushConflict, DurablePortfolioCategoryPushResult, DurablePortfolioCategorySync, TrailsState } from '../../src/apps/trails/types';
 
 const owner: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const participant: Actor = { tenantId: owner.tenantId, userId: 'participant-1', isAdmin: false };

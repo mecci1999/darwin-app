@@ -13,6 +13,10 @@ import {
   resolveSystemServiceIdentity,
 } from './system-telemetry';
 import { normalizeRssMemoryValue } from './memory-units';
+import {
+  projectTrailsCatalogService,
+  TRAILS_EXTERNAL_SERVICE,
+} from '../../../../../../shared/trails-contract';
 
 type MetricsDatasetScope = 'tenant' | 'system';
 
@@ -42,7 +46,7 @@ const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
 const normalizeServiceMetricKey = (value: unknown) => {
   const raw = String(value || '').trim();
-  return raw.startsWith('system:') ? raw.slice('system:'.length) : raw;
+  return projectTrailsCatalogService(raw.startsWith('system:') ? raw.slice('system:'.length) : raw);
 };
 
 const serviceMetricKeyFlux = `if exists r.source and string(v: r.source) == "gateway-ingress" and exists r.service then string(v: r.service) else if exists r.target_service then string(v: r.target_service) else if exists r.targetService then string(v: r.targetService) else if exists r.destination_service then string(v: r.destination_service) else if exists r.peer_service then string(v: r.peer_service) else if exists r.service then string(v: r.service) else if exists r.serviceId then string(v: r.serviceId) else if exists r["service.name"] then string(v: r["service.name"]) else if exists r["service.id"] then string(v: r["service.id"]) else if exists r.service_name then string(v: r.service_name) else ""`;
@@ -55,6 +59,13 @@ const addMetricValue = (map: Map<string, number>, key: unknown, value: unknown) 
   const numericValue = Number(value || 0);
   if (!normalizedKey || !Number.isFinite(numericValue)) return;
   map.set(normalizedKey, (map.get(normalizedKey) || 0) + numericValue);
+};
+
+const setMaximumMetricValue = (map: Map<string, number>, key: unknown, value: unknown) => {
+  const normalizedKey = normalizeServiceMetricKey(key);
+  const numericValue = Number(value || 0);
+  if (!normalizedKey || !Number.isFinite(numericValue)) return;
+  map.set(normalizedKey, Math.max(map.get(normalizedKey) || 0, numericValue));
 };
 
 const mergeMissingMetricValues = (target: Map<string, number>, fallback: Map<string, number>) => {
@@ -145,7 +156,8 @@ const queryServiceLatencyMap = async (bucket: string, star: Star) => {
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
-  rows.forEach((row: any) => addMetricValue(map, row?.service_metric_key, Math.round(Number(row?._value || 0))));
+  // P95 values cannot be summed when several internal shards form one logical service.
+  rows.forEach((row: any) => setMaximumMetricValue(map, row?.service_metric_key, Math.round(Number(row?._value || 0))));
   star.logger?.info('metrics.catalog.service-p95-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
@@ -414,7 +426,7 @@ export const buildServiceCatalogSnapshot = async (
   const bucket = InfluxDBHandler.getBucketName();
   const serviceNames = new Set<string>();
   nodes.forEach((node: any) => {
-    getNodeServiceNames(node).forEach((name: string) => serviceNames.add(name));
+    getNodeServiceNames(node).forEach((name: string) => serviceNames.add(projectTrailsCatalogService(name)));
   });
 
   const { qpsMap, latencyMap, errorRateMap, runtimeMap } = bucket
@@ -442,11 +454,14 @@ export const buildServiceCatalogSnapshot = async (
 
   const map = new Map<string, any>();
   nodes.forEach((node: any) => {
-    getNodeServiceNames(node).forEach((name: string) => {
+    getNodeServiceNames(node).forEach((registeredName: string) => {
+      const name = projectTrailsCatalogService(registeredName);
       if (!map.has(name)) {
         const identity = resolveSystemServiceIdentity(name);
-        const isSystemService = isDarwinSystemService(name);
-        const id = isSystemService ? buildSystemServiceId(name) : name;
+        // Every live Node-Universe registration is an application runtime service.
+        // Membership comes from the registry on every snapshot, not a client list.
+        const isSystemService = true;
+        const id = isDarwinSystemService(name) ? buildSystemServiceId(name) : name;
         const qps = getMetricMapValue(qpsMap, name, id);
         const latency = getMetricMapValue(latencyMap, name, id);
         const errorRate = getMetricMapValue(errorRateMap, name, id);
@@ -454,6 +469,7 @@ export const buildServiceCatalogSnapshot = async (
         map.set(name, {
           id,
           name,
+          displayName: name === TRAILS_EXTERNAL_SERVICE.id ? TRAILS_EXTERNAL_SERVICE.displayName : name,
           version: identity.runtime || '1.0.0',
           instances: 0,
           health: deriveHealth(0, latency, errorRate),
@@ -490,11 +506,11 @@ export const buildServiceCatalogSnapshot = async (
   });
 
   let list = Array.from(map.values()).filter((service: any) =>
-    scope === 'system' ? isDarwinSystemService(service.id) : !isDarwinSystemService(service.id),
+    scope === 'system' ? service.visibilityScope === 'system-admin' : service.visibilityScope === 'tenant',
   );
 
   if (keyword) {
-    list = list.filter((item) => String(item.name).includes(keyword));
+    list = list.filter((item) => String(item.name).includes(keyword) || String(item.displayName || '').includes(keyword));
   }
   if (statusFilter.length > 0 && !statusFilter.includes('all')) {
     list = list.filter(

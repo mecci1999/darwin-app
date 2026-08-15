@@ -15,6 +15,7 @@ import { isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import createActions from './actions';
 import {
   APP_NAME,
@@ -34,6 +35,7 @@ import { coreEvents, lifecycleEvents } from './events';
 import createMethods from './methods';
 import { MetricsState } from './types';
 import { AlertEngine } from './utils/alert-engine';
+import { createServiceReadiness } from 'core/readiness/service-readiness';
 
 // 服务状态管理
 const metricsState: MetricsState = {
@@ -149,6 +151,8 @@ function createMetricsService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
+  const readiness = createServiceReadiness(star, { serviceName: APP_NAME });
 
   // 创建指标数据处理服务
   const metricsService = star.createService({
@@ -259,6 +263,7 @@ function createMetricsService() {
         };
 
         this.logger.info('Metrics service started successfully');
+        readiness.markStarted();
       } catch (error) {
         this.logger.error('Failed to start metrics service:', error);
         throw error;
@@ -266,6 +271,7 @@ function createMetricsService() {
     },
 
     async stopped() {
+      readiness.markStopping();
       this.logger.info('Stopping metrics service...');
 
       try {
@@ -327,22 +333,29 @@ function createMetricsService() {
     events: lifecycleEvents,
   });
 
-  return { star, metricsService, metricsLifecycleService };
+  return { star, metricsService, metricsLifecycleService, readiness };
 }
 
 // 启动服务
 async function startMetricsService() {
   try {
-    const { star, metricsService } = createMetricsService();
+    const { star, metricsService, readiness } = createMetricsService();
 
     // 启动微服务
-    await star.start();
-    star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
+    await readiness.start();
+    try {
+      await star.start();
+      star.logger?.info(`微服务 ${APP_NAME.toUpperCase()} 启动成功`);
+    } catch (error) {
+      await readiness.stop();
+      throw error;
+    }
 
     // 优雅关闭处理
     process.on('SIGINT', async () => {
       star.logger?.info('Received SIGINT, shutting down gracefully...');
       await star.stop();
+      await readiness.stop();
       process.exit(0);
     });
 

@@ -1,0 +1,25 @@
+services:
+  auth:
+    image: darwin-app:auth-service-readiness-20260813.1
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  user:
+    image: darwin-app:user-service-readiness-20260813.1
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  metrics:
+    image: darwin-app:metrics-service-readiness-20260813.1
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s

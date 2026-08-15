@@ -1,7 +1,7 @@
 import { ITrailsTrustedPhotoshopIngestionArtifactTableAttributes } from '../../src/db/mysql/models/trailsTrustedPhotoshopIngestionArtifact';
 import { ITrailsTrustedPhotoshopIngestionOperationTableAttributes } from '../../src/db/mysql/models/trailsTrustedPhotoshopIngestionOperation';
 import { ITrailsTrustedPhotoshopStorageWriteFenceTableAttributes } from '../../src/db/mysql/models/trailsTrustedPhotoshopStorageWriteFence';
-import { MySqlTrustedPhotoshopIngestionOperationRepository, TrustedPhotoshopIngestionModels } from '../../src/apps/starlight/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
+import { MySqlTrustedPhotoshopIngestionOperationRepository, TrustedPhotoshopIngestionModels } from '../../src/apps/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
 
 type Operation = ITrailsTrustedPhotoshopIngestionOperationTableAttributes & { createdAt: Date; updatedAt: Date };
 type Artifact = ITrailsTrustedPhotoshopIngestionArtifactTableAttributes & { createdAt: Date; updatedAt: Date };

@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { MediaAssetRegistryModels, MySqlMediaAssetRegistryRepository } from '../../src/apps/starlight/trails/repository/mysqlMediaAssetRegistry';
+import { Actor } from '../../src/apps/trails/types';
+import { MediaAssetRegistryModels, MySqlMediaAssetRegistryRepository } from '../../src/apps/trails/repository/mysqlMediaAssetRegistry';
 import { ITrailsMediaAssetRegistryTableAttributes } from '../../src/db/mysql/models/trailsMediaAssetRegistry';
 import { ITrailsMediaAssetVariantTableAttributes } from '../../src/db/mysql/models/trailsMediaAssetVariant';
 import { ITrailsMediaAssetArtifactTableAttributes } from '../../src/db/mysql/models/trailsMediaAssetArtifact';
@@ -107,13 +107,14 @@ describe('durable media asset registry', () => {
   it('rejects a cross-owner variant mutation and cannot publish incomplete assets', async () => {
     const store = repository();
     const created = await store.register(owner, { mutationId: 'create', expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/jpeg', privateMasterLocator: 'deployment_master_1' });
-    await expect(store.registerVariant(other, { mutationId: 'other', expectedResourceVersion: created.resourceVersion, assetId: created.id, name: 'cover-1600', publicReference: 'cover_ref', width: 1600, height: 1000, state: 'ready' })).rejects.toThrow('不属于当前创作空间');
-    await expect(store.publish(owner, { mutationId: 'publish', expectedResourceVersion: created.resourceVersion, id: created.id })).rejects.toThrow('全部ready');
+    await expect(store.approvePublicDerivatives(other, { mutationId: 'other', expectedResourceVersion: created.resourceVersion, assetId: created.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } })).rejects.toThrow('不属于当前创作空间');
+    await expect(store.publish(owner, { mutationId: 'publish', expectedResourceVersion: created.resourceVersion, id: created.id })).rejects.toThrow('完整私有衍生物矩阵');
   });
-  it('publishes only after all exact ready variants without exposing a public lookup', async () => {
+  it('publishes only after server approval derives all exact variants from private artifacts without exposing a public lookup', async () => {
     const store = repository();
     let record = await store.register(owner, { mutationId: 'create', expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/jpeg', privateMasterLocator: 'deployment_master_1' });
-    for (const name of ['grid-800', 'cover-1600', 'preview-2048'] as const) record = await store.registerVariant(owner, { mutationId: `variant_${name}`, expectedResourceVersion: record.resourceVersion, assetId: record.id, name, publicReference: `${name}_ref`, width: 800, height: 600, state: 'ready' });
+    record = await store.persistArtifacts(owner, { mutationId: 'persist', expectedResourceVersion: record.resourceVersion, assetId: record.id, artifacts: nineArtifacts() });
+    record = await store.approvePublicDerivatives(owner, { mutationId: 'approve', expectedResourceVersion: record.resourceVersion, assetId: record.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
     const published = await store.publish(owner, { mutationId: 'publish', expectedResourceVersion: record.resourceVersion, id: record.id });
     expect(published).toEqual(expect.objectContaining({ id: 'asset_1', status: 'published' }));
     expect(JSON.stringify(published)).not.toMatch(/deployment_master_1|https?:\/\/|publicReference|privateLocator/);
@@ -123,12 +124,16 @@ describe('durable media asset registry', () => {
   it('lists only current-owner published media with complete ready rendition references and no storage metadata', async () => {
     const store = repository();
     let ready = await store.register(owner, { mutationId: 'picker-ready', expectedResourceVersion: null, id: 'asset_ready', mimeType: 'image/jpeg', privateMasterLocator: 'master_locator' });
-    for (const name of ['grid-800', 'cover-1600', 'preview-2048'] as const) ready = await store.registerVariant(owner, { mutationId: `picker-${name}`, expectedResourceVersion: ready.resourceVersion, assetId: ready.id, name, publicReference: `${name}_ref`, width: 800, height: 600, state: 'ready' });
+    ready = await store.persistArtifacts(owner, { mutationId: 'picker-artifacts', expectedResourceVersion: ready.resourceVersion, assetId: ready.id, artifacts: nineArtifacts() });
+    ready = await store.approvePublicDerivatives(owner, { mutationId: 'picker-approve', expectedResourceVersion: ready.resourceVersion, assetId: ready.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
     await store.publish(owner, { mutationId: 'picker-publish', expectedResourceVersion: ready.resourceVersion, id: ready.id });
     await store.register(other, { mutationId: 'picker-other', expectedResourceVersion: null, id: 'asset_other', mimeType: 'image/jpeg', privateMasterLocator: 'other_master' });
     await store.register(owner, { mutationId: 'picker-draft', expectedResourceVersion: null, id: 'asset_draft', mimeType: 'image/jpeg', privateMasterLocator: 'draft_master' });
     const result = await store.listWorkspacePicker(owner);
-    expect(result).toEqual([{ id: 'asset_ready', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg', renditions: [{ name: 'grid-800', width: 800, height: 600, reference: 'grid-800_ref' }, { name: 'cover-1600', width: 800, height: 600, reference: 'cover-1600_ref' }, { name: 'preview-2048', width: 800, height: 600, reference: 'preview-2048_ref' }] }]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(expect.objectContaining({ id: 'asset_ready', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg' }));
+    expect(result[0].renditions).toHaveLength(3);
+    expect(result[0].renditions.map(item => item.name)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
     expect(await store.listWorkspacePicker(other)).toEqual([]);
     expect(await store.listWorkspacePicker(crossTenant)).toEqual([]);
     expect(JSON.stringify(result)).not.toMatch(/tenantId|ownerUserId|master_locator|privateLocator|objectKey|https?:\/\//);
@@ -140,18 +145,20 @@ describe('durable media asset registry', () => {
   it('projects configured public-owner ready assets through the same opaque picker boundary', async () => {
     const store = repository();
     let ready = await store.register(owner, { mutationId: 'public-create', expectedResourceVersion: null, id: 'asset_public', mimeType: 'image/jpeg', privateMasterLocator: 'master_locator' });
-    for (const name of ['grid-800', 'cover-1600', 'preview-2048'] as const) ready = await store.registerVariant(owner, { mutationId: `public-${name}`, expectedResourceVersion: ready.resourceVersion, assetId: ready.id, name, publicReference: `${name}_reference`, width: 800, height: 600, state: 'ready' });
+    ready = await store.persistArtifacts(owner, { mutationId: 'public-artifacts', expectedResourceVersion: ready.resourceVersion, assetId: ready.id, artifacts: nineArtifacts() });
+    ready = await store.approvePublicDerivatives(owner, { mutationId: 'public-approve', expectedResourceVersion: ready.resourceVersion, assetId: ready.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
     await store.publish(owner, { mutationId: 'public-publish', expectedResourceVersion: ready.resourceVersion, id: ready.id });
     const publicAssets = await store.listPublic({ tenantId: owner.tenantId, userId: owner.userId });
-    expect(publicAssets).toEqual([{ id: 'asset_public', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg', renditions: [{ name: 'grid-800', width: 800, height: 600, reference: 'grid-800_reference' }, { name: 'cover-1600', width: 800, height: 600, reference: 'cover-1600_reference' }, { name: 'preview-2048', width: 800, height: 600, reference: 'preview-2048_reference' }] }]);
+    expect(publicAssets).toHaveLength(1);
+    expect(publicAssets[0]).toEqual(expect.objectContaining({ id: 'asset_public', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg' }));
+    expect(publicAssets[0].renditions.map(item => item.name)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
     expect(JSON.stringify(publicAssets)).not.toMatch(/tenantId|ownerUserId|master_locator|privateLocator|objectKey|https?:\/\//);
   });
-  it('rejects URLs, object keys, invalid MIME and non-positive dimensions', async () => {
+  it('rejects invalid MIME, incomplete private artifacts, and invalid server approval identity', async () => {
     const store = repository();
     await expect(store.register(owner, { mutationId: 'bad', expectedResourceVersion: null, id: 'asset_1', mimeType: 'text/plain', privateMasterLocator: 'locator' })).rejects.toThrow('图片类型');
     const record = await store.register(owner, { mutationId: 'create', expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/png', privateMasterLocator: 'locator' });
-    await expect(store.registerVariant(owner, { mutationId: 'bad-reference', expectedResourceVersion: record.resourceVersion, assetId: record.id, name: 'grid-800', publicReference: 'https://bad.example/image', width: 1, height: 1, state: 'ready' })).rejects.toThrow('安全不透明引用');
-    await expect(store.registerVariant(owner, { mutationId: 'bad-size', expectedResourceVersion: record.resourceVersion, assetId: record.id, name: 'grid-800', publicReference: 'safe_ref', width: 0, height: 1, state: 'ready' })).rejects.toThrow('正整数');
+    await expect(store.approvePublicDerivatives(owner, { mutationId: 'incomplete', expectedResourceVersion: record.resourceVersion, assetId: record.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } })).rejects.toThrow('完整私有衍生物矩阵');
   });
   it('replays exact actor-scoped mutations and rejects altered reuse without mutating state', async () => {
     const store = repository();
@@ -160,12 +167,13 @@ describe('durable media asset registry', () => {
     expect(replay).toEqual(first);
     await expect(store.register(owner, { mutationId: 'create', expectedResourceVersion: null, id: 'asset_2', mimeType: 'image/jpeg', privateMasterLocator: 'locator' })).rejects.toThrow('mutationId不能用于不同的写入');
     expect(assets.has(key(owner.tenantId, 'asset_2'))).toBe(false);
-    const changed = await store.registerVariant(owner, { mutationId: 'variant', expectedResourceVersion: first.resourceVersion, assetId: first.id, name: 'grid-800', publicReference: 'grid_ref', width: 800, height: 600, state: 'ready' });
-    const changedReplay = await store.registerVariant(owner, { mutationId: 'variant', expectedResourceVersion: first.resourceVersion, assetId: first.id, name: 'grid-800', publicReference: 'grid_ref', width: 800, height: 600, state: 'ready' });
+    const withArtifacts = await store.persistArtifacts(owner, { mutationId: 'persist', expectedResourceVersion: first.resourceVersion, assetId: first.id, artifacts: nineArtifacts() });
+    const changed = await store.approvePublicDerivatives(owner, { mutationId: 'approval', expectedResourceVersion: withArtifacts.resourceVersion, assetId: first.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
+    const changedReplay = await store.approvePublicDerivatives(owner, { mutationId: 'approval', expectedResourceVersion: withArtifacts.resourceVersion, assetId: first.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
     expect(changedReplay).toEqual(changed);
-    await expect(store.registerVariant(owner, { mutationId: 'variant', expectedResourceVersion: changed.resourceVersion, assetId: first.id, name: 'cover-1600', publicReference: 'cover_ref', width: 1600, height: 1000, state: 'ready' })).rejects.toThrow('mutationId不能用于不同的写入');
+    await expect(store.approvePublicDerivatives(owner, { mutationId: 'approval', expectedResourceVersion: changed.resourceVersion, assetId: first.id, publication: { approvalId: 'approval_2', identityMode: 'workload-identity' } })).rejects.toThrow('mutationId不能用于不同的写入');
   });
-  it.each(['register', 'variant', 'publish'] as const)('replays a committed ledger race for %s without rerunning the mutation work', async (operation) => {
+  it.each(['register', 'approval', 'publish'] as const)('replays a committed ledger race for %s without rerunning the mutation work', async (operation) => {
     const store = repository();
     if (operation === 'register') {
       mutationFailure = 'race';
@@ -175,18 +183,18 @@ describe('durable media asset registry', () => {
       return;
     }
     const created = await store.register(owner, { mutationId: `seed-${operation}`, expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/jpeg', privateMasterLocator: 'locator' });
-    if (operation === 'variant') {
+    const withArtifacts = await store.persistArtifacts(owner, { mutationId: `persist-${operation}`, expectedResourceVersion: created.resourceVersion, assetId: created.id, artifacts: nineArtifacts() });
+    if (operation === 'approval') {
       mutationFailure = 'race';
-      const replay = await store.registerVariant(owner, { mutationId: 'variant-race', expectedResourceVersion: created.resourceVersion, assetId: created.id, name: 'grid-800', publicReference: 'grid_ref', width: 800, height: 600, state: 'ready' });
-      expect(replay.resourceVersion).toBe('2');
+      const replay = await store.approvePublicDerivatives(owner, { mutationId: 'approval-race', expectedResourceVersion: withArtifacts.resourceVersion, assetId: created.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
+      expect(replay.resourceVersion).toBe('3');
       expect(variants.size).toBe(0);
       return;
     }
-    let record = created;
-    for (const name of ['grid-800', 'cover-1600', 'preview-2048'] as const) record = await store.registerVariant(owner, { mutationId: `seed-${name}`, expectedResourceVersion: record.resourceVersion, assetId: record.id, name, publicReference: `${name}_ref`, width: 800, height: 600, state: 'ready' });
+    const record = await store.approvePublicDerivatives(owner, { mutationId: 'seed-approval', expectedResourceVersion: withArtifacts.resourceVersion, assetId: created.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } });
     mutationFailure = 'race';
     const replay = await store.publish(owner, { mutationId: 'publish-race', expectedResourceVersion: record.resourceVersion, id: record.id });
-    expect(replay).toEqual(expect.objectContaining({ status: 'published', resourceVersion: '5' }));
+    expect(replay).toEqual(expect.objectContaining({ status: 'published', resourceVersion: '4' }));
     expect(assets.get(key(owner.tenantId, created.id))?.status).toBe('draft');
   });
   it('rolls back resource changes on a ledger write failure and fails closed when a retry has no ledger row', async () => {
@@ -212,15 +220,16 @@ describe('durable media asset registry', () => {
     expect(assets.size).toBe(0);
     expect(mutations.size).toBe(0);
   });
-  it('propagates asset and variant deadlocks without opening replay ledger lookup', async () => {
+  it('propagates asset and approval write deadlocks without opening replay ledger lookup', async () => {
     const store = repository();
     const originalCreate = models;
     const assetDeadlockStore = new MySqlMediaAssetRegistryRepository({ async transaction<T>(work: (transaction: object) => Promise<T>) { return work({}); } }, { ...originalCreate(), assets: { ...originalCreate().assets, async create() { throw deadlock('TrailsMediaAssetRegistry'); } } }, () => at);
     await expect(assetDeadlockStore.register(owner, { mutationId: 'asset-deadlock', expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/jpeg', privateMasterLocator: 'locator' })).rejects.toMatchObject({ name: 'SequelizeDatabaseError' });
     expect(mutations.size).toBe(0);
     const created = await store.register(owner, { mutationId: 'seed-deadlock', expectedResourceVersion: null, id: 'asset_1', mimeType: 'image/jpeg', privateMasterLocator: 'locator' });
+    const persisted = await store.persistArtifacts(owner, { mutationId: 'persist-deadlock', expectedResourceVersion: created.resourceVersion, assetId: created.id, artifacts: nineArtifacts() });
     variantFailure = 'deadlock';
-    await expect(store.registerVariant(owner, { mutationId: 'variant-deadlock', expectedResourceVersion: created.resourceVersion, assetId: created.id, name: 'grid-800', publicReference: 'grid_ref', width: 800, height: 600, state: 'ready' })).rejects.toMatchObject({ name: 'SequelizeDatabaseError' });
-    expect(mutations.has(ledgerKey(owner.tenantId, owner.userId, 'variant-deadlock'))).toBe(false);
+    await expect(store.approvePublicDerivatives(owner, { mutationId: 'approval-deadlock', expectedResourceVersion: persisted.resourceVersion, assetId: created.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' } })).rejects.toMatchObject({ name: 'SequelizeDatabaseError' });
+    expect(mutations.has(ledgerKey(owner.tenantId, owner.userId, 'approval-deadlock'))).toBe(false);
   });
 });

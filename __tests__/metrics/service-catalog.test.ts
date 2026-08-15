@@ -37,7 +37,7 @@ describe('service catalog metrics snapshot', () => {
             },
           ],
         },
-      } as any,
+      } as unknown as import('node-universe').Star,
     );
 
     expect(queryMetricsMock.mock.calls[0][0]).toContain('service_metric_key');
@@ -260,5 +260,50 @@ describe('service catalog metrics snapshot', () => {
 
     await buildServiceCatalogSnapshot({ page: 1, pageSize: 1, scope: 'system' }, star);
     expect(queryMetricsMock).toHaveBeenCalledTimes(5);
+  });
+
+  it('projects live Trails action shards into one dynamically discovered system service', async () => {
+    queryMetricsMock.mockResolvedValue([]);
+    const snapshot = await buildServiceCatalogSnapshot(
+      { page: 1, pageSize: 10, scope: 'system' },
+      {
+        registry: {
+          getNodeList: () => [
+            {
+              id: 'trails-node', hostname: 'trails.local', available: true,
+              services: [{ name: 'trails-durable-content' }, { name: 'trails-durable-media' }, { name: 'trails-community' }],
+            },
+          ],
+        },
+      } as any,
+    );
+
+    expect(snapshot.services).toEqual([
+      expect.objectContaining({
+        id: 'trails', name: 'trails', displayName: '星迹', instances: 3, visibilityScope: 'system-admin',
+      }),
+    ]);
+    expect(snapshot.services.some((service) => service.name.startsWith('trails-'))).toBe(false);
+  });
+
+  it('includes an arbitrary live registry service without adding it to a client or system-name allowlist', async () => {
+    queryMetricsMock.mockResolvedValue([]);
+    const snapshot = await buildServiceCatalogSnapshot(
+      { page: 1, pageSize: 10, scope: 'system' },
+      {
+        registry: {
+          getNodeList: () => [
+            {
+              id: 'new-service-node', hostname: 'new-service.local', available: true,
+              services: [{ name: 'new-service' }],
+            },
+          ],
+        },
+      } as unknown as import('node-universe').Star,
+    );
+
+    expect(snapshot.services).toEqual([
+      expect.objectContaining({ id: 'new-service', name: 'new-service', instances: 1, visibilityScope: 'system-admin' }),
+    ]);
   });
 });

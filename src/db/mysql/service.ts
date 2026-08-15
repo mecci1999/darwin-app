@@ -147,6 +147,8 @@ export class DatabaseService {
             DataBaseTableNames.AlertInstance,
             DataBaseTableNames.AlertEvent,
             DataBaseTableNames.AlertNotificationDelivery,
+            DataBaseTableNames.RegistryMissingAlertRule,
+            DataBaseTableNames.RegistryMissingAlertIncident,
           ],
         },
       );
@@ -247,6 +249,8 @@ export class DatabaseService {
             DataBaseTableNames.AlertInstance,
             DataBaseTableNames.AlertEvent,
             DataBaseTableNames.AlertNotificationDelivery,
+            DataBaseTableNames.RegistryMissingAlertRule,
+            DataBaseTableNames.RegistryMissingAlertIncident,
           ],
         },
       );

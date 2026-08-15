@@ -1,5 +1,5 @@
-import { Actor } from '../../src/apps/starlight/trails/types';
-import { ExternalVideoReferenceAuditModel, ExternalVideoReferenceModel, ExternalVideoReferenceMutationModel, ExternalVideoReferencePortfolioModel, MySqlDurableExternalVideoReferenceRepository, TrailsDurableExternalVideoReferenceStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableExternalVideoReference';
+import { Actor } from '../../src/apps/trails/types';
+import { ExternalVideoReferenceAuditModel, ExternalVideoReferenceModel, ExternalVideoReferenceMutationModel, ExternalVideoReferencePortfolioModel, MySqlDurableExternalVideoReferenceRepository, TrailsDurableExternalVideoReferenceStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableExternalVideoReference';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: 'tenant-a', userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'owner-a' };

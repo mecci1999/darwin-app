@@ -1,8 +1,8 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, TrailsState, WeatherProvider } from '../../src/apps/starlight/trails/types';
-import { CachedWeatherService } from '../../src/apps/starlight/trails/weather';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, TrailsState, WeatherProvider } from '../../src/apps/trails/types';
+import { CachedWeatherService } from '../../src/apps/trails/weather';
 
 const actor: Actor = { tenantId: 'tenant-owner', userId: 'owner', isAdmin: false };
 const star = { emit: jest.fn() } as unknown as Starlight;

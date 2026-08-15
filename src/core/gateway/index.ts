@@ -16,6 +16,7 @@ import {
 } from 'typings';
 import { DatabaseService } from 'db/mysql';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import { parseCorsAllowedOrigins } from './cors';
 import { prepareGatewayDispatch } from './dispatch-meta';
 import gatewayMethods, { createWebSocketManager } from './methods';
@@ -39,7 +40,13 @@ import {
 import { GatewayState } from './types';
 import { GatewayHelper, WebSocketHandler } from './utils';
 import { waitForRegisteredService } from './service-discovery';
-import { remapTrailsRoute } from 'apps/starlight/trails/shards';
+import { GatewayRegistryWatchdog } from './registry-readiness';
+import { createGatewayRegistryObservability, GatewayRegistryObservability } from './registry-observability';
+import { createGatewayRegistryAlertAdapter, GatewayRegistryAlertAdapter } from './gateway-registry-alerts';
+import { createGatewayKafkaRecoveryAlertAdapter, createGatewayKafkaRecoveryReportHandler, GatewayKafkaRecoveryAlertAdapter } from './gateway-kafka-recovery-alerts';
+import { getAlertOutboxRepository } from 'apps/starlight/metrics-alerts/alert-outbox';
+import { isInternalOnlyPublicService, remapMetricsPublicRoute, resolveGatewayErrorStatus } from './metrics-route-remap';
+import { remapTrailsRoute, TRAILS_SHARD_NAMES } from '../../../../shared/trails-contract';
 
 const parsePositiveTimeout = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -104,16 +111,9 @@ const INTERNAL_ONLY_SERVICES = new Set([
   'metrics-compat',
   'metrics-query',
   'subscription-billing',
-  'trails-community',
-  'trails-content',
-  'trails-workspace',
-  'trails-durable-content',
-  'trails-durable-media',
-  'trails-durable-workspace',
-  'trails-durable-trips',
-  'trails-durable-site',
-  'trails-durable-site-public',
+  ...TRAILS_SHARD_NAMES,
 ]);
+export const isInternalOnlyService = (service: string) => INTERNAL_ONLY_SERVICES.has(service) || isInternalOnlyPublicService(service);
 
 const INTERNAL_ONLY_ACTIONS = new Set(['logs.v1.capture-darwin']);
 
@@ -228,7 +228,7 @@ const shouldSkipTopologyObservation = (service: string, action: string, params: 
 
 const shouldPreserveSlashActionPath = (service: string) => service === 'metrics-alerts';
 
-const remapMetricsRoute = (
+export const remapMetricsRoute = (
   rawService: string,
   rawVersion: string,
   rawAction: string,
@@ -237,6 +237,15 @@ const remapMetricsRoute = (
   let service = rawService;
   let action = rawAction;
   const params = { ...rawParams };
+
+  const legacyAlertAcknowledgeMatch =
+    service === 'alerts' && action.match(/^incidents\/([^/]+)\/ack$/);
+  if (legacyAlertAcknowledgeMatch) {
+    service = 'metrics-alerts';
+    params.id = legacyAlertAcknowledgeMatch[1];
+    action = 'alerts/:id/ack';
+    return { service, action, params };
+  }
 
   if (service === 'metrics') {
     if ((rawVersion === 'v2' || rawVersion === '2') && action === 'schema') {
@@ -250,10 +259,13 @@ const remapMetricsRoute = (
     }
 
     const alertResolveMatch = action.match(/^alerts\/([^/]+)\/(resolve|suppress)$/);
+    const alertAcknowledgeMatch = action.match(/^alerts\/([^/]+)\/ack$/);
     const alertAssignMatch = action.match(/^alerts\/([^/]+)\/assign$/);
     const notificationResendMatch = action.match(/^notifications\/([^/]+)\/resend$/);
     const alertRuleDeleteMatch = action.match(/^alert-rules\/([^/]+)\/delete$/);
     const alertRuleUpdateMatch = action.match(/^alert-rules\/([^/]+)$/);
+    const registryMissingRuleDeleteMatch = action.match(/^registry-missing-alert-rules\/([^/]+)\/delete$/);
+    const registryMissingRuleUpdateMatch = action.match(/^registry-missing-alert-rules\/([^/]+)$/);
     const staticMetricsAlertActions = new Set([
       'alerts',
       'alerts/assignees',
@@ -263,6 +275,8 @@ const remapMetricsRoute = (
       'alert-rules/export',
       'alert-rules/import',
       'notifications',
+      'registry-missing-alert-rules',
+      'registry-missing-alert-rules/create',
     ]);
 
     if (staticMetricsAlertActions.has(action)) {
@@ -271,6 +285,10 @@ const remapMetricsRoute = (
       service = 'metrics-alerts';
       params.id = alertResolveMatch[1];
       action = `alerts/:id/${alertResolveMatch[2]}`;
+    } else if (alertAcknowledgeMatch) {
+      service = 'metrics-alerts';
+      params.id = alertAcknowledgeMatch[1];
+      action = 'alerts/:id/ack';
     } else if (alertAssignMatch) {
       service = 'metrics-alerts';
       params.id = alertAssignMatch[1];
@@ -287,6 +305,14 @@ const remapMetricsRoute = (
       service = 'metrics-alerts';
       params.id = alertRuleUpdateMatch[1];
       action = 'alert-rules/:id';
+    } else if (registryMissingRuleDeleteMatch) {
+      service = 'metrics-alerts';
+      params.id = registryMissingRuleDeleteMatch[1];
+      action = 'registry-missing-alert-rules/:id/delete';
+    } else if (registryMissingRuleUpdateMatch) {
+      service = 'metrics-alerts';
+      params.id = registryMissingRuleUpdateMatch[1];
+      action = 'registry-missing-alert-rules/:id';
     } else if (
       action === 'alerts' ||
       action.startsWith('alerts/') ||
@@ -332,7 +358,10 @@ const remapGatewayRoute = (
   rawAction: string,
   rawParams: any = {},
 ) => {
-  const remappedMetrics = remapMetricsRoute(rawService, rawVersion, rawAction, rawParams);
+  const remappedMetrics = (() => {
+    const registryRemap = remapMetricsPublicRoute(rawService, rawVersion, rawAction, rawParams);
+    return registryRemap.service === 'metrics-alerts' ? registryRemap : remapMetricsRoute(rawService, rawVersion, rawAction, rawParams);
+  })();
   const remappedSubscription = remapSubscriptionRoute(
     remappedMetrics.service,
     remappedMetrics.action || '',
@@ -386,6 +415,11 @@ const resolveGatewayRequestPath = (reqMeta?: { originalUrl?: unknown; url?: unkn
 };
 
 let wsManager: ReturnType<typeof createWebSocketManager> | null = null;
+let registryWatchdog: GatewayRegistryWatchdog | null = null;
+let registryWatchdogTimer: NodeJS.Timeout | null = null;
+let registryObservability: GatewayRegistryObservability | null = null;
+let registryAlerts: Promise<GatewayRegistryAlertAdapter> | null = null;
+let kafkaRecoveryAlerts: Promise<GatewayKafkaRecoveryAlertAdapter> | null = null;
 
 // 主应用初始化
 async function initializeGatewayService() {
@@ -457,6 +491,8 @@ async function initializeGatewayService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+  installDarwinKafkaRecoveryLifecycle(star);
+  registryObservability = createGatewayRegistryObservability(star);
 
   // 创建网关服务
   star.createService({
@@ -499,6 +535,14 @@ async function initializeGatewayService() {
             GET: 'gateway.health',
           },
         },
+        {
+          path: '/ready',
+          authorization: false,
+          aliases: {
+            'GET /': 'gateway.ready',
+            GET: 'gateway.ready',
+          },
+        },
         // 单段 action 路由，优先处理 /api/:service/:version/:action
         {
           path: '/:service/:version/:action',
@@ -530,7 +574,7 @@ async function initializeGatewayService() {
             const routeParams = normalizeGatewayRouteParams(req);
             req.$params = routeParams;
 
-            if (INTERNAL_ONLY_SERVICES.has(String(routeParams.service || ''))) {
+            if (isInternalOnlyService(String(routeParams.service || ''))) {
               throw createInternalServiceAccessError(String(routeParams.service));
             }
 
@@ -592,7 +636,7 @@ async function initializeGatewayService() {
             }
 
             res.setHeader('Content-Type', 'application/json');
-            res.writeHead(err.code || 500);
+            res.writeHead(resolveGatewayErrorStatus(err));
             res.end(
               JSON.stringify({
                 status: HttpStatusCode.BAD_REQUEST,
@@ -645,7 +689,7 @@ async function initializeGatewayService() {
             const routeParams = normalizeGatewayRouteParams(req);
             req.$params = routeParams;
 
-            if (INTERNAL_ONLY_SERVICES.has(String(routeParams.service || ''))) {
+            if (isInternalOnlyService(String(routeParams.service || ''))) {
               throw createInternalServiceAccessError(String(routeParams.service));
             }
 
@@ -711,7 +755,7 @@ async function initializeGatewayService() {
             }
 
             res.setHeader('Content-Type', 'application/json');
-            res.writeHead(err.code || 500);
+            res.writeHead(resolveGatewayErrorStatus(err));
             res.end(
               JSON.stringify({
                 status: HttpStatusCode.BAD_REQUEST,
@@ -732,6 +776,13 @@ async function initializeGatewayService() {
       ],
     },
     actions: {
+      'kafkaRecovery.report': {
+        async handler(ctx: Context) {
+          if (!kafkaRecoveryAlerts) kafkaRecoveryAlerts = getAlertOutboxRepository().then(createGatewayKafkaRecoveryAlertAdapter);
+          const adapter = await kafkaRecoveryAlerts;
+          return createGatewayKafkaRecoveryReportHandler(adapter).report(ctx.params, ctx.meta);
+        },
+      },
       // 健康检查
       health: {
         handler(ctx: Context) {
@@ -750,12 +801,31 @@ async function initializeGatewayService() {
           };
         },
       },
+      ready: {
+        handler() {
+          const readiness = registryWatchdog?.getReadiness() || null;
+          const ready = readiness?.ready === true;
+          return {
+            status: ready ? HttpStatusCode.OK : HttpStatusCode.SERVICE_UNAVAILABLE,
+            data: {
+              code: ready ? HttpResponseCode.Success : HttpResponseCode.ServiceActionFaild,
+              content: {
+                status: readiness?.status || 'degraded',
+                service: APP_NAME,
+                checkedAt: readiness?.checkedAt || null,
+              },
+              message: ready ? 'Gateway is ready' : 'Gateway service discovery is not ready',
+              success: ready,
+            },
+          };
+        },
+      },
       // 请求分发
       dispatch: {
         timeout: 0,
         async handler(ctx: Context) {
           const rawService = String(ctx.params?.service || '');
-          if (INTERNAL_ONLY_SERVICES.has(rawService)) {
+          if (isInternalOnlyService(rawService)) {
             return createInternalServiceAccessError(rawService).data;
           }
 
@@ -1017,9 +1087,34 @@ async function initializeGatewayService() {
       } catch (error) {
         star.logger?.error('Failed to initialize WebSocket server:', error);
       }
+
+      registryWatchdog = new GatewayRegistryWatchdog(star, {
+        onDiagnostic: (event) => {
+          registryObservability?.record(event);
+          if (!registryAlerts) registryAlerts = getAlertOutboxRepository().then(createGatewayRegistryAlertAdapter);
+          void registryAlerts.then(adapter => adapter.record(event)).catch(error => {
+            registryAlerts = null;
+            star.logger?.warn('Failed to queue gateway registry alert', error);
+          });
+        },
+      });
+      void registryWatchdog.tick();
+      registryWatchdogTimer = setInterval(() => {
+        void registryWatchdog?.tick();
+      }, 15_000);
+      registryWatchdogTimer.unref();
     },
 
     async stopped() {
+      if (registryWatchdogTimer) {
+        clearInterval(registryWatchdogTimer);
+        registryWatchdogTimer = null;
+      }
+      registryWatchdog = null;
+      registryObservability?.stop();
+      registryObservability = null;
+      registryAlerts = null;
+      kafkaRecoveryAlerts = null;
       try {
         await wsManager?.cleanupWebSocket();
         star.logger?.info('WebSocket server cleaned up successfully');

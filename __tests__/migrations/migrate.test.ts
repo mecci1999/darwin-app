@@ -375,6 +375,37 @@ describe('migration runner', () => {
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsDurableJournal', ['tenant_id', 'owner_user_id', 'visibility', 'lifecycle', 'is_pinned', 'published_at', 'id'], { name: 'trails_durable_journal_public_pinned' });
   });
 
+  it('upgrades a pre-039 alert outbox and is safe to rerun', async () => {
+    const migration = migrationDefinitions.migrations.find((item: { id: string }) => item.id === '039-registry-missing-alerts-v1');
+    const tables = ['AlertNotificationDelivery'];
+    const columns: Record<string, unknown> = {};
+    const indexes: Record<string, Array<{ name: string }>> = {
+      AlertNotificationDelivery: [{ name: 'alert_delivery_event_channel' }],
+      RegistryMissingAlertRule: [],
+      RegistryMissingAlertIncident: [],
+    };
+    const queryInterface = {
+      sequelize: { query: jest.fn(async () => [[]]) },
+      showAllTables: jest.fn(async () => tables),
+      createTable: jest.fn(async (tableName: string) => { tables.push(tableName); }),
+      describeTable: jest.fn(async () => columns),
+      addColumn: jest.fn(async (_tableName: string, columnName: string) => { columns[columnName] = {}; }),
+      changeColumn: jest.fn(),
+      showIndex: jest.fn(async (tableName: string) => indexes[tableName]),
+      removeIndex: jest.fn(async (tableName: string, indexName: string) => { indexes[tableName] = indexes[tableName].filter(index => index.name !== indexName); }),
+      addIndex: jest.fn(async (tableName: string, _fields: string[], options: { name: string }) => { indexes[tableName].push({ name: options.name }); }),
+    };
+    if (!migration) throw new Error('Registry missing alert migration is not registered');
+    await migration.up({ queryInterface });
+    await migration.up({ queryInterface });
+    expect(queryInterface.createTable).toHaveBeenCalledTimes(2);
+    expect(queryInterface.createTable).toHaveBeenCalledWith('RegistryMissingAlertRule', expect.objectContaining({ rule_id: expect.objectContaining({ primaryKey: true }), service_name: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('RegistryMissingAlertIncident', expect.objectContaining({ rule_id: expect.objectContaining({ primaryKey: true }), generation: expect.any(Object) }));
+    expect(queryInterface.addColumn).toHaveBeenCalledTimes(1);
+    expect(queryInterface.removeIndex).toHaveBeenCalledWith('AlertNotificationDelivery', 'alert_delivery_event_channel');
+    expect(queryInterface.addIndex).toHaveBeenCalledWith('AlertNotificationDelivery', ['event_id', 'channel', 'target_key'], { unique: true, name: 'alert_delivery_event_channel_target' });
+  });
+
   it('retries partial migration 023 without repeating an already-completed nullable email_hash alteration', async () => {
     const migration = migrationDefinitions.migrations.find((item: { id: string }) => item.id === migrationDefinitions.TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID);
     const tables = ['TrailsGuestComment'];

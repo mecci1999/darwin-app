@@ -554,7 +554,7 @@ const buildCatalogServicesContent = async (
       identity: {
         id: service.id,
         name: service.name,
-        displayName: service.name,
+        displayName: service.displayName || service.name,
         owner: service.owner || '',
         team: service.team || '',
         env: service.env || '',

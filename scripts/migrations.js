@@ -38,6 +38,7 @@ const TRAILS_SHOOTING_LOCATION_MIGRATION_ID = '035-trails-shooting-location-v2';
 const TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID = '036-trails-content-metrics-aggregates-v1';
 const TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID = '037-trails-durable-journal-pinning-v1';
 const ALERT_DURABLE_OUTBOX_MIGRATION_ID = '038-alert-durable-outbox-v1';
+const REGISTRY_MISSING_ALERTS_MIGRATION_ID = '039-registry-missing-alerts-v1';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -667,6 +668,29 @@ const migrations = [
       });
       await ensureIndex(queryInterface, 'AlertNotificationDelivery', ['status', 'next_attempt_at', 'lease_expires_at'], { name: 'alert_delivery_claim' });
       await ensureIndex(queryInterface, 'AlertNotificationDelivery', ['event_id', 'channel'], { unique: true, name: 'alert_delivery_event_channel' });
+    },
+  },
+  {
+    // MySQL DDL implicitly commits; table checks allow an interrupted deployment to retry safely.
+    id: REGISTRY_MISSING_ALERTS_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'RegistryMissingAlertRule', {
+        rule_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, service_name: { type: DataTypes.STRING(120), allowNull: false }, for_seconds: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, deploy_grace_seconds: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, severity: { type: DataTypes.ENUM('critical', 'warning', 'info'), allowNull: false }, enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }, channels_json: { type: DataTypes.TEXT, allowNull: false }, email_recipients_json: { type: DataTypes.TEXT, allowNull: false }, notify_on_recovery: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      if (tableExists(await queryInterface.showAllTables(), 'AlertNotificationDelivery')) {
+        await ensureColumn(queryInterface, 'AlertNotificationDelivery', 'target_key', { type: DataTypes.STRING(64), allowNull: true });
+        await queryInterface.sequelize.query("UPDATE AlertNotificationDelivery SET target_key = SHA2(target_json, 256) WHERE target_key IS NULL");
+        await queryInterface.changeColumn('AlertNotificationDelivery', 'target_key', { type: DataTypes.STRING(64), allowNull: false });
+        const deliveryIndexes = await queryInterface.showIndex('AlertNotificationDelivery');
+        if (deliveryIndexes.some(index => index.name === 'alert_delivery_event_channel')) await queryInterface.removeIndex('AlertNotificationDelivery', 'alert_delivery_event_channel');
+        await ensureIndex(queryInterface, 'AlertNotificationDelivery', ['event_id', 'channel', 'target_key'], { unique: true, name: 'alert_delivery_event_channel_target' });
+      }
+      await ensureIndex(queryInterface, 'RegistryMissingAlertRule', ['service_name'], { unique: true, name: 'registry_missing_rule_service_unique' });
+      await ensureTable(queryInterface, 'RegistryMissingAlertIncident', {
+        rule_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, generation: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 }, status: { type: DataTypes.ENUM('absent', 'active', 'resolved'), allowNull: false }, absent_since: { type: DataTypes.DATE, allowNull: true }, opened_at: { type: DataTypes.DATE, allowNull: true }, resolved_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
     },
   },
 ];

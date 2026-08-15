@@ -70,6 +70,8 @@ class MainDatabaseConnection {
         DataBaseTableNames.AlertInstance,
         DataBaseTableNames.AlertEvent,
         DataBaseTableNames.AlertNotificationDelivery,
+        DataBaseTableNames.RegistryMissingAlertRule,
+        DataBaseTableNames.RegistryMissingAlertIncident,
       ],
     });
   }

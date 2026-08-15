@@ -2,6 +2,7 @@ import { DEFAULT_LOG_CATEGORY_ENABLED, isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import '../../../utils/loadEnv';
 import videoActions from './actions';
 import {
@@ -53,6 +54,7 @@ export function createVideoService() {
     metrics: { enabled: true, reporter: { type: 'Event' } },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
 
   const service = star.createService({
     name: APP_NAME,

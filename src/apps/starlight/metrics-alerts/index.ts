@@ -2,11 +2,14 @@ import { Star } from 'node-universe';
 import { isTransportDebugEnabled } from 'config';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import alerts, { evaluateAlertRules } from '../metrics/actions/alerts';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
 import { AlertOutboxRepository, getAlertOutboxRepository, PendingAlertDelivery } from './alert-outbox';
 import { instrumentServiceActions } from '../metrics/utils/action-metrics';
+import { evaluateRegistryMissingRules, getRegistryMissingAlertRepository, RegistryMissingAlertRepository } from './registry-missing';
+import { deliverEmail } from './smtp-delivery';
 import '../../../utils/loadEnv';
 import {
   INFLUXDB_BUCKET,
@@ -34,6 +37,7 @@ type RedisLeaseCacher = { client?: RedisLeaseClient; redis?: RedisLeaseClient; s
 type MetricsAlertsLifecycleService = {
   redis?: RedisLeaseCacher;
   alertOutboxRepository?: AlertOutboxRepository;
+  registryMissingAlertRepository?: RegistryMissingAlertRepository;
   alertEvaluationTimer?: NodeJS.Timeout;
   alertDeliveryTimer?: NodeJS.Timeout;
   settings: { influxdb: { url: string; token: string; org: string; bucket: string } };
@@ -55,7 +59,7 @@ const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise
   try {
     return await Promise.race([
       operation,
-      new Promise<T>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('InApp delivery timed out')), timeoutMs); }),
+      new Promise<T>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Alert delivery timed out')), timeoutMs); }),
     ]);
   } finally { if (timer) clearTimeout(timer); }
 };
@@ -64,6 +68,12 @@ const deliverInApp = async (star: Starlight, delivery: PendingAlertDelivery) => 
   if (delivery.channel !== 'InApp') throw new Error(`No delivery transport configured for ${delivery.channel}`);
   if (typeof star.call !== 'function') throw new Error('Gateway WebSocket action is unavailable');
   await withTimeout(star.call('gateway.websocket.trigger', { eventName: 'alert', data: { ...delivery.payload, tenantId: delivery.tenantId, alertId: delivery.alertId, target: delivery.target } }), DELIVERY_TIMEOUT_MS);
+};
+
+const deliverAlert = async (star: Starlight, delivery: PendingAlertDelivery) => {
+  if (delivery.channel === 'InApp') return deliverInApp(star, delivery);
+  if (delivery.channel === 'Email') return deliverEmail(delivery, DELIVERY_TIMEOUT_MS);
+  throw new Error(`No delivery transport configured for ${delivery.channel}`);
 };
 
 function createMetricsAlertsService() {
@@ -128,6 +138,7 @@ function createMetricsAlertsService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+    installDarwinKafkaRecoveryLifecycle(star);
 
   const alertsService = star.createService({
     name: APP_NAME,
@@ -150,6 +161,7 @@ function createMetricsAlertsService() {
       const service = this as unknown as MetricsAlertsLifecycleService;
       await InfluxDBHandler.initialize(service.settings.influxdb, star);
       service.alertOutboxRepository = await getAlertOutboxRepository();
+      service.registryMissingAlertRepository = await getRegistryMissingAlertRepository();
       let evaluationInFlight = false;
       let deliveryInFlight = false;
       const runEvaluation = async () => {
@@ -158,6 +170,10 @@ function createMetricsAlertsService() {
         try {
           if (!(await acquireEvaluationLease(service))) return;
           await evaluateAlertRules(service, star);
+          const outbox = service.alertOutboxRepository;
+          const registryRepository = service.registryMissingAlertRepository;
+          if (!outbox || !registryRepository) throw new Error('Registry alert persistence is not initialized');
+          await evaluateRegistryMissingRules(registryRepository, outbox, star);
         } catch (error) {
           service.logger.error('[AlertEval] Metrics alert rule evaluation failed:', error);
         } finally {
@@ -172,7 +188,7 @@ function createMetricsAlertsService() {
           if (!repository) throw new Error('Alert outbox repository is not initialized');
           const claimed = await repository.claimPendingDeliveries(`${APP_NAME}-${process.pid}`, DELIVERY_BATCH_SIZE);
           for (const delivery of claimed) {
-            try { await deliverInApp(star, delivery); await repository.completeDelivery(delivery); }
+            try { await deliverAlert(star, delivery); await repository.completeDelivery(delivery); }
             catch (error) { await repository.failDelivery(delivery, error); service.logger.warn(`[AlertDelivery] delivery=${delivery.deliveryId} retry scheduled`, error); }
           }
         } catch (error) { service.logger.error('[AlertDelivery] worker run failed:', error); }

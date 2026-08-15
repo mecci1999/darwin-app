@@ -1,8 +1,8 @@
 import { HttpResponseItem, Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableGuidedTrip, DurableGuidedTripStore, TrailsState } from '../../src/apps/starlight/trails/types';
-import { TrailsDurableGuidedTripStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableGuidedTrip';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableGuidedTrip, DurableGuidedTripStore, TrailsState } from '../../src/apps/trails/types';
+import { TrailsDurableGuidedTripStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableGuidedTrip';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: 'tenant-a', userId: 'editor-a', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: owner.userId };

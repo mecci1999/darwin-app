@@ -3,10 +3,10 @@ jest.mock('config', () => ({ MYSQL_HOST: '', MYSQL_PORT: '', MYSQL_DATABASE: '',
 
 import { mainConnection } from '../../src/db/mysql';
 import { DataBaseTableNames } from '../../src/typings';
-import { durableTrailsPersistenceEnabled } from '../../src/apps/starlight/trails/durable-persistence';
-import { DurableCategorySyncConnection, DurableCategorySyncConnectionFactory, DurableCategorySyncLifecycle, durableCategorySyncModelKeys } from '../../src/apps/starlight/trails/durable-category-sync-lifecycle';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { TrailsState } from '../../src/apps/starlight/trails/types';
+import { durableTrailsPersistenceEnabled } from '../../src/apps/trails/durable-persistence';
+import { DurableCategorySyncConnection, DurableCategorySyncConnectionFactory, DurableCategorySyncLifecycle, durableCategorySyncModelKeys } from '../../src/apps/trails/durable-category-sync-lifecycle';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { TrailsState } from '../../src/apps/trails/types';
 
 type RegisteredModels = Partial<Record<typeof durableCategorySyncModelKeys[number], ModelStatic<Model>>>;
 

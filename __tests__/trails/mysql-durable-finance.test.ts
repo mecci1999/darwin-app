@@ -1,5 +1,5 @@
-import { Actor, DurableFinanceEntry } from '../../src/apps/starlight/trails/types';
-import { DurableFinanceBalanceSnapshotModel, DurableFinanceDeletionAuditModel, DurableFinanceModel, MySqlDurableFinanceRepository, retentionExpiresAtForCalendarFinancialYear, TrailsDurableFinanceStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableFinance';
+import { Actor, DurableFinanceEntry } from '../../src/apps/trails/types';
+import { DurableFinanceBalanceSnapshotModel, DurableFinanceDeletionAuditModel, DurableFinanceModel, MySqlDurableFinanceRepository, retentionExpiresAtForCalendarFinancialYear, TrailsDurableFinanceStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableFinance';
 
 const actor: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false };
 const other: Actor = { tenantId: actor.tenantId, userId: 'owner-2', isAdmin: true, creatorSpaceRole: 'creator-space-owner' };

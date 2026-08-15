@@ -7,7 +7,7 @@ import {
   TencentCosTrustedPhotoshopIngestionHeadResult,
   TencentCosTrustedPhotoshopIngestionPrivateStorage,
   TencentCosTrustedPhotoshopIngestionPrivateStorageError,
-} from '../../src/apps/starlight/trails/utils/tencent-cos-trusted-photoshop-ingestion-private-storage';
+} from '../../src/apps/trails/utils/tencent-cos-trusted-photoshop-ingestion-private-storage';
 
 jest.mock('cos-nodejs-sdk-v5', () => jest.fn());
 
@@ -40,8 +40,9 @@ describe('Tencent COS trusted Photoshop ingestion private storage', () => {
     expect(result).toEqual({ privateLocator: `ingestion_${hmac('ingestion-locator', value.grant.objectIdentity)}` });
     expect(fakeClient.headObject).toHaveBeenCalledTimes(2); expect(fakeClient.putObject).toHaveBeenCalledTimes(1);
     const [request] = fakeClient.putObject.mock.calls[0];
-    expect(request).toEqual({ Bucket: 'starlight-media-prod-1313219189', Region: 'ap-guangzhou', Key: `ingestion-private/v1/${hmac('ingestion-cos-key', value.grant.objectIdentity)}`, Body: value.content, ContentLength: value.byteLength, ContentType: 'image/jpeg', Headers: { 'x-cos-forbid-overwrite': 'true' }, 'x-cos-meta-contract': 'trusted-photoshop-ingestion-private-v1', 'x-cos-meta-identity': value.grant.objectIdentity, 'x-cos-meta-sha256': value.sha256, 'x-cos-meta-length': String(value.byteLength), 'x-cos-meta-mime': 'image/jpeg', 'x-cos-meta-fence-token-digest': hmac('ingestion-fence-token', value.grant.fenceToken) });
-    expect(Object.keys(request)).not.toContain('ACL'); expect(JSON.stringify(result)).not.toMatch(/ingestion-private|starlight-media|tenant_a|operation_a|fence-token/);
+    const fenceTokenDigest = hmac('ingestion-fence-token', value.grant.fenceToken);
+    expect(request).toEqual({ Bucket: 'starlight-media-prod-1313219189', Region: 'ap-guangzhou', Key: `masters-private/${hmac('ingestion-cos-key', `${value.grant.objectIdentity}\u0000${fenceTokenDigest}`)}`, Body: value.content, ContentLength: value.byteLength, ContentType: 'image/jpeg', 'x-cos-meta-contract': 'trusted-photoshop-ingestion-private-v1', 'x-cos-meta-identity': value.grant.objectIdentity, 'x-cos-meta-sha256': value.sha256, 'x-cos-meta-length': String(value.byteLength), 'x-cos-meta-mime': 'image/jpeg', 'x-cos-meta-fence-token-digest': fenceTokenDigest });
+    expect(Object.keys(request)).not.toContain('ACL'); expect(Object.keys(request)).not.toContain('Headers'); expect(JSON.stringify(result)).not.toMatch(/masters-private|starlight-media|tenant_a|operation_a|fence-token/);
   });
 
   it('returns an existing exact object after its initial HEAD without a PUT', async () => {
@@ -64,12 +65,12 @@ describe('Tencent COS trusted Photoshop ingestion private storage', () => {
     expectRedacted(await mismatch.adapter.storeMaster(input()).catch(error => error)); expect(mismatch.fakeClient.putObject).toHaveBeenCalledTimes(1);
   });
 
-  it('fails redacted on the documented create-only collision without verification, retry, or delete', async () => {
-    const { adapter, fakeClient } = storage();
-    fakeClient.headObject.mockRejectedValueOnce(notFound());
+  it('verifies a matching existing object after a collision response without retry or delete', async () => {
+    const value = input(); const { adapter, fakeClient } = storage();
+    fakeClient.headObject.mockRejectedValueOnce(notFound()).mockResolvedValueOnce(matchingHead(value));
     fakeClient.putObject.mockRejectedValueOnce({ statusCode: 409, error: { Code: 'FileAlreadyExists', Message: 'hidden provider detail' } });
-    expectRedacted(await adapter.storeMaster(input()).catch(error => error));
-    expect(fakeClient.putObject).toHaveBeenCalledTimes(1); expect(fakeClient.headObject).toHaveBeenCalledTimes(1);
+    await expect(adapter.storeMaster(value)).resolves.toEqual({ privateLocator: `ingestion_${hmac('ingestion-locator', value.grant.objectIdentity)}` });
+    expect(fakeClient.putObject).toHaveBeenCalledTimes(1); expect(fakeClient.headObject).toHaveBeenCalledTimes(2);
     expect(Object.keys(fakeClient)).not.toContain('deleteObject');
   });
 
@@ -111,16 +112,36 @@ describe('Tencent COS trusted Photoshop ingestion private storage', () => {
     expect(mockedCos.mock.calls).toEqual([[{ SecretId: 'test-secret-id', SecretKey: 'test-secret-key', Protocol: 'https:', Timeout: 5000 }], [{ SecretId: 'test-secret-id', SecretKey: 'test-secret-key', SecurityToken: 'sts-token', Protocol: 'https:', Timeout: 5000 }]]); mockedCos.mockReset();
   });
 
-  it('rejects invalid scope, metadata, slot, or grant before I/O and separates tenants, operations, and slots', async () => {
+  it('rejects invalid scope, metadata, or grant before I/O and reserves derivative storage for a future worker', async () => {
     const invalid = storage(); const bad = input({ objectIdentity: 'wrong' }); expectRedacted(await invalid.adapter.storeMaster(bad).catch(error => error)); expect(invalid.fakeClient.headObject).not.toHaveBeenCalled();
     const malformed = storage(); expectRedacted(await malformed.adapter.storeMaster(input({ sha256: 'bad' })).catch(error => error)); expect(malformed.fakeClient.headObject).not.toHaveBeenCalled();
     const artifactClient = client(); const artifactAdapter = storage(artifactClient).adapter; const artifactContent = Buffer.from('webp'); const artifactInput = input({ tenantId: 'tenant_b', operationId: 'operation_b', slot: 'grid-800:webp', content: artifactContent, mimeType: 'image/webp' }); artifactClient.headObject.mockRejectedValueOnce(notFound()).mockResolvedValueOnce(matchingHead(artifactInput));
-    await artifactAdapter.storeArtifact({ ...artifactInput, slot: 'grid-800:webp', artifact: { slot: 'grid-800:webp', logicalRendition: 'grid-800', codec: 'webp', mime: 'image/webp', width: 800, height: 400, byteLength: artifactContent.length, sha256: digest(artifactContent), buffer: artifactContent } });
-    expect(artifactClient.putObject.mock.calls[0][0].Key).not.toBe(`ingestion-private/v1/${hmac('ingestion-cos-key', identityFor())}`);
+    expectRedacted(await artifactAdapter.storeArtifact({ ...artifactInput, slot: 'grid-800:webp', artifact: { slot: 'grid-800:webp', logicalRendition: 'grid-800', codec: 'webp', mime: 'image/webp', width: 800, height: 400, byteLength: artifactContent.length, sha256: digest(artifactContent), buffer: artifactContent } }).catch(error => error));
+    expect(artifactClient.headObject).not.toHaveBeenCalled(); expect(artifactClient.putObject).not.toHaveBeenCalled();
+  });
+
+  it('uses a deterministic key for a retried grant and a distinct immutable key for a new fence token', async () => {
+    const first = input({ fenceToken: 'fence-token-one' }); const retry = storage();
+    retry.fakeClient.headObject.mockRejectedValueOnce(notFound()).mockResolvedValueOnce(matchingHead(first)).mockResolvedValueOnce(matchingHead(first));
+    await retry.adapter.storeMaster(first);
+    const sameGrantRequest = retry.fakeClient.putObject.mock.calls[0][0];
+    await retry.adapter.storeMaster(first);
+    const firstAttemptKey = retry.fakeClient.headObject.mock.calls[0][0].Key;
+    const retryKey = retry.fakeClient.headObject.mock.calls[2][0].Key;
+
+    const second = input({ fenceToken: 'fence-token-two' }); const differentFence = storage();
+    differentFence.fakeClient.headObject.mockRejectedValueOnce(notFound()).mockResolvedValueOnce(matchingHead(second));
+    await differentFence.adapter.storeMaster(second);
+    const differentFenceRequest = differentFence.fakeClient.putObject.mock.calls[0][0];
+
+    expect(sameGrantRequest.Key).toMatch(/^masters-private\/[A-Za-z0-9_-]{43}$/);
+    expect(sameGrantRequest.Key).not.toBe(differentFenceRequest.Key);
+    expect(retryKey).toBe(firstAttemptKey);
+    expect(sameGrantRequest.Key).toBe(`masters-private/${hmac('ingestion-cos-key', `${first.grant.objectIdentity}\u0000${hmac('ingestion-fence-token', first.grant.fenceToken)}`)}`);
   });
 
   it('keeps the COS dependency adapter unregistered and isolated from action, lifecycle, state, and coordinator runtime imports', () => {
-    const adapterPath = require.resolve('../../src/apps/starlight/trails/utils/tencent-cos-trusted-photoshop-ingestion-private-storage'); const adapterSource = readFileSync(adapterPath, 'utf8'); const trailsRoot = join(__dirname, '../../src/apps/starlight/trails'); const otherSources = filesBelow(trailsRoot).filter(file => file.endsWith('.ts') && file !== adapterPath).map(file => readFileSync(file, 'utf8')).join('\n');
+    const adapterPath = require.resolve('../../src/apps/trails/utils/tencent-cos-trusted-photoshop-ingestion-private-storage'); const adapterSource = readFileSync(adapterPath, 'utf8'); const trailsRoot = join(__dirname, '../../src/apps/trails'); const otherSources = filesBelow(trailsRoot).filter(file => file.endsWith('.ts') && file !== adapterPath).map(file => readFileSync(file, 'utf8')).join('\n');
     expect(adapterSource).toMatch(/from 'cos-nodejs-sdk-v5'/); expect(adapterSource).not.toMatch(/https?:\/\/|\b(?:ACL|Signed|CDN|URL|deleteObject|getObject|listObject)\b|console\.|logger/i); expect(otherSources).not.toMatch(/tencent-cos-trusted-photoshop-ingestion-private-storage/);
   });
 });

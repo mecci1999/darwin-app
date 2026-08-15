@@ -11,14 +11,14 @@ import initializeTrailsDurablePackingPlanItem, { TrailsDurablePackingPlanItemTab
 import initializeTrailsDurableFinance, { TrailsDurableFinanceTable } from '../../src/db/mysql/models/trailsDurableFinance';
 import initializeTrailsDurableFinanceDeletionAudit, { TrailsDurableFinanceDeletionAuditTable } from '../../src/db/mysql/models/trailsDurableFinanceDeletionAudit';
 import initializeTrailsDurableFinanceBalanceSnapshot, { TrailsDurableFinanceBalanceSnapshotTable } from '../../src/db/mysql/models/trailsDurableFinanceBalanceSnapshot';
-import { createSequelizeTrailsPortfolioCategorySyncModels, MySqlPortfolioCategorySyncRepository, SequelizeTrailsSyncConnection } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
-import { createSequelizeDurablePortfolioModel, MySqlDurablePortfolioRepository } from '../../src/apps/starlight/trails/repository/mysqlDurablePortfolio';
-import { createSequelizeDurableJournalModel, MySqlDurableJournalRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableJournal';
-import { createSequelizeDurableHikeModel, MySqlDurableHikeRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableHike';
-import { createSequelizeDurableGearModel, MySqlDurableGearRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableGear';
-import { createSequelizeDurablePackingPlanModels, MySqlDurablePackingPlanRepository } from '../../src/apps/starlight/trails/repository/mysqlDurablePackingPlan';
-import { createSequelizeDurableFinanceModels, MySqlDurableFinanceRepository } from '../../src/apps/starlight/trails/repository/mysqlDurableFinance';
-import { Actor } from '../../src/apps/starlight/trails/types';
+import { createSequelizeTrailsPortfolioCategorySyncModels, MySqlPortfolioCategorySyncRepository, SequelizeTrailsSyncConnection } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
+import { createSequelizeDurablePortfolioModel, MySqlDurablePortfolioRepository } from '../../src/apps/trails/repository/mysqlDurablePortfolio';
+import { createSequelizeDurableJournalModel, MySqlDurableJournalRepository } from '../../src/apps/trails/repository/mysqlDurableJournal';
+import { createSequelizeDurableHikeModel, MySqlDurableHikeRepository } from '../../src/apps/trails/repository/mysqlDurableHike';
+import { createSequelizeDurableGearModel, MySqlDurableGearRepository } from '../../src/apps/trails/repository/mysqlDurableGear';
+import { createSequelizeDurablePackingPlanModels, MySqlDurablePackingPlanRepository } from '../../src/apps/trails/repository/mysqlDurablePackingPlan';
+import { createSequelizeDurableFinanceModels, MySqlDurableFinanceRepository } from '../../src/apps/trails/repository/mysqlDurableFinance';
+import { Actor } from '../../src/apps/trails/types';
 const { applyTrailsCategoryMigrations } = require('../../scripts/migrations');
 
 const enabled = process.env.TRAILS_MYSQL_INTEGRATION === '1';

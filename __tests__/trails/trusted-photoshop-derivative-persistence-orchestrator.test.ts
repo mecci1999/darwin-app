@@ -1,10 +1,10 @@
 import { readFileSync } from 'fs';
 import sharp from 'sharp';
-import { Actor, DurableMediaAsset, DurableMediaAssetArtifactDescriptor, DurableMediaAssetRegistryStore } from '../../src/apps/starlight/trails/types';
-import { stageTrustedPhotoshopPackageDerivatives, TrustedPhotoshopDerivativeStagingPlan } from '../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-staging-plan';
-import { processTrustedPhotoshopPackageDerivatives } from '../../src/apps/starlight/trails/utils/trusted-photoshop-package-derivative-orchestrator';
-import { persistTrustedPhotoshopDerivativeStagingPlan, TrustedPhotoshopDerivativePersistenceError } from '../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-persistence-orchestrator';
-import { InMemoryTrustedPrivateDerivativeStorage, TrustedPrivateDerivativeStorage, TrustedPrivateDerivativeStorageResult } from '../../src/apps/starlight/trails/utils/trusted-private-derivative-storage';
+import { Actor, DurableMediaAsset, DurableMediaAssetArtifactDescriptor, DurableMediaAssetRegistryStore } from '../../src/apps/trails/types';
+import { stageTrustedPhotoshopPackageDerivatives, TrustedPhotoshopDerivativeStagingPlan } from '../../src/apps/trails/utils/trusted-photoshop-derivative-staging-plan';
+import { processTrustedPhotoshopPackageDerivatives } from '../../src/apps/trails/utils/trusted-photoshop-package-derivative-orchestrator';
+import { persistTrustedPhotoshopDerivativeStagingPlan, TrustedPhotoshopDerivativePersistenceError } from '../../src/apps/trails/utils/trusted-photoshop-derivative-persistence-orchestrator';
+import { InMemoryTrustedPrivateDerivativeStorage, TrustedPrivateDerivativeStorage, TrustedPrivateDerivativeStorageResult } from '../../src/apps/trails/utils/trusted-private-derivative-storage';
 
 const actor: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const asset: DurableMediaAsset = { id: 'asset_1', tenantId: actor.tenantId, ownerUserId: actor.userId, mimeType: 'image/jpeg', status: 'draft', resourceVersion: '2', createdAt: '2026-08-03T00:00:00.000Z', updatedAt: '2026-08-03T00:00:00.000Z' };
@@ -21,7 +21,7 @@ const plan = async (): Promise<TrustedPhotoshopDerivativeStagingPlan> => stageTr
 ]));
 
 const registry = (persistArtifacts: jest.Mock): DurableMediaAssetRegistryStore => ({
-  register: jest.fn(), registerVariant: jest.fn(), persistArtifacts, publish: jest.fn(),
+  listWorkspacePicker: jest.fn(), listPublic: jest.fn(), register: jest.fn(), approvePublicDerivatives: jest.fn(), persistArtifacts, publish: jest.fn(),
 });
 const input = (stagingPlan: TrustedPhotoshopDerivativeStagingPlan) => ({ actor, mutation: { mutationId: 'persist-1', expectedResourceVersion: '1', assetId: asset.id }, plan: stagingPlan });
 const opaqueResults = (): TrustedPrivateDerivativeStorageResult[] => Array.from({ length: 9 }, (_, index) => ({ privateLocator: `opaque_${index}` }));
@@ -142,8 +142,8 @@ describe('trusted Photoshop derivative persistence orchestrator', () => {
   });
 
   it('has no generic storage, COS, action, delivery, URL, or filesystem dependency leaks', () => {
-    const storageSource = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-private-derivative-storage'), 'utf8');
-    const orchestratorSource = readFileSync(require.resolve('../../src/apps/starlight/trails/utils/trusted-photoshop-derivative-persistence-orchestrator'), 'utf8');
+    const storageSource = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-private-derivative-storage'), 'utf8');
+    const orchestratorSource = readFileSync(require.resolve('../../src/apps/trails/utils/trusted-photoshop-derivative-persistence-orchestrator'), 'utf8');
     expect(storageSource).not.toMatch(/TrailsStorage|from ['"](?:fs|path|stream|.*cos|.*delivery|.*actions)['"]/i);
     expect(orchestratorSource).not.toMatch(/TrailsStorage|from ['"](?:fs|path|stream|.*cos|.*delivery|.*actions)['"]/i);
     expect(`${storageSource}\n${orchestratorSource}`).not.toMatch(/https?:\/\/|objectKey|provider|credential|readFile\(|writeFile\(|\.upload\(/i);

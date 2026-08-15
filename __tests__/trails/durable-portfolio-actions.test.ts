@@ -1,9 +1,9 @@
 import { Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurablePortfolio, DurablePortfolioCategory, DurablePortfolioCategorySync, DurablePortfolioStore, DurableRichDocument, DurableRichDocumentStore, PhotoTechnicalMetadata } from '../../src/apps/starlight/trails/types';
-import { TrailsSyncInputError } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
-import { TrailsDurablePortfolioStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurablePortfolio';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurablePortfolio, DurablePortfolioCategory, DurablePortfolioCategorySync, DurablePortfolioStore, DurableRichDocument, DurableRichDocumentStore, PhotoTechnicalMetadata } from '../../src/apps/trails/types';
+import { TrailsSyncInputError } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
+import { TrailsDurablePortfolioStaleVersionError } from '../../src/apps/trails/repository/mysqlDurablePortfolio';
 
 const owner: Actor = { tenantId: 'tenant-1', userId: 'owner-1', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const editor: Actor = { tenantId: owner.tenantId, userId: 'editor-1', isAdmin: false, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: owner.userId };

@@ -1,8 +1,8 @@
 import { HttpResponseItem, Starlight } from '../../src/typings';
-import trailsActions from '../../src/apps/starlight/trails/actions';
-import { InMemoryTrailsRepository } from '../../src/apps/starlight/trails/repository';
-import { Actor, DurableLocationCard, DurableLocationCardStore, TrailsState } from '../../src/apps/starlight/trails/types';
-import { TrailsDurableLocationCardStaleVersionError } from '../../src/apps/starlight/trails/repository/mysqlDurableLocationCard';
+import trailsActions from '../../src/apps/trails/actions';
+import { InMemoryTrailsRepository } from '../../src/apps/trails/repository';
+import { Actor, DurableLocationCard, DurableLocationCardStore, TrailsState } from '../../src/apps/trails/types';
+import { TrailsDurableLocationCardStaleVersionError } from '../../src/apps/trails/repository/mysqlDurableLocationCard';
 
 const owner: Actor = { tenantId: 'tenant-a', userId: 'owner-a', isAdmin: false, creatorSpaceRole: 'creator-space-owner' };
 const card: DurableLocationCard = { id: 'location_1', tenantId: owner.tenantId, ownerUserId: owner.userId, name: '雾岭', regionLabel: '山地地区', summary: '公开文字', status: 'draft', resourceVersion: '1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };

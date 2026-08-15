@@ -1,0 +1,7 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep the production application image intact. This overlay updates only the
+# registry-driven catalog projection and the shared Trails logical-service contract.
+COPY dist/apps/starlight/metrics/utils/service-catalog.js /app/dist/apps/starlight/metrics/utils/service-catalog.js
+COPY ../shared/trails-contract /shared/trails-contract

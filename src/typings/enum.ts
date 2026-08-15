@@ -74,6 +74,8 @@ export enum DataBaseTableNames {
   AlertInstance = 'AlertInstance',
   AlertEvent = 'AlertEvent',
   AlertNotificationDelivery = 'AlertNotificationDelivery',
+  RegistryMissingAlertRule = 'RegistryMissingAlertRule',
+  RegistryMissingAlertIncident = 'RegistryMissingAlertIncident',
 }
 
 /**

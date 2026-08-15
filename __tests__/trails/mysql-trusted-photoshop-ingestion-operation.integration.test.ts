@@ -2,8 +2,8 @@ import { Sequelize } from 'sequelize';
 import initializeOperation, { TrailsTrustedPhotoshopIngestionOperationTable } from '../../src/db/mysql/models/trailsTrustedPhotoshopIngestionOperation';
 import initializeArtifact, { TrailsTrustedPhotoshopIngestionArtifactTable } from '../../src/db/mysql/models/trailsTrustedPhotoshopIngestionArtifact';
 import initializeFence, { TrailsTrustedPhotoshopStorageWriteFenceTable } from '../../src/db/mysql/models/trailsTrustedPhotoshopStorageWriteFence';
-import { createSequelizeTrustedPhotoshopIngestionModels, MySqlTrustedPhotoshopIngestionOperationRepository } from '../../src/apps/starlight/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
-import { SequelizeTrailsSyncConnection } from '../../src/apps/starlight/trails/repository/mysqlPortfolioCategorySync';
+import { createSequelizeTrustedPhotoshopIngestionModels, MySqlTrustedPhotoshopIngestionOperationRepository } from '../../src/apps/trails/repository/mysqlTrustedPhotoshopIngestionOperation';
+import { SequelizeTrailsSyncConnection } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
 
 const describeIntegration = process.env.TRAILS_MYSQL_INTEGRATION === '1' ? describe : describe.skip;
 const artifacts = () => (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
