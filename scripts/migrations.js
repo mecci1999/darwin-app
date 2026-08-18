@@ -39,6 +39,10 @@ const TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID = '036-trails-content-metrics-ag
 const TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID = '037-trails-durable-journal-pinning-v1';
 const ALERT_DURABLE_OUTBOX_MIGRATION_ID = '038-alert-durable-outbox-v1';
 const REGISTRY_MISSING_ALERTS_MIGRATION_ID = '039-registry-missing-alerts-v1';
+const TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID = '040-trails-media-rendition-4k-v1';
+const TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID = '041-trails-public-derivative-publication-job-v1';
+const TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID = '042-trails-durable-exhibition-theme-v1';
+const TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID = '043-trails-durable-portfolio-exhibition-presentation-v1';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -302,7 +306,7 @@ const migrations = [
       });
       await ensureIndex(queryInterface, 'TrailsMediaAssetRegistry', ['tenant_id', 'owner_user_id', 'status'], { name: 'trails_media_asset_owner_status' });
       await ensureTable(queryInterface, 'TrailsMediaAssetVariant', {
-        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, asset_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, name: { type: DataTypes.ENUM('grid-800', 'cover-1600', 'preview-2048'), allowNull: false, primaryKey: true }, public_reference: { type: DataTypes.STRING(160), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, state: { type: DataTypes.ENUM('ready'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, asset_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, name: { type: DataTypes.ENUM('grid-960', 'cover-2048', 'preview-4096'), allowNull: false, primaryKey: true }, public_reference: { type: DataTypes.STRING(160), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, state: { type: DataTypes.ENUM('ready'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       });
     },
   },
@@ -323,7 +327,7 @@ const migrations = [
     async up({ queryInterface }) {
       const { DataTypes } = require('sequelize');
       await ensureTable(queryInterface, 'TrailsMediaAssetArtifact', {
-        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, asset_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, logical_rendition: { type: DataTypes.ENUM('grid-800', 'cover-1600', 'preview-2048'), allowNull: false, primaryKey: true }, codec: { type: DataTypes.ENUM('avif', 'webp', 'jpeg'), allowNull: false, primaryKey: true }, private_locator: { type: DataTypes.STRING(512), allowNull: false }, mime_type: { type: DataTypes.ENUM('image/avif', 'image/webp', 'image/jpeg'), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, asset_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, logical_rendition: { type: DataTypes.ENUM('grid-960', 'cover-2048', 'preview-4096'), allowNull: false, primaryKey: true }, codec: { type: DataTypes.ENUM('avif', 'webp', 'jpeg'), allowNull: false, primaryKey: true }, private_locator: { type: DataTypes.STRING(512), allowNull: false }, mime_type: { type: DataTypes.ENUM('image/avif', 'image/webp', 'image/jpeg'), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       });
       await ensureIndex(queryInterface, 'TrailsMediaAssetArtifact', ['tenant_id', 'asset_id'], { name: 'trails_media_artifact_asset' });
     },
@@ -338,7 +342,7 @@ const migrations = [
       });
       await ensureIndex(queryInterface, 'TrailsTrustedPhotoshopIngestionOperation', ['tenant_id', 'phase', 'lease_expires_at'], { name: 'trails_photoshop_ingestion_claim' });
       await ensureTable(queryInterface, 'TrailsTrustedPhotoshopIngestionArtifact', {
-        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, operation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, logical_rendition: { type: DataTypes.ENUM('grid-800', 'cover-1600', 'preview-2048'), allowNull: false, primaryKey: true }, codec: { type: DataTypes.ENUM('avif', 'webp', 'jpeg'), allowNull: false, primaryKey: true }, mime_type: { type: DataTypes.ENUM('image/avif', 'image/webp', 'image/jpeg'), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, locator: { type: DataTypes.STRING(512), allowNull: true }, write_state: { type: DataTypes.ENUM('pending', 'recorded'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, operation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, logical_rendition: { type: DataTypes.ENUM('grid-960', 'cover-2048', 'preview-4096'), allowNull: false, primaryKey: true }, codec: { type: DataTypes.ENUM('avif', 'webp', 'jpeg'), allowNull: false, primaryKey: true }, mime_type: { type: DataTypes.ENUM('image/avif', 'image/webp', 'image/jpeg'), allowNull: false }, width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, locator: { type: DataTypes.STRING(512), allowNull: true }, write_state: { type: DataTypes.ENUM('pending', 'recorded'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       });
       await ensureIndex(queryInterface, 'TrailsTrustedPhotoshopIngestionArtifact', ['tenant_id', 'operation_id'], { name: 'trails_photoshop_ingestion_artifacts' });
     },
@@ -350,7 +354,7 @@ const migrations = [
     async up({ queryInterface }) {
       const { DataTypes } = require('sequelize');
       await ensureTable(queryInterface, 'TrailsTrustedPhotoshopStorageWriteFence', {
-        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, operation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, slot: { type: DataTypes.ENUM('master', 'grid-800:avif', 'grid-800:webp', 'grid-800:jpeg', 'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg', 'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg'), allowNull: false, primaryKey: true }, intent_digest: { type: DataTypes.CHAR(64), allowNull: false }, object_identity: { type: DataTypes.CHAR(64), allowNull: false }, mime_type: { type: DataTypes.STRING(160), allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, state: { type: DataTypes.ENUM('pending', 'issued', 'recorded'), allowNull: false }, fence_token: { type: DataTypes.CHAR(64), allowNull: true }, issued_at: { type: DataTypes.DATE, allowNull: true }, recorded_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, operation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, slot: { type: DataTypes.ENUM('master', 'grid-960:avif', 'grid-960:webp', 'grid-960:jpeg', 'cover-2048:avif', 'cover-2048:webp', 'cover-2048:jpeg', 'preview-4096:avif', 'preview-4096:webp', 'preview-4096:jpeg'), allowNull: false, primaryKey: true }, intent_digest: { type: DataTypes.CHAR(64), allowNull: false }, object_identity: { type: DataTypes.CHAR(64), allowNull: false }, mime_type: { type: DataTypes.STRING(160), allowNull: false }, byte_length: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, sha256: { type: DataTypes.CHAR(64), allowNull: false }, state: { type: DataTypes.ENUM('pending', 'issued', 'recorded'), allowNull: false }, fence_token: { type: DataTypes.CHAR(64), allowNull: true }, issued_at: { type: DataTypes.DATE, allowNull: true }, recorded_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       });
       await ensureIndex(queryInterface, 'TrailsTrustedPhotoshopStorageWriteFence', ['tenant_id', 'operation_id'], { name: 'trails_photoshop_storage_fence_operation' });
     },
@@ -693,6 +697,99 @@ const migrations = [
       });
     },
   },
+  {
+    // MySQL DDL implicitly commits. Table and index checks allow a deployment retry after interruption.
+    id: TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'TrailsPublicDerivativePublicationJob', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        job_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        asset_id: { type: DataTypes.STRING(160), allowNull: false },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        expected_resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        approval_id: { type: DataTypes.STRING(160), allowNull: false },
+        status: { type: DataTypes.ENUM('pending', 'processing', 'published', 'failed'), allowNull: false },
+        attempts: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+        lease_token: { type: DataTypes.CHAR(64), allowNull: true },
+        lease_expires_at: { type: DataTypes.DATE, allowNull: true },
+        published_at: { type: DataTypes.DATE, allowNull: true },
+        failed_at: { type: DataTypes.DATE, allowNull: true },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsPublicDerivativePublicationJob', ['job_id'], { unique: true, name: 'trails_public_derivative_publication_job_unique' });
+      await ensureIndex(queryInterface, 'TrailsPublicDerivativePublicationJob', ['status', 'lease_expires_at', 'created_at'], { name: 'trails_public_derivative_publication_claim' });
+    },
+  },
+  {
+    // Existing production databases recorded the old rendition enum values. MySQL enum DDL
+    // commits implicitly, so each step is deliberately safe to repeat after interruption.
+    id: TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface, sequelize }) {
+      const { DataTypes } = require('sequelize');
+      const oldRenditions = ['grid-800', 'cover-1600', 'preview-2048'];
+      const renditions = ['grid-960', 'cover-2048', 'preview-4096'];
+      const replaceValues = async (table, column, values) => {
+        if (!tableExists(await queryInterface.showAllTables(), table)) return;
+        // These columns are members of existing composite primary keys. Re-declaring a
+        // single-column primary key makes MySQL reject the enum expansion.
+        await queryInterface.changeColumn(table, column, { type: DataTypes.ENUM(...oldRenditions, ...renditions), allowNull: false });
+        for (const [from, to] of [['grid-800', 'grid-960'], ['cover-1600', 'cover-2048'], ['preview-2048', 'preview-4096']]) {
+          await sequelize.query(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, { replacements: [to, from] });
+        }
+        await queryInterface.changeColumn(table, column, { type: DataTypes.ENUM(...renditions), allowNull: false });
+      };
+      await replaceValues('TrailsMediaAssetVariant', 'name');
+      await replaceValues('TrailsMediaAssetArtifact', 'logical_rendition');
+      await replaceValues('TrailsTrustedPhotoshopIngestionArtifact', 'logical_rendition');
+      if (tableExists(await queryInterface.showAllTables(), 'TrailsTrustedPhotoshopStorageWriteFence')) {
+        const oldSlots = ['master', ...oldRenditions.flatMap(rendition => ['avif', 'webp', 'jpeg'].map(codec => `${rendition}:${codec}`))];
+        const slots = ['master', ...renditions.flatMap(rendition => ['avif', 'webp', 'jpeg'].map(codec => `${rendition}:${codec}`))];
+        const expandedSlots = [...new Set([...oldSlots, ...slots])];
+        await queryInterface.changeColumn('TrailsTrustedPhotoshopStorageWriteFence', 'slot', { type: DataTypes.ENUM(...expandedSlots), allowNull: false });
+        for (const [from, to] of [['grid-800', 'grid-960'], ['cover-1600', 'cover-2048'], ['preview-2048', 'preview-4096']]) {
+          await sequelize.query('UPDATE TrailsTrustedPhotoshopStorageWriteFence SET slot = REPLACE(slot, ?, ?) WHERE slot LIKE ?', { replacements: [from, to, `${from}:%`] });
+        }
+        await queryInterface.changeColumn('TrailsTrustedPhotoshopStorageWriteFence', 'slot', { type: DataTypes.ENUM(...slots), allowNull: false });
+      }
+    },
+  },
+  {
+    // This nullable JSON text keeps existing portfolios unchanged and makes DDL retry-safe.
+    id: TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      if (!tableExists(await queryInterface.showAllTables(), 'TrailsDurablePortfolio')) return;
+      const { DataTypes } = require('sequelize');
+      await ensureColumn(queryInterface, 'TrailsDurablePortfolio', 'exhibition_presentation', { type: DataTypes.TEXT, allowNull: true });
+    },
+  },
+  {
+    // MySQL DDL implicitly commits. Table and index checks keep a failed deployment retryable.
+    id: TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'TrailsDurableExhibitionTheme', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        slug: { type: DataTypes.STRING(160), allowNull: false },
+        status: { type: DataTypes.ENUM('draft', 'published', 'archived'), allowNull: false },
+        resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        payload_json: { type: DataTypes.TEXT('long'), allowNull: false },
+        published_at: { type: DataTypes.DATE, allowNull: true },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsDurableExhibitionTheme', ['tenant_id', 'owner_user_id', 'slug'], { unique: true, name: 'trails_exhibition_theme_owner_slug_unique' });
+      await ensureIndex(queryInterface, 'TrailsDurableExhibitionTheme', ['tenant_id', 'owner_user_id', 'status', 'published_at'], { name: 'trails_exhibition_theme_public' });
+    },
+  },
 ];
 
 // Numeric migration IDs are the deployment ordering authority; keep append-only migrations ordered even when their definitions are grouped by resource.
@@ -701,7 +798,7 @@ migrations.sort((left, right) => left.id.localeCompare(right.id));
 /** Test-only schema bootstrap for the isolated Trails MySQL harness. It never uses migration ledger/locks. */
 const applyTrailsCategoryMigrations = async sequelize => {
   const queryInterface = sequelize.getQueryInterface();
-  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID];
+  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID, TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID, TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID, TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID];
   for (const id of requiredIds) {
     const migration = migrations.find(candidate => candidate.id === id);
     if (!migration) throw new Error(`Required Trails category migration is not registered: ${id}`);
@@ -746,6 +843,10 @@ module.exports = {
   TRAILS_SHOOTING_LOCATION_MIGRATION_ID,
   TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID,
   TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID,
+  TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID,
+  TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID,
+  TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID,
+  TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID,
   ALERT_DURABLE_OUTBOX_MIGRATION_ID,
   BASELINE_MIGRATION_ID,
   getModelTableNames,

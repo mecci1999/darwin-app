@@ -51,10 +51,43 @@ describe('gateway registry readiness', () => {
       options?.onlyAvaliable ? [{ name: 'gateway' }] : [{ name: 'gateway' }, { name: 'metrics' }],
     );
     (star.registry?.services as unknown as { list: typeof list }).list = list;
-    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices });
+    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, criticalServices: requiredServices });
 
     await expect(watchdog.inspect()).resolves.toMatchObject({ ready: false, missingServices: ['metrics'] });
     expect(list).toHaveBeenCalledWith({ onlyAvaliable: true });
+  });
+
+  it('keeps the previous healthy state during one unconfirmed critical-service observation', async () => {
+    const { star, list } = createStar(['gateway', 'metrics']);
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: requiredServices,
+      reconciliationCooldownMs: 60_000,
+    });
+
+    await expect(watchdog.tick()).resolves.toMatchObject({ ready: true, status: 'healthy' });
+    list.mockReturnValue([{ name: 'gateway' }]);
+
+    await expect(watchdog.tick()).resolves.toMatchObject({
+      ready: true,
+      status: 'healthy',
+      missingCriticalServices: ['metrics'],
+      consecutiveMissingObservations: 1,
+    });
+  });
+
+  it('does not make optional service loss a gateway readiness failure', async () => {
+    const watchdog = new GatewayRegistryWatchdog(createStar(['gateway']).star, {
+      requiredServices: ['gateway', 'video'],
+      criticalServices: ['gateway'],
+    });
+
+    await expect(watchdog.tick()).resolves.toMatchObject({
+      ready: true,
+      status: 'healthy',
+      missingServices: ['video'],
+      missingCriticalServices: [],
+    });
   });
 
   it('coalesces concurrent missing-service checks into one reconciliation request', async () => {
@@ -91,7 +124,12 @@ describe('gateway registry readiness', () => {
   it('emits one diagnostic transition and a bounded reconciliation lifecycle', async () => {
     const { star } = createStar(['gateway']);
     const onDiagnostic = jest.fn();
-    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, confirmationThreshold: 1, onDiagnostic });
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: requiredServices,
+      confirmationThreshold: 1,
+      onDiagnostic,
+    });
 
     await watchdog.tick();
 

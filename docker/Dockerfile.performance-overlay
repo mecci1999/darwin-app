@@ -1,0 +1,9 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep the production runtime and dependencies immutable. This release only
+# overlays the compiled metrics paths that changed for the two-core profile.
+COPY dist/apps/starlight/metrics/actions/alerts.js /app/dist/apps/starlight/metrics/actions/alerts.js
+COPY dist/apps/starlight/metrics/actions/realtime.js /app/dist/apps/starlight/metrics/actions/realtime.js
+COPY dist/apps/starlight/metrics/utils/service-catalog.js /app/dist/apps/starlight/metrics/utils/service-catalog.js
+COPY dist/apps/starlight/metrics-alerts/registry-missing.js /app/dist/apps/starlight/metrics-alerts/registry-missing.js

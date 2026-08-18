@@ -35,11 +35,13 @@ type ServiceMetricMaps = {
 
 type ServiceMetricMapCacheEntry = {
   expiresAt: number;
+  staleUntil?: number;
   value?: ServiceMetricMaps;
   inFlight?: Promise<ServiceMetricMaps>;
 };
 
-const SERVICE_METRIC_MAP_CACHE_TTL_MS = 10_000;
+const SERVICE_METRIC_MAP_CACHE_TTL_MS = 30_000;
+const SERVICE_METRIC_MAP_MAX_STALE_MS = 5 * 60_000;
 const serviceMetricMapCache = new WeakMap<object, Map<MetricsDatasetScope, ServiceMetricMapCacheEntry>>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
@@ -114,7 +116,7 @@ const queryServiceQpsMap = async (bucket: string, star: Star) => {
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
   rows.forEach((row: any) => addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300));
-  star.logger?.info('metrics.catalog.service-qps-map', {
+  star.logger?.debug?.('metrics.catalog.service-qps-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
   });
@@ -135,7 +137,7 @@ const queryServiceQpsFallbackMap = async (bucket: string, star: Star) => {
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
   rows.forEach((row: any) => addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300));
-  star.logger?.info('metrics.catalog.service-qps-fallback-map', {
+  star.logger?.debug?.('metrics.catalog.service-qps-fallback-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
   });
@@ -158,7 +160,7 @@ const queryServiceLatencyMap = async (bucket: string, star: Star) => {
   const map = new Map<string, number>();
   // P95 values cannot be summed when several internal shards form one logical service.
   rows.forEach((row: any) => setMaximumMetricValue(map, row?.service_metric_key, Math.round(Number(row?._value || 0))));
-  star.logger?.info('metrics.catalog.service-p95-map', {
+  star.logger?.debug?.('metrics.catalog.service-p95-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
   });
@@ -193,7 +195,7 @@ const queryServiceErrorRateMap = async (bucket: string, star: Star) => {
   totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value));
   const errorMap = new Map<string, number>();
   errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value));
-  star.logger?.info('metrics.catalog.service-error-rate-map', {
+  star.logger?.debug?.('metrics.catalog.service-error-rate-map', {
     totalRowCount: totalRows.length,
     errorRowCount: errorRows.length,
     totalKeySample: getMapKeySample(totalMap),
@@ -237,7 +239,7 @@ const queryServiceErrorRateFallbackMap = async (bucket: string, star: Star) => {
   totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value));
   const errorMap = new Map<string, number>();
   errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value));
-  star.logger?.info('metrics.catalog.service-error-rate-fallback-map', {
+  star.logger?.debug?.('metrics.catalog.service-error-rate-fallback-map', {
     totalRowCount: totalRows.length,
     errorRowCount: errorRows.length,
     totalKeySample: getMapKeySample(totalMap),
@@ -274,7 +276,7 @@ const queryServiceRuntimeMetricMap = async (bucket: string, star: Star) => {
     current.lastSampleAt = row?._time || current.lastSampleAt;
     map.set(key, current);
   });
-  star.logger?.info('metrics.catalog.service-runtime-map', {
+  star.logger?.debug?.('metrics.catalog.service-runtime-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
   });
@@ -383,24 +385,37 @@ const getServiceMetricMaps = (
     serviceMetricMapCache.set(star, scopeEntries);
   }
 
-  const existing = scopeEntries.get(scope);
-  if (existing?.value && existing.expiresAt > Date.now()) return Promise.resolve(existing.value);
-  if (existing?.inFlight) return existing.inFlight;
-
-  const entry: ServiceMetricMapCacheEntry = { expiresAt: 0 };
-  entry.inFlight = buildServiceMetricMaps(bucket, star, serviceNames)
+  const refresh = (entry: ServiceMetricMapCacheEntry) => {
+    entry.inFlight = buildServiceMetricMaps(bucket, star, serviceNames)
     .then((value) => {
       entry.value = value;
       entry.expiresAt = Date.now() + SERVICE_METRIC_MAP_CACHE_TTL_MS;
-      entry.inFlight = undefined;
+      entry.staleUntil = Date.now() + SERVICE_METRIC_MAP_MAX_STALE_MS;
       return value;
     })
     .catch((error) => {
-      if (scopeEntries?.get(scope) === entry) scopeEntries.delete(scope);
+      // Keep the last complete snapshot during a transient Influx or CPU stall.
+      if (!entry.value && scopeEntries?.get(scope) === entry) scopeEntries.delete(scope);
       throw error;
+    })
+    .finally(() => {
+      entry.inFlight = undefined;
     });
+    return entry.inFlight;
+  };
+
+  const now = Date.now();
+  const existing = scopeEntries.get(scope);
+  if (existing?.value && existing.expiresAt > now) return Promise.resolve(existing.value);
+  if (existing?.value && (existing.staleUntil || 0) > now) {
+    if (!existing.inFlight) void refresh(existing).catch(() => undefined);
+    return Promise.resolve(existing.value);
+  }
+  if (existing?.inFlight) return existing.inFlight;
+
+  const entry: ServiceMetricMapCacheEntry = existing || { expiresAt: 0 };
   scopeEntries.set(scope, entry);
-  return entry.inFlight;
+  return refresh(entry);
 };
 
 export const buildServiceCatalogSnapshot = async (
@@ -438,7 +453,7 @@ export const buildServiceCatalogSnapshot = async (
         runtimeMap: new Map<string, ServiceRuntimeMetrics>(),
       };
 
-  star.logger?.info('metrics.catalog.metric-map-summary', {
+  star.logger?.debug?.('metrics.catalog.metric-map-summary', {
     bucketInitialized: Boolean(bucket),
     qpsKeys: getMapKeySample(qpsMap),
     p95Keys: getMapKeySample(latencyMap),
@@ -521,7 +536,7 @@ export const buildServiceCatalogSnapshot = async (
   const total = list.length;
   const start = (page - 1) * pageSize;
   const end = start + pageSize;
-  star.logger?.info('metrics.catalog.service-snapshot-summary', {
+  star.logger?.debug?.('metrics.catalog.service-snapshot-summary', {
     scope,
     total,
     serviceSample: list.slice(0, 8).map((service: any) => ({

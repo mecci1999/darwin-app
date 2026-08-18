@@ -2,6 +2,7 @@ import { DEFAULT_LOG_CATEGORY_ENABLED, isTransportDebugEnabled } from '../../con
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../starlight/logs/utils/darwin-log-capture';
+import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import '../../utils/loadEnv';
 import trailsActions from './actions';
 import { KAFKA_BROKERS, KAFKA_CLIENT_ID, KAFKA_GROUP_ID, KAFKA_PASSWORD, KAFKA_USER, REDIS_DB, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT } from './constants';
@@ -11,6 +12,7 @@ import { durableTrailsPersistenceEnabled } from './durable-persistence';
 import { DurableCategorySyncLifecycle } from './durable-category-sync-lifecycle';
 import { selectTrailsShardActions, trailsShardNamesForRuntime } from './shards';
 import { validateTrailsMediaDeliveryConfiguration } from './media-delivery-configuration';
+import { TrailsPublicDerivativePublicationLifecycle } from './workers/public-derivative-publication-lifecycle';
 
 export { durableTrailsPersistenceEnabled } from './durable-persistence';
 export { durableCategorySyncEnabled } from './durable-category-sync';
@@ -38,6 +40,10 @@ export function createTrailsService() {
     logger: { type: 'Console', options: { level: 'info', categories: DEFAULT_LOG_CATEGORY_ENABLED } }, metrics: { enabled: true, reporter: { type: 'Event' } },
   }) as Starlight;
   registerDarwinLogForwarding(star);
+  installDarwinKafkaRecoveryLifecycle(star);
+  const publicationLifecycle = durablePersistenceEnabled
+    ? new TrailsPublicDerivativePublicationLifecycle(process.env, star.logger || console)
+    : undefined;
   const actions = trailsActions(star, trailsState);
   const shardNames = trailsShardNamesForRuntime();
   const services = shardNames.map((shard, index) => star.createService({
@@ -49,11 +55,17 @@ export function createTrailsService() {
       this.logger.info(`Trails shard '${shard}' created`);
     },
     async started() {
-      if (index === 0 && durableCategorySyncLifecycle) await durableCategorySyncLifecycle.start(trailsState);
+      if (index === 0 && durableCategorySyncLifecycle) {
+        await durableCategorySyncLifecycle.start(trailsState);
+        publicationLifecycle?.start(trailsState);
+      }
       this.logger.info(`Trails shard '${shard}' started`);
     },
     async stopped() {
-      if (index === 0 && durableCategorySyncLifecycle) await durableCategorySyncLifecycle.stop(trailsState);
+      if (index === 0 && durableCategorySyncLifecycle) {
+        await publicationLifecycle?.stop();
+        await durableCategorySyncLifecycle.stop(trailsState);
+      }
       this.logger.info(`Trails shard '${shard}' stopped`);
     },
   }));

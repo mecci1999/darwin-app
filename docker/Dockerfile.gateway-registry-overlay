@@ -1,0 +1,6 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Gateway is the authority for routeable service membership. Only replace the
+# compiled gateway entrypoint that exposes its internal registry snapshot.
+COPY dist/core/gateway/index.js /app/dist/core/gateway/index.js

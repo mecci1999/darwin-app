@@ -12,8 +12,8 @@ const CONTRACT = 'trusted-photoshop-ingestion-private-v1';
 const STATIC_ENV_PROVIDER = 'static-env';
 const STS_ENV_PROVIDER = 'sts-env';
 const SHA256 = /^[a-f0-9]{64}$/;
-const SLOT = /^(?:master|(?:grid-800|cover-1600|preview-2048):(?:avif|webp|jpeg))$/;
-const MIME_FOR_SLOT: Readonly<Record<string, string>> = { master: 'image/jpeg', 'grid-800:avif': 'image/avif', 'grid-800:webp': 'image/webp', 'grid-800:jpeg': 'image/jpeg', 'cover-1600:avif': 'image/avif', 'cover-1600:webp': 'image/webp', 'cover-1600:jpeg': 'image/jpeg', 'preview-2048:avif': 'image/avif', 'preview-2048:webp': 'image/webp', 'preview-2048:jpeg': 'image/jpeg' };
+const SLOT = /^(?:master|(?:grid-960|cover-2048|preview-4096):(?:avif|webp|jpeg))$/;
+const MIME_FOR_SLOT: Readonly<Record<string, string>> = { master: 'image/jpeg', 'grid-960:avif': 'image/avif', 'grid-960:webp': 'image/webp', 'grid-960:jpeg': 'image/jpeg', 'cover-2048:avif': 'image/avif', 'cover-2048:webp': 'image/webp', 'cover-2048:jpeg': 'image/jpeg', 'preview-4096:avif': 'image/avif', 'preview-4096:webp': 'image/webp', 'preview-4096:jpeg': 'image/jpeg' };
 
 interface StaticCredentials { secretId: string; secretKey: string; }
 interface StsCredentials extends StaticCredentials { securityToken: string; }
@@ -39,8 +39,14 @@ export class TencentCosTrustedPhotoshopIngestionPrivateStorageError extends Erro
 
 const nonEmpty = (value: string | undefined): string | undefined => value?.trim() || undefined;
 const isSts = (credentials: StaticCredentials | StsCredentials): credentials is StsCredentials => 'securityToken' in credentials;
+const runtimeStaticKeyAllowed = (environment: NodeJS.ProcessEnv): boolean => (
+  environment.NODE_ENV === 'production'
+  && environment.TRAILS_MEDIA_PUBLICATION_ENABLED === 'true'
+  && environment.TRAILS_MEDIA_SERVER_IDENTITY_MODE === 'static-scoped-key'
+  && environment.TRAILS_COS_CREDENTIAL_PROVIDER === STATIC_ENV_PROVIDER
+);
 const configurationFrom = (environment: NodeJS.ProcessEnv): Configuration | undefined => {
-  if (environment[ENABLED] !== 'true' || !['development', 'test'].includes(environment.NODE_ENV || '')) return undefined;
+  if (environment[ENABLED] !== 'true' || (!['development', 'test'].includes(environment.NODE_ENV || '') && !runtimeStaticKeyAllowed(environment))) return undefined;
   const secretId = nonEmpty(environment.TRAILS_COS_SECRET_ID);
   const secretKey = nonEmpty(environment.TRAILS_COS_SECRET_KEY);
   const mappingSecret = nonEmpty(environment[MAPPING_SECRET]);
@@ -91,23 +97,30 @@ export class TencentCosTrustedPhotoshopIngestionPrivateStorage implements Truste
     try { this.client = createClient(configuration.credentials); this.mappingSecret = configuration.mappingSecret; } catch (_error: unknown) { throw new TencentCosTrustedPhotoshopIngestionPrivateStorageError(); }
   }
 
-  async storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }> {
+  async storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }> {
     return this.store({ tenantId: input.tenantId, operationId: input.operationId, slot: 'master', grant: input.grant, content: input.content, mimeType: input.mimeType, byteLength: input.byteLength, sha256: input.sha256 });
   }
 
-  async storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }> {
-    void input;
-    throw new TencentCosTrustedPhotoshopIngestionPrivateStorageError();
+  async storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }> {
+    try {
+      if (input.artifact.slot !== input.slot) throw new Error('private ingestion slot mismatch');
+      return await this.store({ tenantId: input.tenantId, operationId: input.operationId, slot: input.slot, grant: input.grant, content: input.artifact.buffer, mimeType: input.artifact.mime, byteLength: input.artifact.byteLength, sha256: input.artifact.sha256, artifactSlot: input.artifact.slot });
+    } catch (_error: unknown) {
+      throw new TencentCosTrustedPhotoshopIngestionPrivateStorageError();
+    }
   }
 
-  private async store(input: { tenantId: string; operationId: string; slot: string; grant: { objectIdentity: string; fenceToken: string }; content: Buffer; mimeType: string; byteLength: number; sha256: string; artifactSlot?: string }): Promise<{ privateLocator: string }> {
+  private async store(input: { tenantId: string; operationId: string; slot: string; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; content: Buffer; mimeType: string; byteLength: number; sha256: string; artifactSlot?: string }): Promise<{ privateLocator: string }> {
     try {
-      if (!nonEmpty(input.tenantId) || !nonEmpty(input.operationId) || !SLOT.test(input.slot) || MIME_FOR_SLOT[input.slot] !== input.mimeType || (input.artifactSlot !== undefined && input.artifactSlot !== input.slot) || !Buffer.isBuffer(input.content) || input.content.length === 0 || input.content.length !== input.byteLength || !SHA256.test(input.sha256) || createHash('sha256').update(input.content).digest('hex') !== input.sha256 || !nonEmpty(input.grant.objectIdentity) || !nonEmpty(input.grant.fenceToken)) throw new Error('invalid input');
+      if (!nonEmpty(input.tenantId) || !nonEmpty(input.operationId) || !SLOT.test(input.slot) || MIME_FOR_SLOT[input.slot] !== input.mimeType || (input.artifactSlot !== undefined && input.artifactSlot !== input.slot) || !Buffer.isBuffer(input.content) || input.content.length === 0 || input.content.length !== input.byteLength || !SHA256.test(input.sha256) || createHash('sha256').update(input.content).digest('hex') !== input.sha256 || !SHA256.test(input.grant.intentDigest) || !nonEmpty(input.grant.objectIdentity) || !nonEmpty(input.grant.fenceToken)) throw new Error('invalid input');
       const identity = hmac(this.mappingSecret, 'ingestion-object-identity', canonical(input.tenantId, input.operationId, input.slot));
-      if (input.grant.objectIdentity !== identity) throw new Error('invalid grant');
+      const expectedObjectIdentity = createHash('sha256').update(JSON.stringify({ tenantId: input.tenantId, operationId: input.operationId, slot: input.slot, intentDigest: input.grant.intentDigest })).digest('hex');
+      if (input.grant.objectIdentity !== expectedObjectIdentity) throw new Error('invalid grant');
       const fenceTokenDigest = hmac(this.mappingSecret, 'ingestion-fence-token', input.grant.fenceToken);
-      const key = `${MASTER_PREFIX}${hmac(this.mappingSecret, 'ingestion-cos-key', `${identity}\u0000${fenceTokenDigest}`)}`;
-      const privateLocator = `ingestion_${hmac(this.mappingSecret, 'ingestion-locator', identity)}`;
+      // The locator is opaque, but carries the fenced write generation. This lets the
+      // publication worker deterministically reopen exactly the immutable object later.
+      const privateLocator = `ingestion_${fenceTokenDigest}`;
+      const key = `${MASTER_PREFIX}${hmac(this.mappingSecret, 'ingestion-cos-key', privateLocator)}`;
       const metadata = { contract: CONTRACT, identity, sha256: input.sha256, length: String(input.byteLength), mime: input.mimeType, fenceTokenDigest };
       const matches = (result: TencentCosTrustedPhotoshopIngestionHeadResult): boolean => result.contentLength === input.byteLength && result.metadata.contract === metadata.contract && result.metadata.identity === metadata.identity && result.metadata.sha256 === metadata.sha256 && result.metadata.length === metadata.length && result.metadata.mime === metadata.mime && result.metadata.fenceTokenDigest === metadata.fenceTokenDigest;
       let exists = false;

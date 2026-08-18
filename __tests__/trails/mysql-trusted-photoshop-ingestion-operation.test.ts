@@ -15,11 +15,12 @@ const key = (tenantId: string, operationId: string) => `${tenantId}:${operationI
 const artifactKey = (input: Pick<Artifact, 'tenantId' | 'operationId' | 'logicalRendition' | 'codec'>) => `${key(input.tenantId, input.operationId)}:${input.logicalRendition}:${input.codec}`;
 const fenceKey = (input: Pick<Fence, 'tenantId' | 'operationId' | 'slot'>) => `${key(input.tenantId, input.operationId)}:${input.slot}`;
 const clone = <T>(input: T): T => structuredClone(input);
-const descriptors = () => (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+const descriptors = () => (['grid-960', 'cover-2048', 'preview-4096'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
 const models = (): TrustedPhotoshopIngestionModels => ({
   operations: {
     async create(input) { operations.set(key(input.tenantId, input.operationId), input); return input; },
     async find(input) { return operations.get(key(input.tenantId, input.operationId)); },
+    async listRecent(input) { return [...operations.values()].filter(item => item.tenantId === input.tenantId && item.ownerUserId === input.ownerUserId).sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()).slice(0, input.limit); },
     async cas(input) { const current = operations.get(key(input.tenantId, input.operationId)); if (!current || current.resourceVersion !== input.expectedVersion) return undefined; operations.set(key(input.tenantId, input.operationId), input.next); return input.next; },
   },
   artifacts: {
@@ -46,7 +47,7 @@ describe('trusted Photoshop ingestion operation aggregate', () => {
     expect(replay).toEqual(first);
     expect(first.phase).toBe('prepared');
     expect(first.resourceVersion).toBe('1');
-    expect(first.artifacts.map(item => `${item.logicalRendition}:${item.codec}`)).toEqual(['grid-800:avif', 'grid-800:webp', 'grid-800:jpeg', 'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg', 'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg']);
+    expect(first.artifacts.map(item => `${item.logicalRendition}:${item.codec}`)).toEqual(['grid-960:avif', 'grid-960:webp', 'grid-960:jpeg', 'cover-2048:avif', 'cover-2048:webp', 'cover-2048:jpeg', 'preview-4096:avif', 'preview-4096:webp', 'preview-4096:jpeg']);
     expect(first.artifacts.every(item => item.writeState === 'pending' && item.locator === undefined)).toBe(true);
     expect(fences.size).toBe(10);
     expect([...fences.values()]).toEqual(expect.arrayContaining([expect.objectContaining({ slot: 'master', state: 'pending', mimeType: 'image/jpeg', byteLength: '200', sha256: 'c'.repeat(64) })]));
@@ -77,11 +78,11 @@ describe('trusted Photoshop ingestion operation aggregate', () => {
     const masterGrant = await store.acquireStorageWriteFence({ tenantId: 'tenant-a', operationId: 'operation-1', slot: 'master', leaseOwner: 'worker-a', expectedVersion: pending.resourceVersion });
     const master = await store.recordMaster({ tenantId: 'tenant-a', operationId: 'operation-1', leaseOwner: 'worker-a', expectedVersion: '4', fenceToken: masterGrant.fenceToken, locator: 'master_locator', mimeType: 'image/jpeg', byteLength: 200, sha256: 'c'.repeat(64) });
     expect(master.master.locator).toBe('master_locator');
-    const artifactGrant = await store.acquireStorageWriteFence({ tenantId: 'tenant-a', operationId: 'operation-1', slot: 'grid-800:avif', leaseOwner: 'worker-a', expectedVersion: master.resourceVersion });
+    const artifactGrant = await store.acquireStorageWriteFence({ tenantId: 'tenant-a', operationId: 'operation-1', slot: 'grid-960:avif', leaseOwner: 'worker-a', expectedVersion: master.resourceVersion });
     artifactFailure = true;
-    await expect(store.recordArtifact({ tenantId: 'tenant-a', operationId: 'operation-1', leaseOwner: 'worker-a', expectedVersion: '6', fenceToken: artifactGrant.fenceToken, logicalRendition: 'grid-800', codec: 'avif', locator: 'artifact_locator', mimeType: 'image/avif', width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })).rejects.toThrow('artifact write failed');
+    await expect(store.recordArtifact({ tenantId: 'tenant-a', operationId: 'operation-1', leaseOwner: 'worker-a', expectedVersion: '6', fenceToken: artifactGrant.fenceToken, logicalRendition: 'grid-960', codec: 'avif', locator: 'artifact_locator', mimeType: 'image/avif', width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })).rejects.toThrow('artifact write failed');
     expect(operations.get(key('tenant-a', 'operation-1'))?.resourceVersion).toBe('6');
-    expect(artifacts.get(`${key('tenant-a', 'operation-1')}:grid-800:avif`)?.locator).toBeUndefined();
+    expect(artifacts.get(`${key('tenant-a', 'operation-1')}:grid-960:avif`)?.locator).toBeUndefined();
   });
   it('issues each durable storage write authority once and records only its matching token', async () => {
     const store = repository(); await create(store); const claimed = await store.claim({ tenantId: 'tenant-a', operationId: 'operation-1', owner: 'worker-a', leaseMs: 1_000 }); const pending = await store.transition({ tenantId: 'tenant-a', operationId: 'operation-1', leaseOwner: 'worker-a', expectedVersion: claimed.resourceVersion, phase: 'storage_pending' });

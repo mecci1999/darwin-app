@@ -28,16 +28,24 @@ import {
 const APP_NAME = 'metrics-alerts';
 const ALERT_EVALUATION_INTERVAL_MS = 60 * 1000;
 const DELIVERY_WORKER_INTERVAL_MS = 5_000;
+const REGISTRY_SYNC_GRACE_MS = 15 * 1000;
 const DELIVERY_BATCH_SIZE = 10;
 const DELIVERY_TIMEOUT_MS = 10_000;
 const EVALUATION_LEASE_SECONDS = 55;
 
 type RedisLeaseClient = { set: (key: string, value: string, mode: 'EX', ttl: string, condition: 'NX') => Promise<'OK' | null> };
 type RedisLeaseCacher = { client?: RedisLeaseClient; redis?: RedisLeaseClient; setIfNotExists?: (key: string, value: string, ttl: number) => Promise<boolean> };
+type LocalBus = {
+  on: (eventName: string, listener: () => void) => unknown;
+  off?: (eventName: string, listener: () => void) => unknown;
+  removeListener?: (eventName: string, listener: () => void) => unknown;
+};
 type MetricsAlertsLifecycleService = {
   redis?: RedisLeaseCacher;
   alertOutboxRepository?: AlertOutboxRepository;
   registryMissingAlertRepository?: RegistryMissingAlertRepository;
+  alertStartupTimer?: NodeJS.Timeout;
+  alertStartupListener?: () => void;
   alertEvaluationTimer?: NodeJS.Timeout;
   alertDeliveryTimer?: NodeJS.Timeout;
   settings: { influxdb: { url: string; token: string; org: string; bucket: string } };
@@ -66,8 +74,13 @@ const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise
 
 const deliverInApp = async (star: Starlight, delivery: PendingAlertDelivery) => {
   if (delivery.channel !== 'InApp') throw new Error(`No delivery transport configured for ${delivery.channel}`);
-  if (typeof star.call !== 'function') throw new Error('Gateway WebSocket action is unavailable');
-  await withTimeout(star.call('gateway.websocket.trigger', { eventName: 'alert', data: { ...delivery.payload, tenantId: delivery.tenantId, alertId: delivery.alertId, target: delivery.target } }), DELIVERY_TIMEOUT_MS);
+  if (typeof star.emit !== 'function') throw new Error('Gateway WebSocket event bus is unavailable');
+  // In-app alerts are already durable before this worker runs. WebSocket is a
+  // best-effort live hint, so it must not hold the outbox open awaiting an RPC.
+  await star.emit('gateway.websocket.trigger', {
+    eventName: 'alert',
+    data: { ...delivery.payload, tenantId: delivery.tenantId, alertId: delivery.alertId, target: delivery.target },
+  });
 };
 
 const deliverAlert = async (star: Starlight, delivery: PendingAlertDelivery) => {
@@ -138,7 +151,7 @@ function createMetricsAlertsService() {
     },
   }) as Starlight;
   registerDarwinLogForwarding(star);
-    installDarwinKafkaRecoveryLifecycle(star);
+  installDarwinKafkaRecoveryLifecycle(star);
 
   const alertsService = star.createService({
     name: APP_NAME,
@@ -194,14 +207,37 @@ function createMetricsAlertsService() {
         } catch (error) { service.logger.error('[AlertDelivery] worker run failed:', error); }
         finally { deliveryInFlight = false; }
       };
-      await runEvaluation();
-      await runDeliveryWorker();
-      service.alertEvaluationTimer = setInterval(runEvaluation, ALERT_EVALUATION_INTERVAL_MS);
-      service.alertDeliveryTimer = setInterval(runDeliveryWorker, DELIVERY_WORKER_INTERVAL_MS);
+      const startWorkersAfterRegistrySync = () => {
+        if (service.alertStartupTimer || service.alertEvaluationTimer || service.alertDeliveryTimer) return;
+        service.alertStartupTimer = setTimeout(() => {
+          service.alertStartupTimer = undefined;
+          void runEvaluation();
+          void runDeliveryWorker();
+          service.alertEvaluationTimer = setInterval(runEvaluation, ALERT_EVALUATION_INTERVAL_MS);
+          service.alertDeliveryTimer = setInterval(runDeliveryWorker, DELIVERY_WORKER_INTERVAL_MS);
+          service.logger.info('Metrics alerts workers started after registry synchronization');
+        }, REGISTRY_SYNC_GRACE_MS);
+      };
+      const localBus = star.localBus as unknown as LocalBus | undefined;
+      if (star.started) startWorkersAfterRegistrySync();
+      else if (localBus?.on) {
+        service.alertStartupListener = startWorkersAfterRegistrySync;
+        localBus.on('$star.started', startWorkersAfterRegistrySync);
+      }
       service.logger.info('Metrics alerts service started successfully');
     },
     async stopped() {
       const service = this as unknown as MetricsAlertsLifecycleService;
+      if (service.alertStartupTimer) {
+        clearTimeout(service.alertStartupTimer);
+        service.alertStartupTimer = undefined;
+      }
+      if (service.alertStartupListener) {
+        const localBus = star.localBus as unknown as LocalBus | undefined;
+        if (localBus?.off) localBus.off('$star.started', service.alertStartupListener);
+        else localBus?.removeListener?.('$star.started', service.alertStartupListener);
+        service.alertStartupListener = undefined;
+      }
       if (service.alertEvaluationTimer) {
         clearInterval(service.alertEvaluationTimer);
         service.alertEvaluationTimer = undefined;

@@ -18,7 +18,7 @@ describe('Trails action shards', () => {
   it('assigns every exported action to exactly one shard within the Node-Universe cap', () => {
     const assigned = TRAILS_SHARD_NAMES.flatMap((shard) => Object.keys(selectTrailsShardActions(actions, shard)));
 
-    expect(Object.keys(actions)).toHaveLength(164);
+    expect(Object.keys(actions)).toHaveLength(170);
     expect(new Set(assigned)).toEqual(new Set(Object.keys(actions)));
     expect(assigned).toHaveLength(Object.keys(actions).length);
     for (const shard of TRAILS_SHARD_NAMES) {

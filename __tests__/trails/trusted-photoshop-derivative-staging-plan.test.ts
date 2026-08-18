@@ -13,9 +13,9 @@ const jpeg = (width: number, height: number) => sharp({
 }).jpeg().toBuffer();
 
 const outputs = [
-  { relativePath: 'website/grid-800.v1.jpg', filename: 'grid-800.v1.jpg', presetId: 'website-grid-800', status: 'saved' },
-  { relativePath: 'website/cover-1600.v1.jpg', filename: 'cover-1600.v1.jpg', presetId: 'website-cover-1600', status: 'saved' },
-  { relativePath: 'website/preview-2048.v1.jpg', filename: 'preview-2048.v1.jpg', presetId: 'website-preview-2048', status: 'saved' },
+  { relativePath: 'website/grid-960.v1.jpg', filename: 'grid-960.v1.jpg', presetId: 'website-grid-960', status: 'saved' },
+  { relativePath: 'website/cover-2048.v1.jpg', filename: 'cover-2048.v1.jpg', presetId: 'website-cover-2048', status: 'saved' },
+  { relativePath: 'website/preview-4096.v1.jpg', filename: 'preview-4096.v1.jpg', presetId: 'website-preview-4096', status: 'saved' },
 ];
 
 const packageEntries = async () => [
@@ -24,9 +24,9 @@ const packageEntries = async () => [
     createdAt: '2026-08-02T00:00:00.000Z', producer: { name: 'Photoshop', version: '1', mode: 'uxp' },
     sourceAssetId: 'source-identity-must-not-leak', documentName: 'private.psd', tenantId: 'tenant-must-not-leak',
   })) },
-  { name: 'website/grid-800.v1.jpg', buffer: await jpeg(800, 400) },
-  { name: 'website/cover-1600.v1.jpg', buffer: await jpeg(1600, 800) },
-  { name: 'website/preview-2048.v1.jpg', buffer: await jpeg(2048, 1024) },
+  { name: 'website/grid-960.v1.jpg', buffer: await jpeg(960, 400) },
+  { name: 'website/cover-2048.v1.jpg', buffer: await jpeg(2048, 960) },
+  { name: 'website/preview-4096.v1.jpg', buffer: await jpeg(4096, 1024) },
 ];
 
 const orchestration = async () => processTrustedPhotoshopPackageDerivatives(await packageEntries());
@@ -38,9 +38,9 @@ describe('Trails trusted Photoshop derivative staging plan', () => {
 
     expect(plan.contract).toBe(TRUSTED_PHOTOSHOP_DERIVATIVE_STAGING_PLAN_CONTRACT);
     expect(plan.artifacts.map(({ slot }) => slot)).toEqual([
-      'grid-800:avif', 'grid-800:webp', 'grid-800:jpeg',
-      'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg',
-      'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg',
+      'grid-960:avif', 'grid-960:webp', 'grid-960:jpeg',
+      'cover-2048:avif', 'cover-2048:webp', 'cover-2048:jpeg',
+      'preview-4096:avif', 'preview-4096:webp', 'preview-4096:jpeg',
     ]);
     expect(plan.artifacts).toHaveLength(9);
     for (const [index, artifact] of plan.artifacts.entries()) {
@@ -56,8 +56,8 @@ describe('Trails trusted Photoshop derivative staging plan', () => {
   it('redacts and atomically rejects missing, duplicate, unexpected, MIME, dimension, length, and hash invariant failures', async () => {
     const cases: ReadonlyArray<(result: Awaited<ReturnType<typeof orchestration>>) => void> = [
       (result) => { result.derivatives.pop(); },
-      (result) => { result.derivatives[1] = { ...result.derivatives[1], name: 'grid-800', format: 'avif' }; },
-      (result) => { result.derivatives[1] = { ...result.derivatives[1], name: 'unexpected-rendition' as 'grid-800' }; },
+      (result) => { result.derivatives[1] = { ...result.derivatives[1], name: 'grid-960', format: 'avif' }; },
+      (result) => { result.derivatives[1] = { ...result.derivatives[1], name: 'unexpected-rendition' as 'grid-960' }; },
       (result) => { result.derivatives[0] = { ...result.derivatives[0], mime: 'image/jpeg' }; },
       (result) => { result.derivatives[0] = { ...result.derivatives[0], width: 799 }; },
       (result) => { result.derivatives[0] = { ...result.derivatives[0], byteLength: result.derivatives[0].buffer.length + 1 }; },

@@ -52,8 +52,8 @@ const messageForEvent = (event: GatewayRegistryDiagnosticEvent, status: 'active'
   const reason = event.reason || 'unknown';
   const missingServices = event.missingServiceCount || 0;
   return status === 'active'
-    ? `Gateway registry readiness is degraded (${reason}; ${missingServices} required services missing)`
-    : 'Gateway registry readiness has recovered';
+    ? `服务注册表异常：${missingServices} 个必需服务未注册（原因：${reason}）`
+    : '服务注册表已恢复，所有必需服务均已重新注册。';
 };
 
 export const createGatewayRegistryAlertAdapter = (

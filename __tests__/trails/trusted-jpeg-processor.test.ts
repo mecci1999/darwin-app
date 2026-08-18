@@ -28,18 +28,18 @@ describe('Trails trusted JPEG derivative processor', () => {
 
     expect(artifacts).toHaveLength(9);
     expect(artifacts.map(({ name, format }) => `${name}:${format}`)).toEqual([
-      'grid-800:avif', 'grid-800:webp', 'grid-800:jpeg',
-      'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg',
-      'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg',
+      'grid-960:avif', 'grid-960:webp', 'grid-960:jpeg',
+      'cover-2048:avif', 'cover-2048:webp', 'cover-2048:jpeg',
+      'preview-4096:avif', 'preview-4096:webp', 'preview-4096:jpeg',
     ]);
     expect(artifacts.map(({ name, format }) => `${name}:${format}`).sort()).toEqual([
-      'cover-1600:avif', 'cover-1600:jpeg', 'cover-1600:webp',
-      'grid-800:avif', 'grid-800:jpeg', 'grid-800:webp',
-      'preview-2048:avif', 'preview-2048:jpeg', 'preview-2048:webp',
+      'cover-2048:avif', 'cover-2048:jpeg', 'cover-2048:webp',
+      'grid-960:avif', 'grid-960:jpeg', 'grid-960:webp',
+      'preview-4096:avif', 'preview-4096:jpeg', 'preview-4096:webp',
     ]);
 
     for (const artifact of artifacts) {
-      const target = artifact.name === 'grid-800' ? 800 : artifact.name === 'cover-1600' ? 1600 : 2048;
+      const target = artifact.name === 'grid-960' ? 960 : artifact.name === 'cover-2048' ? 2048 : 4096;
       const [width, height] = expectedDimensions(3200, 1200, target);
       const metadata = await sharp(artifact.buffer).metadata();
 
@@ -73,7 +73,7 @@ describe('Trails trusted JPEG derivative processor', () => {
     const artifacts = await processTrustedJpegDerivatives(await buildJpeg(400, 1200, { orientation: 6, withMetadata: true }));
 
     for (const artifact of artifacts) {
-      const target = artifact.name === 'grid-800' ? 800 : artifact.name === 'cover-1600' ? 1600 : 2048;
+      const target = artifact.name === 'grid-960' ? 960 : artifact.name === 'cover-2048' ? 2048 : 4096;
       const [width, height] = expectedDimensions(1200, 400, target);
       expect(artifact.width).toBe(width);
       expect(artifact.height).toBe(height);
@@ -82,7 +82,7 @@ describe('Trails trusted JPEG derivative processor', () => {
   });
 
   it('omits inspectable EXIF, XMP, and ICC metadata from every re-encoded derivative', async () => {
-    const artifacts = await processTrustedJpegDerivatives(await buildJpeg(1200, 800, { orientation: 6, withMetadata: true }));
+    const artifacts = await processTrustedJpegDerivatives(await buildJpeg(1200, 960, { orientation: 6, withMetadata: true }));
 
     for (const artifact of artifacts) {
       const metadata = await sharp(artifact.buffer).metadata();
@@ -95,7 +95,7 @@ describe('Trails trusted JPEG derivative processor', () => {
   it.each([
     ['non-JPEG', () => sharp({ create: { width: 20, height: 20, channels: 3, background: 'red' } }).png().toBuffer()],
     ['corrupt bytes', () => Promise.resolve(Buffer.from('not an image'))],
-    ['pixel-limit JPEG', () => sharp({ create: { width: 8001, height: 8000, channels: 3, background: 'red' } }).jpeg().toBuffer()],
+    ['pixel-limit JPEG', () => sharp({ create: { width: 9601, height: 9600, channels: 3, background: 'red' } }).jpeg().toBuffer()],
     ['multi-page GIF', async () => sharp([
       await sharp({ create: { width: 20, height: 20, channels: 3, background: 'red' } }).png().toBuffer(),
       await sharp({ create: { width: 20, height: 20, channels: 3, background: 'blue' } }).png().toBuffer(),

@@ -42,15 +42,15 @@ export class TrustedPhotoshopDerivativeStagingPlanError extends Error {
 }
 
 const EXPECTED_ARTIFACTS = [
-  { rendition: 'grid-800', codec: 'avif', mime: 'image/avif', target: 800 },
-  { rendition: 'grid-800', codec: 'webp', mime: 'image/webp', target: 800 },
-  { rendition: 'grid-800', codec: 'jpeg', mime: 'image/jpeg', target: 800 },
-  { rendition: 'cover-1600', codec: 'avif', mime: 'image/avif', target: 1600 },
-  { rendition: 'cover-1600', codec: 'webp', mime: 'image/webp', target: 1600 },
-  { rendition: 'cover-1600', codec: 'jpeg', mime: 'image/jpeg', target: 1600 },
-  { rendition: 'preview-2048', codec: 'avif', mime: 'image/avif', target: 2048 },
-  { rendition: 'preview-2048', codec: 'webp', mime: 'image/webp', target: 2048 },
-  { rendition: 'preview-2048', codec: 'jpeg', mime: 'image/jpeg', target: 2048 },
+  { rendition: 'grid-960', codec: 'avif', mime: 'image/avif', target: 960 },
+  { rendition: 'grid-960', codec: 'webp', mime: 'image/webp', target: 960 },
+  { rendition: 'grid-960', codec: 'jpeg', mime: 'image/jpeg', target: 960 },
+  { rendition: 'cover-2048', codec: 'avif', mime: 'image/avif', target: 2048 },
+  { rendition: 'cover-2048', codec: 'webp', mime: 'image/webp', target: 2048 },
+  { rendition: 'cover-2048', codec: 'jpeg', mime: 'image/jpeg', target: 2048 },
+  { rendition: 'preview-4096', codec: 'avif', mime: 'image/avif', target: 4096 },
+  { rendition: 'preview-4096', codec: 'webp', mime: 'image/webp', target: 4096 },
+  { rendition: 'preview-4096', codec: 'jpeg', mime: 'image/jpeg', target: 4096 },
 ] as const;
 
 const isPositiveSafeInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
@@ -68,7 +68,7 @@ const projectClaims = (claims: TrustedPhotoshopPackageDerivativeClaims): Trusted
 });
 
 const projectSource = (source: TrustedPhotoshopPackageDerivativeSource): TrustedPhotoshopPackageDerivativeSource => ({
-  logicalRendition: 'preview-2048',
+  logicalRendition: 'preview-4096',
   width: source.width,
   height: source.height,
   byteLength: source.byteLength,
@@ -85,7 +85,7 @@ export const stageTrustedPhotoshopPackageDerivatives = (
   try {
     const { source } = derivatives;
     if (
-      source.logicalRendition !== 'preview-2048'
+      source.logicalRendition !== 'preview-4096'
       || !isPositiveSafeInteger(source.width)
       || !isPositiveSafeInteger(source.height)
       || !isPositiveSafeInteger(source.byteLength)

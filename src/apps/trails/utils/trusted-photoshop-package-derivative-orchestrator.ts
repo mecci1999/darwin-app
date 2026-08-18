@@ -17,7 +17,7 @@ export interface TrustedPhotoshopPackageDerivativeClaims {
 
 /** Facts established by the importer for the one buffer provided to the processor. */
 export interface TrustedPhotoshopPackageDerivativeSource {
-  logicalRendition: 'preview-2048';
+  logicalRendition: 'preview-4096';
   width: number;
   height: number;
   byteLength: number;
@@ -54,14 +54,14 @@ export const processTrustedPhotoshopPackageDerivatives = async (
 ): Promise<TrustedPhotoshopPackageDerivatives> => {
   try {
     const imported = await importTrustedPhotoshopPublicationPackage(entries);
-    const preview = imported.jpegs.find(({ logicalRendition }) => logicalRendition === 'preview-2048');
+    const preview = imported.jpegs.find(({ logicalRendition }) => logicalRendition === 'preview-4096');
     if (preview === undefined) throw new Error('Verified preview rendition missing');
 
     const derivatives = await processTrustedJpegDerivatives(preview.buffer);
     return {
       claims: projectClaims(imported.claims),
       source: {
-        logicalRendition: 'preview-2048',
+        logicalRendition: 'preview-4096',
         width: preview.width,
         height: preview.height,
         byteLength: preview.byteLength,

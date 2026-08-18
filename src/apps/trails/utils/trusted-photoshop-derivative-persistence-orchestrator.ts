@@ -13,15 +13,15 @@ import {
 import { TrustedPrivateDerivativeStorage, TrustedPrivateDerivativeStorageResult } from './trusted-private-derivative-storage';
 
 const artifactMatrix = [
-  { logicalRendition: 'grid-800', codec: 'avif', mimeType: 'image/avif', target: 800 },
-  { logicalRendition: 'grid-800', codec: 'webp', mimeType: 'image/webp', target: 800 },
-  { logicalRendition: 'grid-800', codec: 'jpeg', mimeType: 'image/jpeg', target: 800 },
-  { logicalRendition: 'cover-1600', codec: 'avif', mimeType: 'image/avif', target: 1600 },
-  { logicalRendition: 'cover-1600', codec: 'webp', mimeType: 'image/webp', target: 1600 },
-  { logicalRendition: 'cover-1600', codec: 'jpeg', mimeType: 'image/jpeg', target: 1600 },
-  { logicalRendition: 'preview-2048', codec: 'avif', mimeType: 'image/avif', target: 2048 },
-  { logicalRendition: 'preview-2048', codec: 'webp', mimeType: 'image/webp', target: 2048 },
-  { logicalRendition: 'preview-2048', codec: 'jpeg', mimeType: 'image/jpeg', target: 2048 },
+  { logicalRendition: 'grid-960', codec: 'avif', mimeType: 'image/avif', target: 960 },
+  { logicalRendition: 'grid-960', codec: 'webp', mimeType: 'image/webp', target: 960 },
+  { logicalRendition: 'grid-960', codec: 'jpeg', mimeType: 'image/jpeg', target: 960 },
+  { logicalRendition: 'cover-2048', codec: 'avif', mimeType: 'image/avif', target: 2048 },
+  { logicalRendition: 'cover-2048', codec: 'webp', mimeType: 'image/webp', target: 2048 },
+  { logicalRendition: 'cover-2048', codec: 'jpeg', mimeType: 'image/jpeg', target: 2048 },
+  { logicalRendition: 'preview-4096', codec: 'avif', mimeType: 'image/avif', target: 4096 },
+  { logicalRendition: 'preview-4096', codec: 'webp', mimeType: 'image/webp', target: 4096 },
+  { logicalRendition: 'preview-4096', codec: 'jpeg', mimeType: 'image/jpeg', target: 4096 },
 ] as const;
 
 const opaqueLocator = /^[A-Za-z0-9_-]{1,512}$/;
@@ -48,7 +48,7 @@ export class TrustedPhotoshopDerivativePersistenceError extends Error {
 const validatePlan = (plan: TrustedPhotoshopDerivativeStagingPlan): void => {
   if (
     plan.contract !== TRUSTED_PHOTOSHOP_DERIVATIVE_STAGING_PLAN_CONTRACT
-    || plan.source.logicalRendition !== 'preview-2048'
+    || plan.source.logicalRendition !== 'preview-4096'
     || !positiveSafeInteger(plan.source.width)
     || !positiveSafeInteger(plan.source.height)
     || !positiveSafeInteger(plan.source.byteLength)

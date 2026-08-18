@@ -5,9 +5,9 @@ const MAX_INPUT_PIXELS = 64_000_000;
 const MAX_INPUT_CHANNELS = 4;
 
 const RENDITIONS = [
-  { name: 'grid-800', target: 800 },
-  { name: 'cover-1600', target: 1600 },
-  { name: 'preview-2048', target: 2048 },
+  { name: 'grid-960', target: 960 },
+  { name: 'cover-2048', target: 2048 },
+  { name: 'preview-4096', target: 4096 },
 ] as const;
 
 const FORMATS = ['avif', 'webp', 'jpeg'] as const;

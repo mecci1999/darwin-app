@@ -14,6 +14,7 @@ const MAX_BATCH_SIZE = 100;
 const FORWARD_BATCH_SIZE = 20;
 const FORWARD_FLUSH_MS = 200;
 const FORWARD_UNAVAILABLE_FALLBACK_MS = 5000;
+const FORWARD_FAILURE_BACKOFF_MS = 60 * 1000;
 const MAX_FORWARD_PENDING_RECORDS = 200;
 const MAX_FALLBACK_REPLAY_BYTES = 1024 * 1024;
 const MAX_STORED_MESSAGE_CHARS = 64 * 1024;
@@ -204,6 +205,9 @@ function shouldIgnoreForwardToLogs(args: any[], bindings: LoggerBindings): boole
     if (typeof arg !== 'string') return false;
     return (
       arg.includes("Unable to send send to 'logs-development'") ||
+      arg.includes("Request 'logs.v1.capture-darwin' is timed out") ||
+      arg.includes("Request is timed out when call 'logs.v1.capture-darwin'") ||
+      arg.includes('Darwin log forwarding fell back to local capture file') ||
       arg.includes('Kafka Server Publish error') ||
       arg.includes('Timeout while acquiring lock') ||
       arg.includes('Cleaning up excess request')
@@ -768,6 +772,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
   let pendingRecords: DarwinLogRecord[] = [];
   let flushTimer: NodeJS.Timeout | undefined;
   let unavailableSince = 0;
+  let circuitOpenUntil = 0;
 
   const flushPending = (star: {
     call?: (name: string, params: DarwinLogRecord | { records: DarwinLogRecord[] }, options?: { timeout?: number }) => Promise<unknown>;
@@ -776,6 +781,17 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
   }) => {
     if (typeof star.call !== 'function') return;
     if (pendingRecords.length === 0) return;
+
+    const now = Date.now();
+    if (now < circuitOpenUntil) {
+      if (!flushTimer) {
+        flushTimer = setTimeout(() => {
+          flushTimer = undefined;
+          flushPending(star);
+        }, circuitOpenUntil - now);
+      }
+      return;
+    }
 
     if (star.started === false) {
       logForwardDiagnostic('darwin-forward-star-not-started', 'Darwin log forwarding waiting for Star startup', {
@@ -839,6 +855,7 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
       .catch(() => undefined)
       .then(async () => {
         const result = await star.call!(serviceName, { records }, { timeout: 3000 });
+        circuitOpenUntil = 0;
         const accepted = readForwardAcceptedCount(result, records.length);
         if (records.some(isGatewayExplorerRecord)) {
           logGatewayForwardDiagnostic('darwin-forward-gateway-result', 'Darwin gateway log forwarding capture result', {
@@ -859,14 +876,18 @@ export function createDarwinLogForwardMiddleware(serviceName: string = 'logs.v1.
           await persistForwardedRecordsToFallback(records, 'capture_action_accepted_zero');
         }
       })
-      .catch((error) => persistForwardedRecordsToFallback(records, 'forward_call_failure', error))
+      .catch(async (error) => {
+        // A busy logs service must not trigger a retry storm from every service.
+        circuitOpenUntil = Math.max(circuitOpenUntil, Date.now() + FORWARD_FAILURE_BACKOFF_MS);
+        await persistForwardedRecordsToFallback(records, 'forward_call_failure', error);
+      })
       .finally(() => {
         forwardingInFlight = false;
         if (pendingRecords.length > 0 && !flushTimer) {
           flushTimer = setTimeout(() => {
             flushTimer = undefined;
             flushPending(star);
-          }, FORWARD_FLUSH_MS);
+          }, Math.max(FORWARD_FLUSH_MS, circuitOpenUntil - Date.now()));
         }
       });
   };

@@ -12,6 +12,7 @@ export interface ITrailsDurablePortfolioTableAttributes {
   mediaIds: string;
   locationLabel?: string;
   photoTechnicalMetadata?: string | null;
+  exhibitionPresentation?: string | null;
   visibility: 'public' | 'private' | 'unlisted';
   lifecycle: 'draft' | 'published' | 'archived';
   resourceVersion: string;
@@ -30,6 +31,7 @@ export class TrailsDurablePortfolioTable extends Model<ITrailsDurablePortfolioTa
   public mediaIds!: string;
   public locationLabel?: string;
   public photoTechnicalMetadata?: string | null;
+  public exhibitionPresentation?: string | null;
   public visibility!: 'public' | 'private' | 'unlisted';
   public lifecycle!: 'draft' | 'published' | 'archived';
   public resourceVersion!: string;
@@ -46,6 +48,7 @@ export default function (sequelize: Sequelize) {
     categoryId: { type: DataTypes.STRING(160), field: 'category_id' }, coverMediaId: { type: DataTypes.STRING(160), field: 'cover_media_id' },
     mediaIds: { type: DataTypes.TEXT('long'), field: 'media_ids', allowNull: false }, locationLabel: { type: DataTypes.STRING(240), field: 'location_label' },
     photoTechnicalMetadata: { type: DataTypes.TEXT('long'), field: 'photo_technical_metadata', allowNull: true },
+    exhibitionPresentation: { type: DataTypes.TEXT, field: 'exhibition_presentation', allowNull: true },
     visibility: { type: DataTypes.ENUM('public', 'private', 'unlisted'), allowNull: false }, lifecycle: { type: DataTypes.ENUM('draft', 'published', 'archived'), allowNull: false },
     resourceVersion: { type: DataTypes.BIGINT.UNSIGNED, field: 'resource_version', allowNull: false },
     createdAt: { type: DataTypes.DATE, field: 'created_at', defaultValue: DataTypes.NOW }, updatedAt: { type: DataTypes.DATE, field: 'updated_at', defaultValue: DataTypes.NOW },

@@ -6,9 +6,9 @@ const MAX_INPUT_PIXELS = 64_000_000;
 const MAX_INPUT_CHANNELS = 4;
 
 const EXPECTED_RENDITIONS = [
-  { logicalRendition: 'grid-800', entryName: 'website/grid-800.v1.jpg', filename: 'grid-800.v1.jpg', presetId: 'website-grid-800', longestEdge: 800 },
-  { logicalRendition: 'cover-1600', entryName: 'website/cover-1600.v1.jpg', filename: 'cover-1600.v1.jpg', presetId: 'website-cover-1600', longestEdge: 1600 },
-  { logicalRendition: 'preview-2048', entryName: 'website/preview-2048.v1.jpg', filename: 'preview-2048.v1.jpg', presetId: 'website-preview-2048', longestEdge: 2048 },
+  { logicalRendition: 'grid-960', entryName: 'website/grid-960.v1.jpg', filename: 'grid-960.v1.jpg', presetId: 'website-grid-960', longestEdge: 960 },
+  { logicalRendition: 'cover-2048', entryName: 'website/cover-2048.v1.jpg', filename: 'cover-2048.v1.jpg', presetId: 'website-cover-2048', longestEdge: 2048 },
+  { logicalRendition: 'preview-4096', entryName: 'website/preview-4096.v1.jpg', filename: 'preview-4096.v1.jpg', presetId: 'website-preview-4096', longestEdge: 4096 },
 ] as const;
 
 const EXPECTED_ENTRY_NAMES = ['manifest.json', ...EXPECTED_RENDITIONS.map(({ entryName }) => entryName)] as const;

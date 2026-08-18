@@ -44,10 +44,17 @@ const nonEmpty = (value: string | undefined): string | undefined => {
 const isLocalDevelopmentEnvironment = (environment: NodeJS.ProcessEnv): boolean =>
   environment.NODE_ENV === 'development' || environment.NODE_ENV === 'test';
 
+const isLighthouseRuntimeIdentity = (environment: NodeJS.ProcessEnv): boolean => (
+  environment.NODE_ENV === 'production'
+  && environment.TRAILS_MEDIA_PUBLICATION_ENABLED === 'true'
+  && environment.TRAILS_MEDIA_SERVER_IDENTITY_MODE === 'static-scoped-key'
+  && environment.TRAILS_COS_CREDENTIAL_PROVIDER === STATIC_ENV_PROVIDER
+);
+
 const configurationFrom = (environment: NodeJS.ProcessEnv): TrailsCosVerificationConfiguration | undefined => {
   if (environment.TRAILS_COS_ENABLED !== 'true') return undefined;
   const provider = environment.TRAILS_COS_CREDENTIAL_PROVIDER;
-  if (!isLocalDevelopmentEnvironment(environment) || (provider !== STATIC_ENV_PROVIDER && provider !== STS_ENV_PROVIDER)) return undefined;
+  if ((!isLocalDevelopmentEnvironment(environment) && !isLighthouseRuntimeIdentity(environment)) || (provider !== STATIC_ENV_PROVIDER && provider !== STS_ENV_PROVIDER)) return undefined;
 
   const secretId = nonEmpty(environment.TRAILS_COS_SECRET_ID);
   const secretKey = nonEmpty(environment.TRAILS_COS_SECRET_KEY);

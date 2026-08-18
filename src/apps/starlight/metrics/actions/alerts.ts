@@ -88,6 +88,17 @@ type AlertNotification = {
 
 const ALERT_EVALUATION_INTERVAL_MS = 60 * 1000;
 const ALERT_NOTIFICATION_COOLDOWN_MS = 5 * 60 * 1000;
+// Alert lists are read by the page, badge and notification host at the same time.
+// Keep a very short local snapshot so those reads do not rebuild the same catalog.
+const ALERT_SNAPSHOT_CACHE_TTL_MS = 5_000;
+
+type AlertSnapshotCacheEntry = {
+  expiresAt: number;
+  value?: any[];
+  inFlight?: Promise<any[]>;
+};
+
+const alertSnapshotCache = new WeakMap<object, Map<string, AlertSnapshotCacheEntry>>();
 
 const metricAliases: Record<string, string> = {
   错误率: 'service.error.rate',
@@ -719,7 +730,7 @@ export const evaluateAlertRules = async (serviceContext: any, star: Starlight) =
   return results;
 };
 
-export const buildAlerts = async (serviceContext: any, params: any, loadedServices?: any[]) => {
+const buildAlertSnapshot = async (serviceContext: any, params: any, loadedServices?: any[]) => {
   const scope = normalizeMetricsScope(params?.scope);
   const storedAlerts = await loadAllAlertStates(serviceContext);
   const ruleAlerts = storedAlerts
@@ -759,9 +770,6 @@ export const buildAlerts = async (serviceContext: any, params: any, loadedServic
     : Array.isArray(servicesResult?.services)
       ? servicesResult.services
       : [];
-  const startTime = params?.startTime ? Number(params.startTime) : null;
-  const endTime = params?.endTime ? Number(params.endTime) : null;
-
   const healthAlerts = await Promise.all(
     services
       .filter((service: any) => service.health !== 'healthy' || Number(service.errorRate || 0) > 0)
@@ -787,7 +795,49 @@ export const buildAlerts = async (serviceContext: any, params: any, loadedServic
       }),
   );
 
-  const alerts = [...ruleAlerts, ...healthAlerts];
+  return [...ruleAlerts, ...healthAlerts];
+};
+
+const getAlertSnapshot = async (serviceContext: any, params: any, loadedServices?: any[]) => {
+  // A caller-provided catalog can be a different filtered view, so it must not
+  // populate the shared cache used by independent HTTP requests.
+  if (Array.isArray(loadedServices) || !serviceContext || typeof serviceContext !== 'object') {
+    return buildAlertSnapshot(serviceContext, params, loadedServices);
+  }
+
+  const scope = normalizeMetricsScope(params?.scope);
+  const keyword = String(params?.keyword || '').trim();
+  const tenantId = String(serviceContext.tenantId || params?.tenantId || 'default');
+  const key = `${tenantId}:${scope}:${keyword}`;
+  let entries = alertSnapshotCache.get(serviceContext);
+  if (!entries) {
+    entries = new Map<string, AlertSnapshotCacheEntry>();
+    alertSnapshotCache.set(serviceContext, entries);
+  }
+
+  const now = Date.now();
+  const cached = entries.get(key);
+  if (cached?.value && cached.expiresAt > now) return cached.value;
+  if (cached?.inFlight) return cached.inFlight;
+
+  const entry: AlertSnapshotCacheEntry = cached || { expiresAt: 0 };
+  entry.inFlight = buildAlertSnapshot(serviceContext, { ...params, scope })
+    .then((value) => {
+      entry.value = value;
+      entry.expiresAt = Date.now() + ALERT_SNAPSHOT_CACHE_TTL_MS;
+      return value;
+    })
+    .finally(() => {
+      entry.inFlight = undefined;
+    });
+  entries.set(key, entry);
+  return entry.inFlight;
+};
+
+export const buildAlerts = async (serviceContext: any, params: any, loadedServices?: any[]) => {
+  const alerts = await getAlertSnapshot(serviceContext, params, loadedServices);
+  const startTime = params?.startTime ? Number(params.startTime) : null;
+  const endTime = params?.endTime ? Number(params.endTime) : null;
 
   return alerts
     .filter((alert: any) => {

@@ -59,6 +59,19 @@ describe('v2 durable public content actions', () => {
     const store = profileStore(); const result = await trailsActions(star, state({ durablePublicSiteContentStore: store }))['v2.site-content.draft'].handler(context(owner, { ...draftPayload, contactLinks: [{ kind: 'website', href: 'http://127.0.0.1/' }] }) as never);
     expect(result.status).toBe(400); expect(store.saveDraft).not.toHaveBeenCalled();
   });
+  it('accepts official social profiles, public email and WeChat channels before persistence', async () => {
+    const store = profileStore();
+    const contactLinks = [
+      { kind: 'instagram', href: 'https://www.instagram.com/starlightodyssey21' },
+      { kind: 'linkedin', href: 'https://www.linkedin.com/in/starlight-odyssey' },
+      { kind: 'bilibili', href: 'https://space.bilibili.com/123456' },
+      { kind: 'xiaohongshu', href: 'https://www.xiaohongshu.com/user/profile/abcdef123456' },
+      { kind: 'email', href: 'mailto:hello@example.com' },
+      { kind: 'wechat', href: 'wechat:starlight_photo' },
+    ];
+    const result = await trailsActions(star, state({ durablePublicSiteContentStore: store }))['v2.site-content.draft'].handler(context(owner, { ...draftPayload, contactLinks }) as never);
+    expect(result.status).toBe(201); expect(store.saveDraft).toHaveBeenCalledWith(owner, expect.objectContaining({ contactLinks }));
+  });
   it('projects only a valid optional aboutProfile through owner draft and public reads', async () => {
     const store = profileStore({ saveDraft: jest.fn(async (): Promise<DurablePublicSiteContent> => ({ ...site, aboutProfile, status: 'draft' })), readPublic: jest.fn(async (): Promise<DurablePublicSiteContent> => ({ ...site, aboutProfile })) });
     const actions = trailsActions(star, state({ durablePublicSiteContentStore: store }));

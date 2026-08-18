@@ -18,16 +18,16 @@ const manifest = (outputs: unknown, extra: Record<string, unknown> = {}) => Buff
 }));
 
 const outputs = [
-  { relativePath: 'website/grid-800.v1.jpg', filename: 'grid-800.v1.jpg', presetId: 'website-grid-800', status: 'saved' },
-  { relativePath: 'website/cover-1600.v1.jpg', filename: 'cover-1600.v1.jpg', presetId: 'website-cover-1600', status: 'saved' },
-  { relativePath: 'website/preview-2048.v1.jpg', filename: 'preview-2048.v1.jpg', presetId: 'website-preview-2048', status: 'saved' },
+  { relativePath: 'website/grid-960.v1.jpg', filename: 'grid-960.v1.jpg', presetId: 'website-grid-960', status: 'saved' },
+  { relativePath: 'website/cover-2048.v1.jpg', filename: 'cover-2048.v1.jpg', presetId: 'website-cover-2048', status: 'saved' },
+  { relativePath: 'website/preview-4096.v1.jpg', filename: 'preview-4096.v1.jpg', presetId: 'website-preview-4096', status: 'saved' },
 ];
 
 const packageEntries = async (manifestBuffer = manifest(outputs)) => [
   { name: 'manifest.json', buffer: manifestBuffer },
-  { name: 'website/grid-800.v1.jpg', buffer: await jpeg(800, 400) },
-  { name: 'website/cover-1600.v1.jpg', buffer: await jpeg(1600, 800) },
-  { name: 'website/preview-2048.v1.jpg', buffer: await jpeg(2048, 1024) },
+  { name: 'website/grid-960.v1.jpg', buffer: await jpeg(960, 400) },
+  { name: 'website/cover-2048.v1.jpg', buffer: await jpeg(2048, 960) },
+  { name: 'website/preview-4096.v1.jpg', buffer: await jpeg(4096, 1024) },
 ];
 
 const expectRejected = async (entries: Awaited<ReturnType<typeof packageEntries>>) => {
@@ -41,8 +41,8 @@ describe('Trails trusted Photoshop website publication package importer', () => 
     const result = await importTrustedPhotoshopPublicationPackage(await packageEntries(manifest(uxpOutputs, { sourceAsset: { assetId: 'source-1', documentName: 'private.psd' } })));
 
     expect(result.claims).toEqual({ schema: 'trails.publishing-package/v1', packageId: 'package-1', createdAt: '2026-08-02T00:00:00.000Z', producer: { name: 'Photoshop', version: '1', mode: 'uxp' }, sourceAssetId: 'source-1' });
-    expect(result.jpegs.map(({ logicalRendition }) => logicalRendition)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
-    expect(result.jpegs.map(({ width, height }) => [width, height])).toEqual([[800, 400], [1600, 800], [2048, 1024]]);
+    expect(result.jpegs.map(({ logicalRendition }) => logicalRendition)).toEqual(['grid-960', 'cover-2048', 'preview-4096']);
+    expect(result.jpegs.map(({ width, height }) => [width, height])).toEqual([[960, 400], [2048, 960], [4096, 1024]]);
     for (const image of result.jpegs) {
       expect(image.byteLength).toBe(image.buffer.length);
       expect(image.sha256).toBe(createHash('sha256').update(image.buffer).digest('hex'));
@@ -59,14 +59,14 @@ describe('Trails trusted Photoshop website publication package importer', () => 
     const result = await importTrustedPhotoshopPublicationPackage(await packageEntries(manifest(cepOutputs, { sourceAsset: { assetId: 'cep-source', documentName: 'private.psd' } })));
 
     expect(result.claims.sourceAssetId).toBe('cep-source');
-    expect(result.jpegs.map(({ logicalRendition }) => logicalRendition)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
+    expect(result.jpegs.map(({ logicalRendition }) => logicalRendition)).toEqual(['grid-960', 'cover-2048', 'preview-4096']);
   });
 
   it('uses orientation-aware JPEG facts', async () => {
     const entries = await packageEntries();
-    entries[1].buffer = await jpeg(400, 800, 6);
+    entries[1].buffer = await jpeg(400, 960, 6);
     const result = await importTrustedPhotoshopPublicationPackage(entries);
-    expect(result.jpegs[0]).toEqual(expect.objectContaining({ width: 800, height: 400 }));
+    expect(result.jpegs[0]).toEqual(expect.objectContaining({ width: 960, height: 400 }));
   });
 
   it.each([
@@ -74,13 +74,13 @@ describe('Trails trusted Photoshop website publication package importer', () => 
     ['hidden entry', async () => [...await packageEntries(), { name: '.DS_Store', buffer: Buffer.from('x') }]],
     ['duplicate entry', async () => { const entries = await packageEntries(); return [...entries, entries[1]]; }],
     ['missing entry', async () => (await packageEntries()).slice(0, 3)],
-    ['alternate casing', async () => { const entries = await packageEntries(); entries[1].name = 'website/Grid-800.v1.jpg'; return entries; }],
-    ['traversal', async () => { const entries = await packageEntries(); entries[1].name = 'website/../grid-800.v1.jpg'; return entries; }],
-    ['backslash', async () => { const entries = await packageEntries(); entries[1].name = 'website\\grid-800.v1.jpg'; return entries; }],
-    ['absolute path', async () => { const entries = await packageEntries(); entries[1].name = '/website/grid-800.v1.jpg'; return entries; }],
-    ['URL', async () => { const entries = await packageEntries(); entries[1].name = 'https://example.test/grid-800.v1.jpg'; return entries; }],
-    ['control trick', async () => { const entries = await packageEntries(); entries[1].name = 'website/grid-800.v1.jpg\u0000'; return entries; }],
-    ['percent trick', async () => { const entries = await packageEntries(); entries[1].name = 'website/%67rid-800.v1.jpg'; return entries; }],
+    ['alternate casing', async () => { const entries = await packageEntries(); entries[1].name = 'website/Grid-960.v1.jpg'; return entries; }],
+    ['traversal', async () => { const entries = await packageEntries(); entries[1].name = 'website/../grid-960.v1.jpg'; return entries; }],
+    ['backslash', async () => { const entries = await packageEntries(); entries[1].name = 'website\\grid-960.v1.jpg'; return entries; }],
+    ['absolute path', async () => { const entries = await packageEntries(); entries[1].name = '/website/grid-960.v1.jpg'; return entries; }],
+    ['URL', async () => { const entries = await packageEntries(); entries[1].name = 'https://example.test/grid-960.v1.jpg'; return entries; }],
+    ['control trick', async () => { const entries = await packageEntries(); entries[1].name = 'website/grid-960.v1.jpg\u0000'; return entries; }],
+    ['percent trick', async () => { const entries = await packageEntries(); entries[1].name = 'website/%67rid-960.v1.jpg'; return entries; }],
   ])('rejects package safety violation: %s', async (_name, create) => expectRejected(await create()));
 
   it.each([
@@ -90,7 +90,7 @@ describe('Trails trusted Photoshop website publication package importer', () => 
     ['missing output', () => manifest(outputs.slice(0, 2))],
     ['duplicate claim', () => manifest([outputs[0], outputs[0], outputs[2]])],
     ['wrong full relative path', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, relativePath: 'website' } : output))],
-    ['wrong website preset ID', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, presetId: 'grid-800' } : output))],
+    ['wrong website preset ID', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, presetId: 'grid-960' } : output))],
     ['unsaved website output', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, status: 'failed-no-artifact' } : output))],
     ['URL output field', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, url: 'https://example.test/x' } : output))],
     ['object-key output field', () => manifest(outputs.map((output, index) => index === 0 ? { ...output, objectKey: 'private' } : output))],
@@ -101,7 +101,7 @@ describe('Trails trusted Photoshop website publication package importer', () => 
   it.each([
     ['PNG disguised as JPEG', async () => sharp({ create: { width: 20, height: 20, channels: 3, background: 'red' } }).png().toBuffer()],
     ['corrupt JPEG', async () => Buffer.from('not an image')],
-    ['pixel limit', async () => sharp({ create: { width: 8001, height: 8000, channels: 3, background: 'red' } }).jpeg().toBuffer()],
+    ['pixel limit', async () => sharp({ create: { width: 9601, height: 9600, channels: 3, background: 'red' } }).jpeg().toBuffer()],
     ['grid named dimension', async () => jpeg(801, 400)],
   ])('rejects invalid source bytes: %s', async (_name, createImage) => {
     const entries = await packageEntries();

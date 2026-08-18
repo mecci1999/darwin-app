@@ -4,6 +4,7 @@ import { Context } from 'node-universe';
 import { HttpResponseCode, HttpResponseItem, Starlight } from 'typings';
 import { instrumentServiceActions } from '../../metrics/utils/action-metrics';
 import { resolveTrailsWorkspaceActor } from '../creator-space-resolver';
+import { resolveTrailsShard } from '../../../../../../shared/trails-contract';
 
 type MicroAppVisibility = 'public' | 'tenant' | 'allowlist';
 
@@ -13,6 +14,8 @@ type MicroAppManifest = {
   version: string;
   entry: string;
   description?: string;
+  icon?: string;
+  iconFileId?: string;
   permissions?: Record<string, unknown>;
 };
 
@@ -23,6 +26,7 @@ type TrailsWorkspaceOperation =
   | 'categories.archive'
   | 'categories.reorder'
   | 'media-assets.workspace-picker'
+  | 'photoshop-ingestion.upload-session' | 'photoshop-ingestion.complete-upload' | 'photoshop-ingestion.workspace'
   | 'catalog.workspace' | 'media.create' | 'media.transition' | 'editions.create' | 'editions.transition'
   | 'portfolios.workspace'
   | 'portfolios.draft'
@@ -46,6 +50,7 @@ type TrailsWorkspaceOperation =
   | 'publishing-packages.transition'
   | 'publishing-packages.measure'
   | 'publishing-packages.learn'
+  | 'exhibitions.workspace' | 'exhibitions.mutate'
   | 'site-content.workspace' | 'site-content.draft' | 'site-content.publish' | 'site-content.unpublish'
   | 'trips.workspace' | 'trips.draft' | 'trips.update' | 'trips.publish' | 'trips.unpublish' | 'trips.cancel'
   | 'trip-registrations.summary' | 'trip-registrations.capacity'
@@ -79,6 +84,7 @@ type RuntimeTicketClaims = {
 };
 
 type MicroAppSessionClaims = RuntimeTicketClaims & { kind: 'micro-app-session' };
+type MicroAppRefreshClaims = RuntimeTicketClaims & { kind: 'micro-app-refresh' };
 
 type AtomicTicketCacher = {
   setIfNotExists?: (key: string, value: string, ttlSeconds: number) => Promise<boolean>;
@@ -99,6 +105,7 @@ const TRAILS_WORKSPACE_GRANTS: readonly TrailsWorkspaceGrant[] = [{
     'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.preview', 'trails.v2.publishing-packages.workspace',
     'trails.v2.publishing-packages.create', 'trails.v2.publishing-packages.transition',
     'trails.v2.publishing-packages.measure', 'trails.v2.publishing-packages.learn',
+    'trails.v2.exhibitions.workspace', 'trails.v2.exhibitions.workspace.mutate',
     'trails.v2.site-content.workspace', 'trails.v2.site-content.draft', 'trails.v2.site-content.publish', 'trails.v2.site-content.unpublish',
     'trails.v2.trips.workspace', 'trails.v2.trips.workspace.draft', 'trails.v2.trips.workspace.update', 'trails.v2.trips.workspace.publish', 'trails.v2.trips.workspace.unpublish', 'trails.v2.trips.workspace.cancel',
     'trails.v2.trip-registrations.summary', 'trails.v2.trip-registrations.capacity',
@@ -123,6 +130,7 @@ const TRAILS_WORKSPACE_GRANTS: readonly TrailsWorkspaceGrant[] = [{
     'trails.v2.portfolios.draft', 'trails.v2.portfolios.update', 'trails.v2.portfolios.publish', 'trails.v2.portfolios.unpublish', 'trails.v2.portfolios.rich-document.read', 'trails.v2.portfolios.rich-document.save', 'trails.v2.portfolios.rich-document.preview',
     'trails.v2.journals.workspace', 'trails.v2.journals.draft', 'trails.v2.journals.update', 'trails.v2.journals.publish', 'trails.v2.journals.unpublish', 'trails.v2.journals.pin', 'trails.v2.journals.rich-document.read', 'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.preview',
     'trails.v2.publishing-packages.workspace', 'trails.v2.publishing-packages.create', 'trails.v2.publishing-packages.transition', 'trails.v2.publishing-packages.measure', 'trails.v2.publishing-packages.learn',
+    'trails.v2.exhibitions.workspace', 'trails.v2.exhibitions.workspace.mutate',
     'trails.v2.site-content.workspace', 'trails.v2.site-content.draft', 'trails.v2.site-content.publish', 'trails.v2.site-content.unpublish',
     'trails.v2.trips.workspace', 'trails.v2.trips.workspace.draft', 'trails.v2.trips.workspace.update', 'trails.v2.trips.workspace.publish', 'trails.v2.trips.workspace.unpublish', 'trails.v2.trips.workspace.cancel',
     'trails.v2.trip-registrations.summary', 'trails.v2.trip-registrations.capacity',
@@ -144,6 +152,9 @@ const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { acti
   'categories.archive': { action: 'trails.v2.categories.archive', scope: 'trails.v2.categories.archive' },
   'categories.reorder': { action: 'trails.v2.categories.reorder', scope: 'trails.v2.categories.reorder' },
   'media-assets.workspace-picker': { action: 'trails.v2.media-assets.workspace-picker', scope: 'trails.v2.media-assets.workspace-picker' },
+  'photoshop-ingestion.upload-session': { action: 'trails.v2.media-ingestion.upload-session', scope: 'trails.v2.media-ingestion.upload-session' },
+  'photoshop-ingestion.complete-upload': { action: 'trails.v2.media-ingestion.complete-upload', scope: 'trails.v2.media-ingestion.complete-upload' },
+  'photoshop-ingestion.workspace': { action: 'trails.v2.media-ingestion.workspace', scope: 'trails.v2.media-ingestion.workspace' },
   'catalog.workspace': { action: 'trails.v2.commerce.catalog.workspace', scope: 'trails.v2.commerce.catalog.workspace' },
   'media.create': { action: 'trails.v2.commerce.catalog.media.create', scope: 'trails.v2.commerce.catalog.media.create' },
   'media.transition': { action: 'trails.v2.commerce.catalog.media.transition', scope: 'trails.v2.commerce.catalog.media.transition' },
@@ -171,6 +182,8 @@ const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { acti
   'publishing-packages.transition': { action: 'trails.v2.publishing-packages.transition', scope: 'trails.v2.publishing-packages.transition' },
   'publishing-packages.measure': { action: 'trails.v2.publishing-packages.measure', scope: 'trails.v2.publishing-packages.measure' },
   'publishing-packages.learn': { action: 'trails.v2.publishing-packages.learn', scope: 'trails.v2.publishing-packages.learn' },
+  'exhibitions.workspace': { action: 'trails.v2.exhibitions.workspace', scope: 'trails.v2.exhibitions.workspace' },
+  'exhibitions.mutate': { action: 'trails.v2.exhibitions.workspace.mutate', scope: 'trails.v2.exhibitions.workspace.mutate' },
   'site-content.workspace': { action: 'trails.v2.site-content.workspace', scope: 'trails.v2.site-content.workspace' },
   'site-content.draft': { action: 'trails.v2.site-content.draft', scope: 'trails.v2.site-content.draft' },
   'site-content.publish': { action: 'trails.v2.site-content.publish', scope: 'trails.v2.site-content.publish' },
@@ -230,7 +243,7 @@ export const requireMicroAppTicketSecret = () => {
 };
 const MAX_MICRO_APP_PACKAGE_BYTES = Number(process.env.MICRO_APP_MAX_PACKAGE_MB || 100) * 1024 * 1024;
 const uploadChunkKey = (uploadId: string) => `micro-app:upload:${uploadId}`;
-type ChunkUploadState = { total: number; chunks: Record<string, string>; updatedAt: number };
+type ChunkUploadState = { total: number; chunks: Record<string, string>; manifest?: MicroAppManifest; updatedAt: number };
 
 const getChunkUploadState = async (star: Starlight, uploadId: string): Promise<ChunkUploadState | null> => {
   const cached = await star.cacher?.get(uploadChunkKey(uploadId));
@@ -280,13 +293,42 @@ const safeParseManifest = (raw: unknown): MicroAppManifest | null => {
   if (!manifest || typeof manifest !== 'object') return null;
   const item = manifest as Partial<MicroAppManifest>;
   if (!item.appId || !item.name || !item.version || !item.entry) return null;
+  const icon = typeof item.icon === 'string' ? item.icon.trim() : '';
+  if (icon) {
+    try {
+      const url = new URL(icon);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+    } catch {
+      return null;
+    }
+  }
   return {
     appId: String(item.appId),
     name: String(item.name),
     version: String(item.version),
     entry: String(item.entry),
     description: item.description ? String(item.description) : '',
+    ...(icon ? { icon } : {}),
+    ...(typeof item.iconFileId === 'string' && item.iconFileId.trim() ? { iconFileId: item.iconFileId.trim() } : {}),
     permissions: item.permissions || {},
+  };
+};
+
+const mergeUploadedManifestMetadata = (packageManifest: MicroAppManifest, raw: unknown): MicroAppManifest => {
+  if (raw === undefined) return packageManifest;
+  const submitted = safeParseManifest(raw);
+  if (!submitted) throw new Error('上传 manifest 元数据无效');
+  if (
+    submitted.appId !== packageManifest.appId ||
+    submitted.version !== packageManifest.version ||
+    submitted.entry !== packageManifest.entry
+  ) {
+    throw new Error('上传 manifest 与微应用包身份不匹配');
+  }
+  return {
+    ...packageManifest,
+    ...(submitted.icon ? { icon: submitted.icon } : {}),
+    ...(submitted.iconFileId ? { iconFileId: submitted.iconFileId } : {}),
   };
 };
 
@@ -351,6 +393,7 @@ const currentUser = (ctx: Context) => (ctx.meta as any)?.user || {};
 const currentUserId = (ctx: Context) => String(currentUser(ctx)?.userId || currentUser(ctx)?.id || '');
 const currentTenantId = (ctx: Context) => String((ctx.meta as any)?.tenantId || currentUser(ctx)?.tenantId || currentUserId(ctx));
 const isAdmin = (ctx: Context) => Boolean(currentUser(ctx)?.isAdmin);
+const isTrailsWorkspaceApp = (appId: unknown) => appId === 'starlight-trails-workspace';
 const requestIp = (ctx: Context) => String((ctx.meta as any)?.req?.ip || '');
 const requestedPackageVersion = (params: any) => String(params?.targetVersion || params?.appVersion || '');
 
@@ -395,13 +438,39 @@ const verifyTicket = (ticket: string): Record<string, unknown> | null => {
 };
 
 const runtimeTicketKey = (jti: string) => `micro-app:runtime-ticket:${jti}`;
-const registeredTrailsWorkspaceGrant = (appId: string, version: string): TrailsWorkspaceGrant | undefined =>
-  TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === appId && grant.version === version);
+const registeredTrailsWorkspaceGrant = (appId: string, version: string): TrailsWorkspaceGrant | undefined => {
+  const exact = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === appId && grant.version === version);
+  if (exact) return exact;
+  const prior = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === 'starlight-trails-workspace' && grant.version === '1.0.1');
+  return appId === 'starlight-trails-workspace' && ['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13'].includes(version) && prior
+    ? { ...prior, version, scopes: [...prior.scopes, 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace'] }
+    : undefined;
+};
 const isRuntimeTicketClaims = (value: Record<string, unknown>): value is RuntimeTicketClaims =>
   typeof value.aud === 'string' && typeof value.jti === 'string' && typeof value.appId === 'string' && typeof value.version === 'string'
   && typeof value.userId === 'string' && Array.isArray(value.scopes) && value.scopes.every((scope) => typeof scope === 'string');
 const isMicroAppSessionClaims = (value: Record<string, unknown>): value is MicroAppSessionClaims =>
   isRuntimeTicketClaims(value) && value.kind === 'micro-app-session';
+const isMicroAppRefreshClaims = (value: Record<string, unknown>): value is MicroAppRefreshClaims =>
+  isRuntimeTicketClaims(value) && value.kind === 'micro-app-refresh';
+
+const microAppSessionResponse = (payload: RuntimeTicketClaims) => {
+  const session: MicroAppSessionClaims = { ...payload, kind: 'micro-app-session', exp: Date.now() + 10 * 60 * 1000 };
+  const refresh: MicroAppRefreshClaims = {
+    ...payload,
+    kind: 'micro-app-refresh',
+    jti: crypto.randomUUID(),
+    exp: Date.now() + 12 * 60 * 60 * 1000,
+  };
+  return {
+    sessionToken: signPayload(session),
+    refreshToken: signPayload(refresh),
+    user: { userId: payload.userId },
+    app: { appId: payload.appId, version: payload.version, scopes: payload.scopes },
+    expiresIn: 600,
+    refreshExpiresIn: 12 * 60 * 60,
+  };
+};
 
 const consumeRuntimeTicket = async (star: Starlight, claims: RuntimeTicketClaims): Promise<boolean> => {
   const ttlSeconds = Math.max(1, Math.ceil((claims.exp - Date.now()) / 1000));
@@ -420,8 +489,8 @@ const containsForbiddenBridgeIdentityField = (value: unknown): boolean => {
 };
 const isPortfolioWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
   const allowed = operation === 'portfolios.workspace' ? []
-    : operation === 'portfolios.draft' ? ['title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata']
-      : operation === 'portfolios.update' ? ['id', 'resourceVersion', 'title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata']
+    : operation === 'portfolios.draft' ? ['title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata', 'exhibitionPresentation']
+      : operation === 'portfolios.update' ? ['id', 'resourceVersion', 'title', 'summary', 'mediaIds', 'visibility', 'categoryId', 'coverMediaId', 'locationLabel', 'photoTechnicalMetadata', 'exhibitionPresentation']
         : ['id', 'resourceVersion'];
   return Object.keys(payload).every((key) => allowed.includes(key));
 };
@@ -476,6 +545,9 @@ const isShootingLocationPayload = (operation: TrailsWorkspaceOperation, payload:
   const allowed = operation === 'shooting-locations.workspace' ? [] : operation === 'shooting-locations.archive' ? ['id', 'mutationId', 'expectedResourceVersion'] : ['id', 'name', 'latitude', 'longitude', 'notes', 'mutationId', 'expectedResourceVersion'];
   return Object.keys(payload).length === allowed.length && Object.keys(payload).every(key => allowed.includes(key));
 };
+const isPhotoshopIngestionPayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => operation === 'photoshop-ingestion.upload-session'
+  ? Object.keys(payload).length === 0
+  : Object.keys(payload).length === 1 && typeof payload.uploadSession === 'string' && payload.uploadSession.length >= 64 && payload.uploadSession.length <= 2048;
 
 const publicVersion = (version: any, includePackage = false) => {
   if (!version) return null;
@@ -514,77 +586,90 @@ const writeAuditLog = (star: Starlight, ctx: Context, payload: any) =>
     detailsJson: JSON.stringify(payload.details || {}),
   });
 
+const persistMicroAppUpload = async (star: Starlight, ctx: Context): Promise<HttpResponseItem> => {
+  try {
+    const packageBase64 = String((ctx.params as any).packageBase64 || '');
+    if (!packageBase64) return fail('微应用包不能为空');
+
+    const packageBuffer = Buffer.from(packageBase64, 'base64');
+    if (!packageBuffer.length) return fail('微应用包格式不正确');
+    if (packageBuffer.length > MAX_MICRO_APP_PACKAGE_BYTES) {
+      return fail(`微应用包不能超过 ${Math.floor(MAX_MICRO_APP_PACKAGE_BYTES / 1024 / 1024)}MB`);
+    }
+    const manifest = mergeUploadedManifestMetadata(parseManifestFromZip(packageBuffer), (ctx.params as any).manifest);
+    const scanReport = createStaticScanReport(packageBuffer);
+    if (!scanReport.passed) return fail('静态安全扫描未通过，请移除敏感文件后重新上传');
+
+    const packageSha256 = crypto.createHash('sha256').update(packageBuffer).digest('hex');
+    const userId = currentUserId(ctx);
+    const tenantId = currentTenantId(ctx);
+
+    const app = await star.db.microApp.upsertMicroApp({
+      appId: manifest.appId,
+      name: manifest.name,
+      description: manifest.description,
+      ownerUserId: userId,
+      tenantId,
+      visibility: ((ctx.params as any).visibility as MicroAppVisibility) || 'tenant',
+      status: 'active',
+      allowedUsers: JSON.stringify(normalizeUserList((ctx.params as any).allowedUsers)),
+      rolloutUsers: JSON.stringify(normalizeUserList((ctx.params as any).rolloutUsers)),
+      rolloutTenants: JSON.stringify(normalizeUserList((ctx.params as any).rolloutTenants)),
+      rolloutPercent: Math.max(0, Math.min(100, Number((ctx.params as any).rolloutPercent ?? 100))),
+      releaseChannel: (ctx.params as any).releaseChannel || 'stable',
+    });
+
+    const version = await star.db.microApp.upsertMicroAppVersion({
+      appId: manifest.appId,
+      version: manifest.version,
+      manifestJson: JSON.stringify(manifest),
+      packageBase64,
+      packageSha256,
+      packageSize: packageBuffer.length,
+      status: 'pending_review',
+      scanReportJson: JSON.stringify(scanReport),
+      createdBy: userId,
+    });
+
+    await writeAuditLog(star, ctx, {
+      appId: manifest.appId,
+      version: manifest.version,
+      action: 'upload',
+      afterStatus: 'pending_review',
+      details: { packageSha256, scanReport },
+    });
+
+    return ok({ app, version: publicVersion(version) }, '微应用包已上传，等待审核');
+  } catch (error) {
+    star.logger?.error('micro-app upload failed', error);
+    return fail(`上传失败: ${error}`, HttpResponseCode.ServiceActionFaild, 500);
+  }
+};
+
 export default function microAppActions(star: Starlight) {
   return instrumentServiceActions(star, 'micro-app', {
     'v1.upload': {
       metadata: { auth: true },
-      async handler(ctx: Context): Promise<HttpResponseItem> {
-        try {
-          const packageBase64 = String((ctx.params as any).packageBase64 || '');
-          if (!packageBase64) return fail('微应用包不能为空');
-
-          const packageBuffer = Buffer.from(packageBase64, 'base64');
-          if (!packageBuffer.length) return fail('微应用包格式不正确');
-          if (packageBuffer.length > MAX_MICRO_APP_PACKAGE_BYTES) {
-            return fail(`微应用包不能超过 ${Math.floor(MAX_MICRO_APP_PACKAGE_BYTES / 1024 / 1024)}MB`);
-          }
-          const manifest = parseManifestFromZip(packageBuffer);
-          const scanReport = createStaticScanReport(packageBuffer);
-          if (!scanReport.passed) return fail('静态安全扫描未通过，请移除敏感文件后重新上传');
-
-          const packageSha256 = crypto.createHash('sha256').update(packageBuffer).digest('hex');
-          const userId = currentUserId(ctx);
-          const tenantId = currentTenantId(ctx);
-
-          const app = await star.db.microApp.upsertMicroApp({
-            appId: manifest.appId,
-            name: manifest.name,
-            description: manifest.description,
-            ownerUserId: userId,
-            tenantId,
-            visibility: ((ctx.params as any).visibility as MicroAppVisibility) || 'tenant',
-            status: 'active',
-            allowedUsers: JSON.stringify(normalizeUserList((ctx.params as any).allowedUsers)),
-            rolloutUsers: JSON.stringify(normalizeUserList((ctx.params as any).rolloutUsers)),
-            rolloutTenants: JSON.stringify(normalizeUserList((ctx.params as any).rolloutTenants)),
-            rolloutPercent: Math.max(0, Math.min(100, Number((ctx.params as any).rolloutPercent ?? 100))),
-            releaseChannel: (ctx.params as any).releaseChannel || 'stable',
-          });
-
-          const version = await star.db.microApp.upsertMicroAppVersion({
-            appId: manifest.appId,
-            version: manifest.version,
-            manifestJson: JSON.stringify(manifest),
-            packageBase64,
-            packageSha256,
-            packageSize: packageBuffer.length,
-            status: 'pending_review',
-            scanReportJson: JSON.stringify(scanReport),
-            createdBy: userId,
-          });
-
-          await writeAuditLog(star, ctx, {
-            appId: manifest.appId,
-            version: manifest.version,
-            action: 'upload',
-            afterStatus: 'pending_review',
-            details: { packageSha256, scanReport },
-          });
-
-          return ok({ app, version: publicVersion(version) }, '微应用包已上传，等待审核');
-        } catch (error) {
-          star.logger?.error('micro-app upload failed', error);
-          return fail(`上传失败: ${error}`, HttpResponseCode.ServiceActionFaild, 500);
-        }
-      },
+      handler: (ctx: Context): Promise<HttpResponseItem> => persistMicroAppUpload(star, ctx),
     },
 
     'v1.uploadChunk': {
       metadata: { auth: true },
       async handler(ctx: Context): Promise<HttpResponseItem> {
-        const { uploadId, index, total, chunkBase64 } = ctx.params as any;
+        const { uploadId, index, total, chunkBase64, manifest: rawManifest } = ctx.params as any;
         if (!uploadId || typeof index !== 'number' || typeof total !== 'number' || !chunkBase64) return fail('分片上传参数不完整');
         const record = (await getChunkUploadState(star, uploadId)) || { total, chunks: {}, updatedAt: Date.now() };
+        if (rawManifest !== undefined) {
+          const manifest = safeParseManifest(rawManifest);
+          if (!manifest) return fail('分片上传 manifest 元数据无效');
+          if (
+            record.manifest &&
+            (record.manifest.appId !== manifest.appId || record.manifest.version !== manifest.version || record.manifest.entry !== manifest.entry)
+          ) {
+            return fail('分片上传 manifest 身份不一致');
+          }
+          record.manifest = manifest;
+        }
         record.total = total;
         record.chunks[String(index)] = String(chunkBase64);
         record.updatedAt = Date.now();
@@ -598,11 +683,16 @@ export default function microAppActions(star: Starlight) {
       async handler(ctx: Context): Promise<HttpResponseItem> {
         const { uploadId, visibility } = ctx.params as any;
         const record = await getChunkUploadState(star, uploadId);
-        if (!record || Object.keys(record.chunks).length !== record.total) return fail('分片未上传完整');
+        if (!record || !Array.from({ length: record.total }, (_, index) => record.chunks[String(index)]).every(Boolean)) {
+          return fail('分片未上传完整');
+        }
         const packageBase64 = Array.from({ length: record.total }, (_, index) => record.chunks[String(index)] || '').join('');
-        ctx.params = { ...ctx.params, packageBase64, visibility };
-        await clearChunkUploadState(star, uploadId);
-        return (this as any)['v1.upload'].handler(ctx);
+        const response = await persistMicroAppUpload(star, {
+          ...ctx,
+          params: { ...ctx.params, packageBase64, visibility, ...(record.manifest ? { manifest: record.manifest } : {}) },
+        } as Context);
+        if (response.data.success) await clearChunkUploadState(star, uploadId);
+        return response;
       },
     },
 
@@ -770,6 +860,9 @@ export default function microAppActions(star: Starlight) {
         const { appId } = ctx.params as any;
         const version = requestedPackageVersion(ctx.params);
         const app = await star.db.microApp.findMicroAppByAppId(appId);
+        if (isTrailsWorkspaceApp(appId) && !isAdmin(ctx)) {
+          return fail('只有星光超级管理员可以运行星迹创作后台', HttpResponseCode.NoPermissionError, 403);
+        }
         if (!canAccessApp(ctx, app)) return fail('没有该微应用的运行权限', HttpResponseCode.NoPermissionError, 403);
         const record = version
           ? await star.db.microApp.findMicroAppVersion(appId, version)
@@ -805,6 +898,20 @@ export default function microAppActions(star: Starlight) {
     'v1.exchange-session': {
       metadata: { auth: false },
       async handler(ctx: Context): Promise<HttpResponseItem> {
+        const refreshPayload = verifyTicket(String((ctx.params as any).refreshToken || ''));
+        if (refreshPayload) {
+          if (!isMicroAppRefreshClaims(refreshPayload)) {
+            return fail('微应用续签凭证无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+          }
+          const grant = registeredTrailsWorkspaceGrant(refreshPayload.appId, refreshPayload.version);
+          if (
+            refreshPayload.appId === 'starlight-trails-workspace' &&
+            (!grant || refreshPayload.aud !== grant.audience || !refreshPayload.scopes.every((scope) => grant.scopes.includes(scope)))
+          ) {
+            return fail('微应用续签授权无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
+          }
+          return ok(microAppSessionResponse(refreshPayload), '微应用会话已续签');
+        }
         const payload = verifyTicket(String((ctx.params as any).ticket || ''));
         if (!payload) return fail('运行票据无效或已过期', HttpResponseCode.ERR_INVALID_TOKEN, 401);
         if (payload.appId === 'starlight-trails-workspace' && (!isRuntimeTicketClaims(payload) || !registeredTrailsWorkspaceGrant(payload.appId, payload.version))) {
@@ -816,20 +923,9 @@ export default function microAppActions(star: Starlight) {
             return fail('运行票据受众或授权无效', HttpResponseCode.ERR_INVALID_TOKEN, 401);
           }
           if (!(await consumeRuntimeTicket(star, payload))) return fail('运行票据已使用或当前不可安全换取', HttpResponseCode.ERR_INVALID_TOKEN, 401);
-          const session: MicroAppSessionClaims = { ...payload, kind: 'micro-app-session', exp: Date.now() + 10 * 60 * 1000 };
-          return ok({
-            sessionToken: signPayload(session),
-            user: { userId: payload.userId },
-            app: { appId: payload.appId, version: payload.version, scopes: payload.scopes },
-            expiresIn: 600,
-          }, '微应用会话已换取');
+          return ok(microAppSessionResponse(payload), '微应用会话已换取');
         }
-        return ok({
-          sessionToken: signPayload({ ...payload, kind: 'micro-app-session', exp: Date.now() + 10 * 60 * 1000 }),
-          user: { userId: payload.userId },
-          app: { appId: payload.appId, version: payload.version, scopes: payload.scopes },
-          expiresIn: 600,
-        }, '微应用会话已换取');
+        return ok(microAppSessionResponse(payload as RuntimeTicketClaims), '微应用会话已换取');
       },
     },
 
@@ -867,10 +963,20 @@ export default function microAppActions(star: Starlight) {
   if (operation === 'trip-registrations.summary' && !isTripRegistrationSummaryPayload(payload)) return fail('报名摘要请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if (operation === 'trip-registrations.capacity' && !isTripRegistrationCapacityPayload(payload)) return fail('行摄名额请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if ((operation === 'shooting-locations.workspace' || operation === 'shooting-locations.create' || operation === 'shooting-locations.update' || operation === 'shooting-locations.archive') && !isShootingLocationPayload(operation, payload)) return fail('拍摄地点请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
-           if (typeof ctx.call !== 'function') return fail('Trails 服务当前不可用', HttpResponseCode.ServiceActionFaild, 503);
+  if ((operation === 'photoshop-ingestion.upload-session' || operation === 'photoshop-ingestion.complete-upload') && !isPhotoshopIngestionPayload(operation, payload)) return fail('Photoshop导入请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+          if (typeof ctx.call !== 'function') return fail('Trails 服务当前不可用', HttpResponseCode.ServiceActionFaild, 503);
           const trustedActor = await resolveTrailsWorkspaceActor(star.db, session.userId);
           if (!trustedActor) return fail('当前用户没有有效的 Trails 创作者空间权限', HttpResponseCode.NoPermissionError, 403);
-          return ctx.call(target.action, payload, {
+          if (!trustedActor.user.isAdmin) {
+            return fail('只有星光超级管理员可以操作星迹创作后台', HttpResponseCode.NoPermissionError, 403);
+          }
+          const [, targetVersion, ...targetActionParts] = target.action.split('.');
+          const targetAction = targetActionParts.join('.');
+          const targetShard = resolveTrailsShard(`${targetVersion}.${targetAction}`);
+          if (!targetVersion || !targetAction || !targetShard) {
+            return fail('Trails 工作台操作未映射到可用服务', HttpResponseCode.ServiceActionFaild, 503);
+          }
+          return ctx.call(`${targetShard}.${targetVersion}.${targetAction}`, payload, {
             meta: {
               tenantId: trustedActor.tenantId,
               user: trustedActor.user,

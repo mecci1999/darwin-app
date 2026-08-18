@@ -29,7 +29,11 @@ type Incident = { ruleId: string; generation: number; status: 'absent' | 'active
 type Row = { get(): Record<string, unknown>; update(values: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown> };
 type TransactionRunner = { transaction<T>(operation: (transaction: AlertOutboxTransaction) => Promise<T>): Promise<T> };
 type ModelPort = { findAll(options?: Record<string, unknown>): Promise<Row[]>; findOne(options: Record<string, unknown>): Promise<Row | null>; create(values: Record<string, unknown>, options?: Record<string, unknown>): Promise<Row>; destroy(options: Record<string, unknown>): Promise<number> };
-type RegistryStar = { registry?: { services?: { list?: () => unknown | Promise<unknown> } } | null; logger?: { warn(message: string, error?: unknown): void } | null };
+type RegistryStar = {
+  registry?: { services?: { list?: () => unknown | Promise<unknown> } } | null;
+  call?: (name: string, params?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
+  logger?: { warn(message: string, error?: unknown): void } | null;
+};
 type NotificationOutbox = { createNotificationEventInTransaction(transaction: AlertOutboxTransaction, input: { tenantId?: string; alertId: string; eventKey: string; payload: Record<string, unknown>; channels: Array<{ channel: DeliveryChannel; target: unknown }> }): Promise<boolean> };
 type IncidentTransition = { rule: RegistryMissingRule; registered: boolean; now: Date };
 
@@ -96,7 +100,33 @@ export const getRegistryMissingAlertRepository = (): Promise<RegistryMissingAler
   return repositoryPromise;
 };
 
+const serviceNamesFromGatewaySnapshot = async (star: RegistryStar): Promise<Set<string> | null> => {
+  if (typeof star.call !== 'function') return null;
+  try {
+    const response = await star.call(
+      'gateway.registry.snapshot',
+      {},
+      { meta: { internal: true, system: 'metrics-alerts-registry-evaluator' } },
+    ) as any;
+    const candidates = [
+      response?.data?.content?.services,
+      response?.content?.services,
+      response?.data?.data?.content?.services,
+    ];
+    const services = candidates.find(Array.isArray);
+    if (!services) throw new Error('Gateway registry snapshot returned an invalid service list');
+    return new Set(services.map(String).filter(Boolean));
+  } catch (error) {
+    star.logger?.warn('[RegistryMissing] gateway registry snapshot unavailable; local registry fallback used', error);
+    return null;
+  }
+};
+
 const registryServiceNames = async (star: RegistryStar): Promise<Set<string> | null> => {
+  // Gateway is the routing authority seen by users. Its snapshot avoids false
+  // positives when the alerts process briefly holds a stale Kafka registry view.
+  const gatewayServices = await serviceNamesFromGatewaySnapshot(star);
+  if (gatewayServices) return gatewayServices;
   try {
     const list = await star.registry?.services?.list?.();
     if (!Array.isArray(list)) return null;
@@ -115,7 +145,7 @@ const nextIncidentTransition = (incident: Incident | null, input: IncidentTransi
   const { rule, registered, now } = input;
   if (registered) {
     if (incident?.status === 'active') {
-      const payload = { ruleId: rule.ruleId, service: rule.serviceName, serviceId: `system:${rule.serviceName}`, level: rule.severity, status: 'resolved', message: `${rule.serviceName} has re-registered`, time: now.toISOString() };
+      const payload = { ruleId: rule.ruleId, service: rule.serviceName, serviceId: `system:${rule.serviceName}`, level: rule.severity, status: 'resolved', message: `服务“${rule.serviceName}”已重新注册，服务连接已恢复。`, time: now.toISOString() };
       return { incident: { ...incident, status: 'resolved', resolvedAt: now }, notification: rule.notifyOnRecovery ? { tenantId: 'system', alertId: `registry-missing-${rule.ruleId}-${incident.generation}`, eventKey: `recovered:${incident.generation}`, payload, channels: registryChannels(rule) } : undefined };
     }
     return incident?.status === 'absent' ? { incident: { ...incident, status: 'resolved', resolvedAt: now } } : null;
@@ -124,7 +154,7 @@ const nextIncidentTransition = (incident: Incident | null, input: IncidentTransi
   const generation = incident?.status === 'resolved' ? incident.generation + 1 : incident?.generation || 1;
   if (now.getTime() < absentSince.getTime() + (rule.forSeconds + rule.deployGraceSeconds) * 1000) return { incident: { ruleId: rule.ruleId, generation, status: 'absent', absentSince, openedAt: null, resolvedAt: null } };
   if (incident?.status === 'active') return null;
-  const payload = { ruleId: rule.ruleId, service: rule.serviceName, serviceId: `system:${rule.serviceName}`, level: rule.severity, status: 'active', message: `${rule.serviceName} is absent from the live service registry`, time: now.toISOString() };
+  const payload = { ruleId: rule.ruleId, service: rule.serviceName, serviceId: `system:${rule.serviceName}`, level: rule.severity, status: 'active', message: `服务“${rule.serviceName}”未注册或连接已断开，请检查服务进程和 Kafka 服务发现。`, time: now.toISOString() };
   return { incident: { ruleId: rule.ruleId, generation, status: 'active', absentSince, openedAt: now, resolvedAt: null }, notification: { tenantId: 'system', alertId: `registry-missing-${rule.ruleId}-${generation}`, eventKey: `opened:${generation}`, payload, channels: registryChannels(rule) } };
 };
 const isUniqueConflict = (error: unknown) => {

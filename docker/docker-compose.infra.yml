@@ -17,7 +17,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 160m
-    cpus: 0.25
+    cpus: 0.10
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo ruok > /dev/tcp/127.0.0.1/2181'"]
@@ -70,8 +70,8 @@ services:
       - mysql_data:/var/lib/mysql
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 640m
-    cpus: 0.20
+    mem_limit: 768m
+    cpus: 0.15
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -90,7 +90,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 96m
-    cpus: 0.05
+    cpus: 0.03
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
@@ -114,7 +114,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 384m
-    cpus: 0.50
+    cpus: 0.40
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "influx ping --host http://localhost:8086 >/dev/null 2>&1"]
@@ -135,7 +135,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 1280m
-    cpus: 0.20
+    cpus: 0.12
     logging: *default-logging
     ulimits:
       nofile:

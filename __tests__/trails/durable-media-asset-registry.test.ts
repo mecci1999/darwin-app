@@ -55,7 +55,7 @@ const models = (): MediaAssetRegistryModels => ({
   },
 });
 const repository = () => new MySqlMediaAssetRegistryRepository({ async transaction<T>(work: (transaction: object) => Promise<T>) { const snapshot = { assets: clone([...assets]), variants: clone([...variants]), artifacts: clone([...artifacts]), mutations: clone([...mutations]) }; try { return await work({}); } catch (error: unknown) { assets.clear(); variants.clear(); artifacts.clear(); mutations.clear(); snapshot.assets.forEach(([mapKey, row]) => assets.set(mapKey, row)); snapshot.variants.forEach(([mapKey, row]) => variants.set(mapKey, row)); snapshot.artifacts.forEach(([mapKey, row]) => artifacts.set(mapKey, row)); snapshot.mutations.forEach(([mapKey, row]) => mutations.set(mapKey, row)); if (remoteMutation) { mutations.set(ledgerKey(remoteMutation.tenantId, remoteMutation.actorUserId, remoteMutation.mutationId), remoteMutation); remoteMutation = undefined; } throw error; } } }, models(), () => at);
-const nineArtifacts = () => (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, privateLocator: `${logicalRendition}_${codec}`, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+const nineArtifacts = () => (['grid-960', 'cover-2048', 'preview-4096'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, privateLocator: `${logicalRendition}_${codec}`, width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
 
 describe('durable media asset registry', () => {
   beforeEach(() => { assets.clear(); variants.clear(); artifacts.clear(); mutations.clear(); mutationFailure = undefined; assetFailure = undefined; variantFailure = undefined; artifactFailure = undefined; remoteMutation = undefined; });
@@ -67,7 +67,7 @@ describe('durable media asset registry', () => {
     const persisted = await store.persistArtifacts(owner, { mutationId: 'artifact-persist', expectedResourceVersion: registered.resourceVersion, assetId: registered.id, artifacts: nineArtifacts() });
     expect(artifacts.size).toBe(9);
     expect(variants.size).toBe(0);
-    expect(JSON.stringify(persisted)).not.toMatch(/master_locator|grid-800_avif|https?:\/\//);
+    expect(JSON.stringify(persisted)).not.toMatch(/master_locator|grid-960_avif|https?:\/\//);
     await expect(store.persistArtifacts(owner, { mutationId: 'artifact-persist', expectedResourceVersion: registered.resourceVersion, assetId: registered.id, artifacts: nineArtifacts() })).resolves.toEqual(persisted);
     await expect(store.persistArtifacts(owner, { mutationId: 'artifact-persist', expectedResourceVersion: persisted.resourceVersion, assetId: registered.id, artifacts: nineArtifacts() })).rejects.toThrow('mutationId不能用于不同的写入');
   });
@@ -133,11 +133,11 @@ describe('durable media asset registry', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual(expect.objectContaining({ id: 'asset_ready', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg' }));
     expect(result[0].renditions).toHaveLength(3);
-    expect(result[0].renditions.map(item => item.name)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
+    expect(result[0].renditions.map(item => item.name)).toEqual(['grid-960', 'cover-2048', 'preview-4096']);
     expect(await store.listWorkspacePicker(other)).toEqual([]);
     expect(await store.listWorkspacePicker(crossTenant)).toEqual([]);
     expect(JSON.stringify(result)).not.toMatch(/tenantId|ownerUserId|master_locator|privateLocator|objectKey|https?:\/\//);
-    const corrupted = variants.get(`${key(owner.tenantId, 'asset_ready')}:grid-800`);
+    const corrupted = variants.get(`${key(owner.tenantId, 'asset_ready')}:grid-960`);
     if (!corrupted) throw new Error('picker fixture variant missing');
     corrupted.publicReference = 'https://invalid.example/image';
     await expect(store.listWorkspacePicker(owner)).rejects.toThrow('unsafe public reference');
@@ -151,7 +151,7 @@ describe('durable media asset registry', () => {
     const publicAssets = await store.listPublic({ tenantId: owner.tenantId, userId: owner.userId });
     expect(publicAssets).toHaveLength(1);
     expect(publicAssets[0]).toEqual(expect.objectContaining({ id: 'asset_public', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg' }));
-    expect(publicAssets[0].renditions.map(item => item.name)).toEqual(['grid-800', 'cover-1600', 'preview-2048']);
+    expect(publicAssets[0].renditions.map(item => item.name)).toEqual(['grid-960', 'cover-2048', 'preview-4096']);
     expect(JSON.stringify(publicAssets)).not.toMatch(/tenantId|ownerUserId|master_locator|privateLocator|objectKey|https?:\/\//);
   });
   it('rejects invalid MIME, incomplete private artifacts, and invalid server approval identity', async () => {

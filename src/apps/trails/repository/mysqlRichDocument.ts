@@ -100,7 +100,7 @@ export const createRichDocumentMediaValidator = (media: Pick<MediaAssetRegistryM
       const asset = await media.assets.find({ tenantId: input.tenantId, id }, { transaction });
       if (!asset || asset.ownerUserId !== input.ownerUserId || asset.status !== 'published') throw new TrailsSyncInputError('富文档媒体必须属于当前创作空间且已发布就绪');
       const variants = await media.variants.list({ tenantId: input.tenantId, assetId: id }, { transaction });
-      if (!['grid-800', 'cover-1600', 'preview-2048'].every(name => variants.some(variant => variant.name === name && variant.state === 'ready'))) throw new TrailsSyncInputError('富文档媒体必须属于当前创作空间且已发布就绪');
+      if (!['grid-960', 'cover-2048', 'preview-4096'].every(name => variants.some(variant => variant.name === name && variant.state === 'ready'))) throw new TrailsSyncInputError('富文档媒体必须属于当前创作空间且已发布就绪');
     }
   },
 });

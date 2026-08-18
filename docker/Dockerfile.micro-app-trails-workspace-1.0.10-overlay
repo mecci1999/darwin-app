@@ -1,0 +1,5 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Authorize only the packaged Trails workspace 1.0.10 operation allowlist.
+COPY dist/apps/starlight/micro-app/actions/index.js /app/dist/apps/starlight/micro-app/actions/index.js

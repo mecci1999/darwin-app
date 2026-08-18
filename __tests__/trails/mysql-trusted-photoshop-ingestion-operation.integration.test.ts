@@ -6,7 +6,7 @@ import { createSequelizeTrustedPhotoshopIngestionModels, MySqlTrustedPhotoshopIn
 import { SequelizeTrailsSyncConnection } from '../../src/apps/trails/repository/mysqlPortfolioCategorySync';
 
 const describeIntegration = process.env.TRAILS_MYSQL_INTEGRATION === '1' ? describe : describe.skip;
-const artifacts = () => (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+const artifacts = () => (['grid-960', 'cover-2048', 'preview-4096'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as const, width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
 
 describeIntegration('trusted Photoshop ingestion operation MySQL schema', () => {
   let sequelize: Sequelize;

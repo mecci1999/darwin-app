@@ -5,6 +5,7 @@ import { instrumentServiceActions } from '../../starlight/metrics/utils/action-m
 import { Actor, DEFAULT_PUBLIC_SITE_CHROME, DurablePortfolioCategoryMutation, DurableMediaAssetVariantName, DurablePublishingPackageStatus, DurableGuestComment, DurableRichDocument, EffectivePublicSiteContent, GuestComment, GuidedTripItineraryItem, GuidedTripMaterialReference, GuidedTripPlan, GuidedTripPlanStatus, GuidedTripRegistration, GuidedTripRegistrationStatus, Hike, Journal, PhotoTechnicalMetadata, Portfolio, PortfolioCategory, PortfolioCategorySyncPayload, PublicAnalyticsEvent, PublicChromeTarget, PublishingMeasurementEvent, PublishingPackage, PublishingPackageStatus, RichDocumentSubjectType, SharedGearProjection, SharedPackingGearProjection, SharedResourceProjection, ShootSession, ShootSessionStatus, ShareableResourceType, SyncMutation, SyncScope, TrailsShareGrant, TrailsState, Visibility, WeatherForecastRequest } from '../types';
 import { TrailsSyncDuplicateSlugError, TrailsSyncInputError } from '../repository/mysqlPortfolioCategorySync';
 import { TrailsDurablePortfolioStaleVersionError } from '../repository/mysqlDurablePortfolio';
+import { TrailsDurableExhibitionThemeStaleVersionError } from '../repository/mysqlDurableExhibitionTheme';
 import { TrailsDurableJournalStaleVersionError } from '../repository/mysqlDurableJournal';
 import { richDocumentTextProjection, validateRichDocument } from '../repository/mysqlRichDocument';
 import { TrailsDurableGearStaleVersionError } from '../repository/mysqlDurableGear';
@@ -23,7 +24,24 @@ import { actorCanManageCreatorSpace, actorCanReadPrivate, capabilitySnapshot, cr
 import { createPublicOwnerResolver } from '../utils/public-owner';
 import { PublicResponseCache, publicResponseCacheKey } from '../utils/public-response-cache';
 import { failure, success } from '../utils/responses';
-import { Input, coordinate, guestAvatarId, guestCommentBody, guestCommentSubject, guestDisplayName, normalizedEmail, opaqueIdArray, optionalNumber, optionalOpaqueId, optionalSlug, optionalString, photoTechnicalMetadata, plainTextArray, publishingApprovals, publishingClaims, publishingContentOrigin, publishingExportVariants, publishingLocationPolicy, publishingPath, publishingPlatform, publishingRights, publishingUtmUrl, requiredNonNegativeInteger, requiredSlug, requiredString, stringArray, visibility } from '../validators';
+import { Input, coordinate, exhibitionPresentation, guestAvatarId, guestCommentBody, guestCommentSubject, guestDisplayName, normalizedEmail, opaqueIdArray, optionalNumber, optionalOpaqueId, optionalSlug, optionalString, photoTechnicalMetadata, plainTextArray, publishingApprovals, publishingClaims, publishingContentOrigin, publishingExportVariants, publishingLocationPolicy, publishingPath, publishingPlatform, publishingRights, publishingUtmUrl, requiredNonNegativeInteger, requiredSlug, requiredString, stringArray, visibility } from '../validators';
+import { TencentCosTrustedPhotoshopPackageTransfer } from '../utils/tencent-cos-trusted-photoshop-package-transfer';
+import { TencentCosTrustedPhotoshopIngestionPrivateStorage } from '../utils/tencent-cos-trusted-photoshop-ingestion-private-storage';
+import { ingestTrustedPhotoshopPublication } from '../utils/trusted-photoshop-publication-ingestion-coordinator';
+import { TrustedPhotoshopPublicationIngestionCoordinatorError } from '../utils/trusted-photoshop-publication-ingestion-coordinator';
+
+// A Photoshop import performs Sharp conversion plus ten private COS writes. Keep
+// that CPU and I/O work outside the interactive micro-app RPC while preserving a
+// single writer on the two-core production host.
+let trustedPhotoshopIngestionQueue: Promise<void> = Promise.resolve();
+const enqueueTrustedPhotoshopIngestion = (operationId: string, work: () => Promise<void>): void => {
+  trustedPhotoshopIngestionQueue = trustedPhotoshopIngestionQueue
+    .then(work, work)
+    .catch((error: unknown) => {
+      const stage = error instanceof TrustedPhotoshopPublicationIngestionCoordinatorError ? error.stage : 'internal';
+      console.error(`Trails Photoshop ingestion failed: ${operationId} stage=${stage}`);
+    });
+};
 
 const params = (ctx: Context): Input => {
   const value: unknown = ctx.params;
@@ -31,6 +49,9 @@ const params = (ctx: Context): Input => {
   return Object.fromEntries(Object.entries(value));
 };
 const analyticsEvent = (input: Input): PublicAnalyticsEvent => {
+  input = Object.fromEntries(
+    Object.entries(input).filter(([key]) => !['routeService', 'service', 'version', 'action', 'meta'].includes(key)),
+  );
   const allowed = ['eventId', 'eventName', 'contentType', 'contentId', 'occurredAt', 'visitorId', 'acquisitionChannel', 'deviceClass'];
   if (!Object.keys(input).every(key => allowed.includes(key))) throw new TrailsSyncInputError('analytics请求包含不允许字段');
   const eventName = input.eventName;
@@ -126,6 +147,13 @@ const canonicalDecimalString = (value: unknown, label: string): string => {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new TrailsSyncInputError(`${label}必须是规范十进制非负整数字符串`);
   return value;
 };
+const trustedPhotoshopUploadRequest = (input: Input): void => {
+  if (Object.keys(input).length !== 0) throw new TrailsSyncInputError('Photoshop上传会话请求包含不允许字段');
+};
+const trustedPhotoshopUploadCompletion = (input: Input): string => {
+  if (Object.keys(input).length !== 1 || typeof input.uploadSession !== 'string' || input.uploadSession.length < 64 || input.uploadSession.length > 2048) throw new TrailsSyncInputError('Photoshop上传完成请求无效');
+  return input.uploadSession;
+};
 const durableCategoryMutation = (input: Input): DurablePortfolioCategoryMutation => {
   if (!isRecord(input.payload)) throw new TrailsSyncInputError('payload必须是对象');
   const baseVersion = input.baseVersion;
@@ -169,6 +197,12 @@ const durablePortfolioFailure = (error: unknown): HttpResponseItem =>
     : error instanceof TrailsSyncInputError
     ? failure(error.message, HttpStatusCode.BAD_REQUEST)
     : failure('耐久作品集当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+const durableExhibitionThemeFailure = (error: unknown): HttpResponseItem =>
+  error instanceof TrailsDurableExhibitionThemeStaleVersionError
+    ? failure('展览主题已被更新；请重新载入后再提交', HttpStatusCode.CONFLICT)
+    : error instanceof TrailsSyncInputError
+    ? failure(error.message, HttpStatusCode.BAD_REQUEST)
+    : failure('耐久展览主题当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
 const durableJournalFailure = (error: unknown): HttpResponseItem =>
   error instanceof TrailsDurableJournalStaleVersionError
     ? failure('日记已被更新；请基于current重试', HttpStatusCode.CONFLICT)
@@ -221,6 +255,22 @@ const safePublicText = (value: unknown, label: string, maximum: number): string 
 const publicIcpFilingNumber = (value: unknown, label: string): string => { if (typeof value !== 'string') throw new TrailsSyncInputError(`${label}无效`); const normalized = value.trim(); if (normalized.length > 32 || /[<>]|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]|\s/.test(normalized) || !/^[\u4E00-\u9FFF]{1,3}ICP备\d{4,12}号(?:-\d{1,3})?$/.test(normalized)) throw new TrailsSyncInputError(`${label}无效`); return normalized; };
 const isIpv4Host = (host: string) => /^(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})(?:\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})){3}$/.test(host);
 const isDnsHost = (host: string) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(host) && host.toLowerCase() !== 'localhost' && !isIpv4Host(host);
+type SiteContactKind = EffectivePublicSiteContent['contactLinks'][number]['kind'];
+const publicEmailContact = (value: string): string | undefined => { const address = value.startsWith('mailto:') ? value.slice(7) : ''; return address.length <= 254 && /^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$/i.test(address) ? `mailto:${address}` : undefined; };
+const publicWechatContact = (value: string): string | undefined => /^wechat:[A-Za-z][A-Za-z0-9_-]{5,19}$/.test(value) ? value : undefined;
+const publicHttpsContact = (value: string, kind: Exclude<SiteContactKind, 'email' | 'wechat'>): string | undefined => {
+  try {
+    const url = new URL(value); const host = url.hostname.toLowerCase(); const authority = value.slice('https://'.length).split(/[/?#]/, 1)[0];
+    if (url.protocol !== 'https:' || !isDnsHost(host) || authority.includes(':') || url.username || url.password || url.port || url.search || url.hash) return undefined;
+    if (kind === 'website' && url.pathname !== '/') return undefined;
+    if (kind === 'instagram' && !((host === 'instagram.com' || host === 'www.instagram.com') && /^\/[A-Za-z0-9._]{1,30}\/?$/.test(url.pathname))) return undefined;
+    if (kind === 'linkedin' && !((host === 'linkedin.com' || host === 'www.linkedin.com') && /^\/(?:in|company)\/[A-Za-z0-9_-]{2,100}\/?$/.test(url.pathname))) return undefined;
+    if (kind === 'bilibili' && !(host === 'space.bilibili.com' && /^\/[1-9][0-9]{0,19}\/?$/.test(url.pathname))) return undefined;
+    if (kind === 'xiaohongshu' && !((host === 'xiaohongshu.com' || host === 'www.xiaohongshu.com') && /^\/user\/profile\/[A-Za-z0-9_-]{6,64}\/?$/.test(url.pathname))) return undefined;
+    return url.toString();
+  } catch { return undefined; }
+};
+const publicContactHref = (value: string, kind: SiteContactKind): string | undefined => kind === 'email' ? publicEmailContact(value) : kind === 'wechat' ? publicWechatContact(value) : publicHttpsContact(value, kind);
 const ownExactObject = (value: unknown, allowed: readonly string[], label: string): Record<string, unknown> => {
   if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new TrailsSyncInputError(`${label}必须是普通对象`);
   const keys = Reflect.ownKeys(value);
@@ -287,8 +337,8 @@ const publicSiteContent = (input: unknown): EffectivePublicSiteContent => {
   if (!Array.isArray(links) || links.length > 10) throw new TrailsSyncInputError('contactLinks无效');
   const contactLinks: EffectivePublicSiteContent['contactLinks'] = links.map((entry, index) => {
     const link = ownExactObject(entry, ['kind', 'href'], `contactLinks[${index}]`);
-    if ((link.kind !== 'website' && link.kind !== 'instagram' && link.kind !== 'linkedin') || typeof link.href !== 'string') throw new TrailsSyncInputError('contactLinks无效');
-    try { const url = new URL(link.href); const authority = link.href.slice('https://'.length).split(/[/?#]/, 1)[0]; if (url.protocol !== 'https:' || !isDnsHost(url.hostname) || authority.includes(':') || url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) throw new Error('unsafe'); return { kind: link.kind, href: url.toString() }; } catch { throw new TrailsSyncInputError('contactLinks无效'); }
+    if ((link.kind !== 'website' && link.kind !== 'instagram' && link.kind !== 'linkedin' && link.kind !== 'bilibili' && link.kind !== 'xiaohongshu' && link.kind !== 'email' && link.kind !== 'wechat') || typeof link.href !== 'string') throw new TrailsSyncInputError('contactLinks无效');
+    const href = publicContactHref(link.href, link.kind); if (!href) throw new TrailsSyncInputError('contactLinks无效'); return { kind: link.kind, href };
   });
   const aboutPortraitMediaId = optionalSiteOpaqueId(document, 'aboutPortraitMediaId');
   return { displayName: safePublicText(document.displayName, 'displayName', 120), biography: { plainText: safePublicText(biography.plainText, 'biography', 50000) }, contactLinks, licensingCopy: safePublicText(document.licensingCopy, 'licensingCopy', 10000), seo: { title: safePublicText(seo.title, 'seo.title', 160), description: safePublicText(seo.description, 'seo.description', 320) }, ...(document.aboutProfile === undefined ? {} : { aboutProfile: publicAboutProfile(document.aboutProfile) }), ...(aboutPortraitMediaId === undefined ? {} : { aboutPortraitMediaId }), chrome: { navigation: publicChromeLinks(chrome.navigation, 'chrome.navigation', 1, 7), footer: { links: publicChromeLinks(footer.links, 'chrome.footer.links', 0, 7), copyright: safePublicText(footer.copyright, 'chrome.footer.copyright', 160), ...(footer.icpFilingNumber === undefined ? {} : { icpFilingNumber: publicIcpFilingNumber(footer.icpFilingNumber, 'chrome.footer.icpFilingNumber') }) } } };
@@ -382,10 +432,44 @@ const durablePortfolioDraft = (input: Input, resourceId: string) => ({
   mediaIds: opaqueIdArray(input, 'mediaIds'),
   locationLabel: optionalString(input, 'locationLabel'),
   photoTechnicalMetadata: photoTechnicalMetadata(input),
+  exhibitionPresentation: exhibitionPresentation(input),
   visibility: visibility(input),
 });
 const durablePortfolioUpdate = (input: Input) => ({ ...durablePortfolioDraft(input, requiredString(input, 'id', '作品集编号')), resourceVersion: canonicalDecimalString(input.resourceVersion, 'resourceVersion') });
-const publicDurablePortfolio = (portfolio: { id: string; title: string; summary: string; categoryId?: string; coverMediaId?: string; mediaIds: string[]; locationLabel?: string; photoTechnicalMetadata?: PhotoTechnicalMetadata; createdAt: string; updatedAt: string }) => {
+const durableExhibitionThemeMutation = (input: Input) => {
+  const operation = input.operation;
+  if (operation !== 'create' && operation !== 'update' && operation !== 'publish' && operation !== 'unpublish' && operation !== 'archive') throw new TrailsSyncInputError('展览主题操作无效');
+  const allowed = operation === 'create' ? ['operation', 'draft'] : ['operation', 'id', 'resourceVersion', ...(operation === 'update' ? ['draft'] : [])];
+  if (!Object.keys(input).every(key => allowed.includes(key))) throw new TrailsSyncInputError('展览主题请求包含不允许字段');
+  const makeDraft = (value: Input, idValue: string) => {
+    const fields = ['slug', 'title', 'introduction', 'closingNote', 'layoutId', 'portfolioIds', 'coverMediaId'];
+    if (!Object.keys(value).every(key => fields.includes(key) || (operation === 'create' && key === 'id'))) throw new TrailsSyncInputError('展览主题草稿包含不允许字段');
+    return { id: idValue, slug: requiredString(value, 'slug', 'slug'), title: requiredString(value, 'title', '展览主题标题'), introduction: requiredString(value, 'introduction', '展览主题序言'), ...(value.closingNote === undefined ? {} : { closingNote: optionalString(value, 'closingNote') }), layoutId: requiredString(value, 'layoutId', '布局编号') as import('../types').ExhibitionLayoutId, portfolioIds: opaqueIdArray(value, 'portfolioIds'), ...(value.coverMediaId === undefined ? {} : { coverMediaId: optionalOpaqueId(value, 'coverMediaId') }) };
+  };
+  if (operation === 'create') { if (!isRecord(input.draft)) throw new TrailsSyncInputError('展览主题草稿无效'); return { operation, draft: makeDraft(input.draft, requiredString(input.draft, 'id', '展览主题编号')) }; }
+  const base = { operation, id: requiredString(input, 'id', '展览主题编号'), resourceVersion: canonicalDecimalString(input.resourceVersion, 'resourceVersion') };
+  if (operation !== 'update') return base;
+  if (!isRecord(input.draft)) throw new TrailsSyncInputError('展览主题草稿无效');
+  return { ...base, draft: makeDraft(input.draft, base.id) };
+};
+const publicExhibitionTheme = (theme: import('../types').DurableExhibitionTheme) => ({ id: theme.id, slug: theme.slug, title: theme.title, introduction: theme.introduction, ...(theme.closingNote ? { closingNote: theme.closingNote } : {}), layoutId: theme.layoutId, portfolioIds: theme.portfolioIds, ...(theme.coverMediaId ? { coverMediaId: theme.coverMediaId } : {}), publishedAt: theme.publishedAt || theme.updatedAt });
+/** The workspace is authenticated but still receives a deliberately narrow DTO. */
+const workspaceExhibitionTheme = (theme: import('../types').DurableExhibitionTheme) => ({
+  id: theme.id,
+  slug: theme.slug,
+  title: theme.title,
+  introduction: theme.introduction,
+  ...(theme.closingNote ? { closingNote: theme.closingNote } : {}),
+  layoutId: theme.layoutId,
+  portfolioIds: theme.portfolioIds,
+  ...(theme.coverMediaId ? { coverMediaId: theme.coverMediaId } : {}),
+  status: theme.status,
+  resourceVersion: theme.resourceVersion,
+  ...(theme.publishedAt ? { publishedAt: theme.publishedAt } : {}),
+  createdAt: theme.createdAt,
+  updatedAt: theme.updatedAt,
+});
+const publicDurablePortfolio = (portfolio: { id: string; title: string; summary: string; categoryId?: string; coverMediaId?: string; mediaIds: string[]; locationLabel?: string; photoTechnicalMetadata?: PhotoTechnicalMetadata; exhibitionPresentation?: import('../types').ExhibitionPresentation; createdAt: string; updatedAt: string }) => {
   const photoMetadata = publicPhotoTechnicalMetadata(portfolio.photoTechnicalMetadata);
   return {
     id: portfolio.id, title: portfolio.title, summary: portfolio.summary,
@@ -394,6 +478,7 @@ const publicDurablePortfolio = (portfolio: { id: string; title: string; summary:
     mediaIds: portfolio.mediaIds,
     ...(portfolio.locationLabel ? { locationLabel: portfolio.locationLabel } : {}),
     ...(photoMetadata ? { photoTechnicalMetadata: photoMetadata } : {}),
+    ...(portfolio.exhibitionPresentation ? { exhibitionPresentation: portfolio.exhibitionPresentation } : {}),
     publishedAt: portfolio.updatedAt,
   };
 };
@@ -588,6 +673,7 @@ const publicPortfolio = (portfolio: Portfolio) => {
     id: portfolio.id, title: portfolio.title, summary: portfolio.summary, coverMediaId: portfolio.coverMediaId,
     mediaIds: portfolio.mediaIds, locationLabel: portfolio.locationLabel, categoryId: portfolio.categoryId, publishedAt: portfolio.updatedAt,
     ...(photoMetadata ? { photoTechnicalMetadata: photoMetadata } : {}),
+    ...(portfolio.exhibitionPresentation ? { exhibitionPresentation: portfolio.exhibitionPresentation } : {}),
   };
 };
 const publicCategory = (category: PortfolioCategory) => ({
@@ -741,7 +827,7 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
         }, '星迹公开概览');
       },
     },
-    'v2.analytics.ingest': { metadata: { auth: false }, async handler(ctx: Context): Promise<HttpResponseItem> { const analytics = state.durableAnalyticsStore; if (!analytics) return failure('公开站分析尚未启用', HttpStatusCode.SERVICE_UNAVAILABLE); try { const owner = publicOwner(ctx); await analytics.ingest({ tenantId: owner.tenantId, userId: owner.ownerUserId }, analyticsEvent(params(ctx))); return success({ accepted: true }, '分析事件已接收'); } catch (error: unknown) { return error instanceof TrailsSyncInputError ? failure(error.message, HttpStatusCode.BAD_REQUEST) : failure('分析事件当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); } } },
+    'v2.analytics.ingest': { metadata: { auth: false }, async handler(ctx: Context): Promise<HttpResponseItem> { const analytics = state.durableAnalyticsStore; if (!analytics) return failure('公开站分析尚未启用', HttpStatusCode.SERVICE_UNAVAILABLE); try { const owner = (state.publicOwnerResolver || createPublicOwnerResolver()).resolve(); if (!owner) return failure('未找到公开站点', HttpStatusCode.NOT_FOUND); await analytics.ingest({ tenantId: owner.tenantId, userId: owner.ownerUserId }, analyticsEvent(params(ctx))); return success({ accepted: true }, '分析事件已接收'); } catch (error: unknown) { return error instanceof TrailsSyncInputError ? failure(error.message, HttpStatusCode.BAD_REQUEST) : failure('分析事件当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); } } },
     'v2.analytics.workspace': { metadata: { auth: true }, async handler(ctx: Context): Promise<HttpResponseItem> { const actor = requireActor(ctx); if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED); if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN); const analytics = state.durableAnalyticsStore; if (!analytics) return failure('真实访问分析尚未启用', HttpStatusCode.SERVICE_UNAVAILABLE); try { return success(await analytics.readWorkspace(actor, analyticsRange(params(ctx))), '摄影站访问分析'); } catch (error: unknown) { return error instanceof TrailsSyncInputError ? failure(error.message, HttpStatusCode.BAD_REQUEST) : failure('访问分析当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); } } },
     'v2.analytics.content-metrics': { metadata: { auth: true }, async handler(ctx: Context): Promise<HttpResponseItem> { const actor = requireActor(ctx); if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED); if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN); const analytics = state.durableAnalyticsStore; if (!analytics) return failure('真实访问分析尚未启用', HttpStatusCode.SERVICE_UNAVAILABLE); try { return success(await analytics.readContentMetrics(actor, analyticsContentMetrics(params(ctx))), '内容库指标'); } catch (error: unknown) { return error instanceof TrailsSyncInputError ? failure(error.message, HttpStatusCode.BAD_REQUEST) : failure('内容指标当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); } } },
     'v2.trip-registrations.submit': { metadata: { auth: true }, async handler(ctx: Context): Promise<HttpResponseItem> { const actor = requireActor(ctx); if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED); const store = state.durableTripRegistrationStore; if (!store) return failure('耐久报名当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); try { return success(await store.submit(actor, durableTripRegistrationSubmit(params(ctx))), '报名申请已提交', HttpStatusCode.CREATED); } catch (error: unknown) { return error instanceof TrailsSyncInputError ? failure(error.message, HttpStatusCode.BAD_REQUEST) : failure('耐久报名当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); } } },
@@ -1176,7 +1262,7 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
           const portfolio: Portfolio = {
             id: id('portfolio'), tenantId: actor.tenantId, ownerUserId, lifecycle: 'draft', visibility: visibility(input),
             title: requiredString(input, 'title', '作品集标题'), summary: requiredString(input, 'summary', '作品集简介'),
-            categoryId, mediaIds: stringArray(input, 'mediaIds'), coverMediaId: optionalString(input, 'coverMediaId'), locationLabel: optionalString(input, 'locationLabel'), photoTechnicalMetadata: photoTechnicalMetadata(input),
+            categoryId, mediaIds: stringArray(input, 'mediaIds'), coverMediaId: optionalString(input, 'coverMediaId'), locationLabel: optionalString(input, 'locationLabel'), photoTechnicalMetadata: photoTechnicalMetadata(input), exhibitionPresentation: exhibitionPresentation(input),
             createdAt: timestamp, updatedAt: timestamp, resourceVersion: 0,
           };
           return success(repository.savePortfolio(portfolio), '作品集草稿已保存', HttpStatusCode.CREATED);
@@ -1649,6 +1735,69 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
         try { return success(await durable.listWorkspacePicker(actor), '耐久媒体资产选择器'); } catch (error: unknown) { return durableMediaRegistryFailure(error); }
       },
     },
+    /** Browser uploads can only target a short-lived, server-derived COS staging session. */
+    'v2.media-ingestion.upload-session': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        const actor = requireActor(ctx);
+        if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED);
+        if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN);
+        try {
+          trustedPhotoshopUploadRequest(params(ctx));
+          return success(new TencentCosTrustedPhotoshopPackageTransfer().createUploadSession(actor), 'Photoshop发布包上传会话已创建');
+        } catch (error: unknown) {
+          return error instanceof TrailsSyncInputError
+            ? failure(error.message, HttpStatusCode.BAD_REQUEST)
+            : failure('媒体上传当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        }
+      },
+    },
+    'v2.media-ingestion.complete-upload': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        const actor = requireActor(ctx);
+        if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED);
+        if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN);
+        const operations = state.trustedPhotoshopIngestionOperationStore;
+        const registry = state.durableMediaAssetRegistryStore;
+        const publicationJobs = state.publicDerivativePublicationJobStore;
+        if (!operations || !registry || !publicationJobs) return failure('媒体导入当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        try {
+          const uploadSession = trustedPhotoshopUploadCompletion(params(ctx));
+          const transfer = new TencentCosTrustedPhotoshopPackageTransfer();
+          const uploaded = await transfer.completeUpload(actor, uploadSession);
+          enqueueTrustedPhotoshopIngestion(uploaded.operationId, async () => {
+            await ingestTrustedPhotoshopPublication({
+              actor, operationId: uploaded.operationId, ownerUserId: uploaded.ownerUserId, assetId: uploaded.assetId,
+              workerId: `photoshop-ingestion-${process.pid}`, leaseMs: 120_000, entries: uploaded.entries,
+            }, operations, new TencentCosTrustedPhotoshopIngestionPrivateStorage(), registry, publicationJobs);
+            await transfer.removeCompletedUpload(uploadSession);
+          });
+          // Keep the established bridge DTO for already-installed workspace
+          // versions. The message carries the asynchronous processing state.
+          return success({ operationId: uploaded.operationId, assetId: uploaded.assetId, phase: 'completed', assetStatus: 'draft' }, 'Photoshop发布包已验证，正在后台生成衍生图并进入公开交付队列', HttpStatusCode.CREATED);
+        } catch (error: unknown) {
+          return error instanceof TrailsSyncInputError
+            ? failure(error.message, HttpStatusCode.BAD_REQUEST)
+            : failure('媒体导入当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        }
+      },
+    },
+    'v2.media-ingestion.workspace': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        const actor = requireActor(ctx);
+        if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED);
+        const ownerUserId = creatorOwner(actor);
+        if (!ownerUserId) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN);
+        const operations = state.trustedPhotoshopIngestionOperationStore;
+        if (!operations) return failure('媒体导入状态当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        try {
+          const items = await operations.listRecent({ tenantId: actor.tenantId, ownerUserId, limit: 12 });
+          return success(items.map(item => ({ operationId: item.operationId, assetId: item.assetId, phase: item.phase, ...(item.failureClass ? { failureClass: item.failureClass } : {}), createdAt: item.createdAt, updatedAt: item.updatedAt })), 'Photoshop导入任务');
+        } catch { return failure('媒体导入状态当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE); }
+      },
+    },
     'v2.media-assets.public': {
       metadata: { auth: false },
       async handler(ctx: Context): Promise<HttpResponseItem> {
@@ -1740,6 +1889,32 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
           const documents = state.durableRichDocumentStore;
           return success(await Promise.all(publicPortfolios.map(async portfolio => ({ ...publicDurablePortfolio(portfolio), ...publicRichContent((await documents?.readPublic({ tenantId: owner.tenantId, userId: owner.ownerUserId }, { subjectType: 'portfolio', subjectId: portfolio.id }))?.document) }))), '公开耐久作品集');
         } catch (error: unknown) { return durablePortfolioFailure(error); }
+      },
+    },
+    'v2.exhibitions.workspace': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        const actor = requireActor(ctx); if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED);
+        if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN);
+        const durable = state.durableExhibitionThemeStore; if (!durable) return failure('耐久展览主题当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        try { return success((await durable.listWorkspace(actor)).map(workspaceExhibitionTheme), '耐久展览主题工作台'); } catch (error: unknown) { return durableExhibitionThemeFailure(error); }
+      },
+    },
+    'v2.exhibitions.workspace.mutate': {
+      metadata: { auth: true },
+      async handler(ctx: Context): Promise<HttpResponseItem> {
+        const actor = requireActor(ctx); if (!actor) return failure('未识别到可信登录身份', HttpStatusCode.UNAUTHORIZED);
+        if (!creatorOwner(actor)) return failure('当前账号没有创作空间管理权限', HttpStatusCode.FORBIDDEN);
+        const durable = state.durableExhibitionThemeStore; if (!durable) return failure('耐久展览主题当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        try { const mutation = durableExhibitionThemeMutation(params(ctx)) as import('../types').DurableExhibitionThemeMutation; return success(workspaceExhibitionTheme(await durable.mutate(actor, mutation)), mutation.operation === 'create' ? '耐久展览主题草稿已保存' : '耐久展览主题已更新', mutation.operation === 'create' ? HttpStatusCode.CREATED : HttpStatusCode.OK); } catch (error: unknown) { return durableExhibitionThemeFailure(error); }
+      },
+    },
+    'v2.exhibitions.public': {
+      metadata: { auth: false },
+      async handler(): Promise<HttpResponseItem> {
+        const durable = state.durableExhibitionThemeStore; if (!durable) return failure('耐久展览主题当前不可用', HttpStatusCode.SERVICE_UNAVAILABLE);
+        const owner = publicOwnerResolver.resolve(); if (!owner) return failure('未找到公开站点', HttpStatusCode.NOT_FOUND);
+        try { return success((await durable.listPublic({ tenantId: owner.tenantId, userId: owner.ownerUserId })).map(publicExhibitionTheme), '公开展览主题'); } catch (error: unknown) { return durableExhibitionThemeFailure(error); }
       },
     },
     'v2.portfolios.rich-document.read': {
@@ -2107,6 +2282,7 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
     'v2.categories.public': 'categories',
     'v2.media-assets.public': 'media-assets',
     'v2.portfolios.public': 'portfolios',
+    'v2.exhibitions.public': 'exhibitions',
     'v2.journals.public': 'journals',
     'v2.journals.public-detail': 'journals',
     'v2.commerce.public': 'commerce',
@@ -2127,6 +2303,7 @@ export default function trailsActions(star: Starlight, state: TrailsState) {
     'v2.portfolios.update': ['portfolios', 'media-assets', 'video-references', 'comments'],
     'v2.portfolios.unpublish': ['portfolios', 'media-assets', 'video-references', 'comments'],
     'v2.portfolios.rich-document.save': ['portfolios', 'media-assets'],
+    'v2.exhibitions.workspace.mutate': ['exhibitions'],
     'v2.journals.publish': ['journals', 'comments'],
     'v2.journals.update': ['journals', 'comments'],
     'v2.journals.unpublish': ['journals', 'comments'],

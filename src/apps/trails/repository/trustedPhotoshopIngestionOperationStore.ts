@@ -9,6 +9,8 @@ import {
 
 /** Coordinator-facing durable operation boundary. It intentionally excludes Sequelize details. */
 export interface TrustedPhotoshopIngestionOperationStore {
+  /** Owner-scoped read projection for the workspace import monitor. */
+  listRecent(input: { tenantId: string; ownerUserId: string; limit: number }): Promise<TrustedPhotoshopIngestionOperation[]>;
   create(input: {
     tenantId: string;
     operationId: string;

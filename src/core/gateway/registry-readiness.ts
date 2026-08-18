@@ -23,6 +23,23 @@ export const DEFAULT_GATEWAY_REQUIRED_SERVICES = [
   'video',
 ] as const;
 
+// These services are required to keep authenticated desktop and Trails workspace
+// traffic available. Observability and optional product services retain their own
+// targeted health checks instead of turning the entire gateway unavailable.
+export const DEFAULT_GATEWAY_CRITICAL_SERVICES = [
+  'auth',
+  'file',
+  'gateway',
+  'micro-app',
+  'trails-durable-content',
+  'trails-durable-media',
+  'trails-durable-workspace',
+  'trails-durable-trips',
+  'trails-durable-site',
+  'trails-durable-site-public',
+  'user',
+] as const;
+
 type RegistryService = { name?: unknown };
 type RegistryListOptions = { onlyAvaliable?: boolean };
 type RegistryServices = { list?: (options?: RegistryListOptions) => unknown | Promise<unknown> };
@@ -33,6 +50,7 @@ export type GatewayRegistryReadiness = {
   registryReadable: boolean;
   registeredServiceCount: number;
   missingServices: string[];
+  missingCriticalServices: string[];
   transportConnected: boolean;
   ready: boolean;
   status: 'healthy' | 'degraded' | 'reconciling';
@@ -67,6 +85,7 @@ export type GatewayRegistryDiagnosticEvent = {
 
 export type GatewayRegistryWatchdogOptions = {
   requiredServices?: readonly string[];
+  criticalServices?: readonly string[];
   confirmationThreshold?: number;
   reconciliationCooldownMs?: number;
   now?: () => number;
@@ -76,14 +95,18 @@ export type GatewayRegistryWatchdogOptions = {
 const DEFAULT_CONFIRMATION_THRESHOLD = 2;
 const DEFAULT_RECONCILIATION_COOLDOWN_MS = 30_000;
 
-export const requiredGatewayServicesFromEnvironment = (
-  value = process.env.GATEWAY_REQUIRED_SERVICES,
-): readonly string[] => {
-  if (!value?.trim()) return DEFAULT_GATEWAY_REQUIRED_SERVICES;
+const serviceNamesFromEnvironment = (value: string | undefined, defaults: readonly string[]): readonly string[] => {
+  if (!value?.trim()) return defaults;
   const services = Array.from(new Set(value.split(',').map((service) => service.trim()).filter(Boolean))).sort();
-  if (services.length === 0) throw new Error('GATEWAY_REQUIRED_SERVICES must contain at least one service name');
+  if (services.length === 0) throw new Error('Gateway service configuration must contain at least one service name');
   return services;
 };
+
+export const requiredGatewayServicesFromEnvironment = (value = process.env.GATEWAY_REQUIRED_SERVICES): readonly string[] =>
+  serviceNamesFromEnvironment(value, DEFAULT_GATEWAY_REQUIRED_SERVICES);
+
+export const criticalGatewayServicesFromEnvironment = (value = process.env.GATEWAY_CRITICAL_SERVICES): readonly string[] =>
+  serviceNamesFromEnvironment(value, DEFAULT_GATEWAY_CRITICAL_SERVICES);
 
 const normalizeServiceNames = (value: unknown): string[] | null => {
   if (!Array.isArray(value)) return null;
@@ -108,6 +131,7 @@ export class GatewayRegistryWatchdog {
   private latestReadiness: GatewayRegistryReadiness;
 
   private readonly requiredServices: readonly string[];
+  private readonly criticalServices: readonly string[];
   private readonly confirmationThreshold: number;
   private readonly reconciliationCooldownMs: number;
   private readonly now: () => number;
@@ -115,6 +139,8 @@ export class GatewayRegistryWatchdog {
 
   constructor(private readonly star: Starlight, options: GatewayRegistryWatchdogOptions = {}) {
     this.requiredServices = options.requiredServices || requiredGatewayServicesFromEnvironment();
+    const criticalServices = options.criticalServices || criticalGatewayServicesFromEnvironment();
+    this.criticalServices = criticalServices.filter((service) => this.requiredServices.includes(service));
     this.confirmationThreshold = options.confirmationThreshold ?? DEFAULT_CONFIRMATION_THRESHOLD;
     this.reconciliationCooldownMs = options.reconciliationCooldownMs ?? DEFAULT_RECONCILIATION_COOLDOWN_MS;
     this.now = options.now || Date.now;
@@ -125,7 +151,7 @@ export class GatewayRegistryWatchdog {
     if (!Number.isInteger(this.reconciliationCooldownMs) || this.reconciliationCooldownMs < 1) {
       throw new Error('reconciliationCooldownMs must be a positive integer');
     }
-    this.latestReadiness = this.snapshot(this.now(), false, 0, [...this.requiredServices], false);
+    this.latestReadiness = this.snapshot(this.now(), false, 0, [...this.requiredServices], [...this.criticalServices], false);
   }
 
   getReadiness(): GatewayRegistryReadiness {
@@ -144,16 +170,17 @@ export class GatewayRegistryWatchdog {
       );
       if (!services) {
         this.lastError = 'Gateway registry returned an invalid service list';
-        return this.snapshot(checkedAt, false, 0, this.requiredServices.slice(), transportConnected);
+        return this.snapshot(checkedAt, false, 0, this.requiredServices.slice(), this.criticalServices.slice(), transportConnected);
       }
 
       const registered = new Set(services);
       const missingServices = this.requiredServices.filter((service) => !registered.has(service));
+      const missingCriticalServices = this.criticalServices.filter((service) => !registered.has(service));
       this.lastError = null;
-      return this.snapshot(checkedAt, true, services.length, missingServices, transportConnected);
+      return this.snapshot(checkedAt, true, services.length, missingServices, missingCriticalServices, transportConnected);
     } catch (error) {
       this.lastError = toErrorMessage(error);
-      return this.snapshot(checkedAt, false, 0, this.requiredServices.slice(), transportConnected);
+      return this.snapshot(checkedAt, false, 0, this.requiredServices.slice(), this.criticalServices.slice(), transportConnected);
     }
   }
 
@@ -174,7 +201,7 @@ export class GatewayRegistryWatchdog {
 
     this.consecutiveMissingObservations += 1;
     if (this.consecutiveMissingObservations < this.confirmationThreshold) {
-      return this.store(this.withCurrentState(readiness));
+      return this.store(this.withUnconfirmedState(readiness));
     }
 
     await this.reconcileIfEligible(readiness.missingServices);
@@ -197,7 +224,7 @@ export class GatewayRegistryWatchdog {
         outcome: readiness.ready ? 'healthy' : 'degraded',
         reason: readiness.registryReadable ? 'registry_membership' : 'registry_unreadable',
         service: 'gateway',
-        missingServiceCount: readiness.missingServices.length,
+        missingServiceCount: readiness.missingCriticalServices.length,
         registeredServiceCount: readiness.registeredServiceCount,
         transportConnected: readiness.transportConnected,
       });
@@ -205,9 +232,23 @@ export class GatewayRegistryWatchdog {
     return readiness;
   }
 
-  private withCurrentState(readiness: GatewayRegistryReadiness): GatewayRegistryReadiness {
+  private withUnconfirmedState(readiness: GatewayRegistryReadiness): GatewayRegistryReadiness {
+    if (readiness.missingCriticalServices.length === 0 && readiness.registryReadable && readiness.transportConnected) {
+      return {
+        ...readiness,
+        ready: true,
+        status: 'healthy',
+        consecutiveMissingObservations: this.consecutiveMissingObservations,
+        reconciliationAttempts: this.reconciliationAttempts,
+        lastReconciliationAt: this.lastReconciliationAt,
+        lastError: this.lastError,
+      };
+    }
     return {
       ...readiness,
+      // Do not drop readiness on a single stale Kafka registry observation.
+      ready: this.latestReadiness.ready && readiness.registryReadable && readiness.transportConnected,
+      status: this.latestReadiness.ready && readiness.registryReadable && readiness.transportConnected ? 'healthy' : readiness.status,
       consecutiveMissingObservations: this.consecutiveMissingObservations,
       reconciliationAttempts: this.reconciliationAttempts,
       lastReconciliationAt: this.lastReconciliationAt,
@@ -220,15 +261,17 @@ export class GatewayRegistryWatchdog {
     registryReadable: boolean,
     registeredServiceCount: number,
     missingServices: string[],
+    missingCriticalServices: string[],
     transportConnected: boolean,
   ): GatewayRegistryReadiness {
     const reconciling = this.reconciliationInFlight !== null;
-    const ready = registryReadable && transportConnected && missingServices.length === 0 && !reconciling;
+    const ready = registryReadable && transportConnected && missingCriticalServices.length === 0 && !reconciling;
     return {
       checkedAt,
       registryReadable,
       registeredServiceCount,
       missingServices,
+      missingCriticalServices,
       transportConnected,
       ready,
       status: reconciling ? 'reconciling' : ready ? 'healthy' : 'degraded',

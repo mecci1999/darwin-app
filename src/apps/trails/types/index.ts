@@ -20,10 +20,10 @@ export interface PrivateOriginalCapability {
   capabilityReference: string;
 }
 
-export type DurableMediaAssetVariantName = 'grid-800' | 'cover-1600' | 'preview-2048';
+export type DurableMediaAssetVariantName = 'grid-960' | 'cover-2048' | 'preview-4096';
 export type DurableMediaAssetArtifactCodec = 'avif' | 'webp' | 'jpeg';
 /** Server-only approval marker. It is created by the reviewed publication worker, never parsed from an action request. */
-export interface ServerApprovedPublicDerivativePublication { approvalId: string; identityMode: 'workload-identity'; }
+export interface ServerApprovedPublicDerivativePublication { approvalId: string; identityMode: 'workload-identity' | 'static-scoped-key'; }
 /** Trusted server-only persistence input. It intentionally excludes buffers, URLs, object keys, package provenance, delivery configuration, and credentials. */
 export interface DurableMediaAssetArtifactDescriptor { logicalRendition: DurableMediaAssetVariantName; codec: DurableMediaAssetArtifactCodec; privateLocator: string; mimeType: 'image/avif' | 'image/webp' | 'image/jpeg'; width: number; height: number; byteLength: number; sha256: string; }
 export interface DurableMediaAsset { id: string; tenantId: string; ownerUserId: string; mimeType: string; status: 'draft' | 'published'; resourceVersion: DurableDecimalString; createdAt: string; updatedAt: string; }
@@ -51,6 +51,16 @@ export interface PhotoTechnicalMetadataVisibility {
   locationLabel: boolean;
   technicalTags: boolean;
   creationNote: boolean;
+}
+
+/** Per-work installation choices. They affect presentation only and never alter source media. */
+export interface ExhibitionPresentation {
+  fit: 'contain' | 'cover';
+  focalPoint: 'center' | 'top' | 'right' | 'bottom' | 'left';
+  matte: 'dark' | 'light';
+  breathingRoom: 'none' | 'small' | 'large';
+  captionPlacement: 'below' | 'overlay';
+  showTechnicalInfo: boolean;
 }
 
 /**
@@ -86,6 +96,7 @@ export interface Portfolio extends TenantOwnedRecord {
   mediaIds: string[];
   locationLabel?: string;
   photoTechnicalMetadata?: PhotoTechnicalMetadata;
+  exhibitionPresentation?: ExhibitionPresentation;
 }
 
 export type PublishingPlatform = 'instagram' | 'xiaohongshu';
@@ -177,7 +188,7 @@ export interface Journal extends TenantOwnedRecord {
   isPinned: boolean;
 }
 
-export type PublicContactLinkKind = 'website' | 'instagram' | 'linkedin' | 'email';
+export type PublicContactLinkKind = 'website' | 'instagram' | 'linkedin' | 'bilibili' | 'xiaohongshu' | 'email' | 'wechat';
 
 /** Public-safe projection only. Private owner data and credentials never belong here. */
 export interface PublicOwnerProfile {
@@ -584,6 +595,7 @@ export interface DurablePortfolioDraftInput {
   mediaIds: string[];
   locationLabel?: string;
   photoTechnicalMetadata?: PhotoTechnicalMetadata;
+  exhibitionPresentation?: ExhibitionPresentation;
   visibility: Visibility;
 }
 export interface DurablePortfolioTransitionInput { id: string; resourceVersion: DurableDecimalString; }
@@ -596,6 +608,55 @@ export interface DurablePortfolioStore {
   unpublish(actor: Actor, input: DurablePortfolioTransitionInput): Promise<DurablePortfolio>;
   listWorkspace(actor: Actor): Promise<DurablePortfolio[]>;
   listPublic(owner: Pick<Actor, 'tenantId' | 'userId'>, categoryId?: string): Promise<DurablePortfolio[]>;
+}
+
+/**
+ * The exhibition layout catalogue is deliberately closed. A theme stores only
+ * an identifier from this list and never executable markup or style text.
+ */
+export const exhibitionLayoutIds = [
+  'single-contemplation', 'scale-contrast', 'breathing-diptych', 'three-echoes',
+  'anchor-and-echo', 'horizon', 'vertical-entry', 'editorial-wall', 'walking-scroll', 'night-room',
+] as const;
+export type ExhibitionLayoutId = typeof exhibitionLayoutIds[number];
+export type DurableExhibitionThemeStatus = 'draft' | 'published' | 'archived';
+export interface DurableExhibitionTheme {
+  id: string;
+  tenantId: string;
+  ownerUserId: string;
+  slug: string;
+  title: string;
+  introduction: string;
+  closingNote?: string;
+  layoutId: ExhibitionLayoutId;
+  portfolioIds: string[];
+  coverMediaId?: string;
+  status: DurableExhibitionThemeStatus;
+  resourceVersion: DurableDecimalString;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface DurableExhibitionThemeDraftInput {
+  id: string;
+  slug: string;
+  title: string;
+  introduction: string;
+  closingNote?: string;
+  layoutId: ExhibitionLayoutId;
+  portfolioIds: string[];
+  coverMediaId?: string;
+}
+export interface DurableExhibitionThemeMutation {
+  id?: string;
+  resourceVersion?: DurableDecimalString;
+  operation: 'create' | 'update' | 'publish' | 'unpublish' | 'archive';
+  draft?: DurableExhibitionThemeDraftInput;
+}
+export interface DurableExhibitionThemeStore {
+  listWorkspace(actor: Actor): Promise<DurableExhibitionTheme[]>;
+  mutate(actor: Actor, input: DurableExhibitionThemeMutation): Promise<DurableExhibitionTheme>;
+  listPublic(owner: Pick<Actor, 'tenantId' | 'userId'>): Promise<DurableExhibitionTheme[]>;
 }
 
 /** Trusted deployment configuration; public requests never choose this owner. */
@@ -907,7 +968,7 @@ export interface ShootingLocationMutation { mutationId: string; expectedResource
 export interface ShootingLocationStore { create(actor: Actor, input: ShootingLocationMutation & ShootingLocationDraftInput): Promise<ShootingLocation>; update(actor: Actor, input: ShootingLocationMutation & ShootingLocationDraftInput): Promise<ShootingLocation>; archive(actor: Actor, input: ShootingLocationMutation & { id: string }): Promise<ShootingLocation>; listWorkspace(actor: Actor): Promise<ShootingLocation[]>; }
 
 export type DurablePublicSiteContentStatus = 'draft' | 'published';
-export interface PublicSiteContactLink { kind: 'website' | 'instagram' | 'linkedin'; href: string; }
+export interface PublicSiteContactLink { kind: 'website' | 'instagram' | 'linkedin' | 'bilibili' | 'xiaohongshu' | 'email' | 'wechat'; href: string; }
 /** Sanitized structured rich text, never HTML. */
 export interface PublicSiteBiography { plainText: string; richText?: RichDocumentJson; }
 export const publicChromeTargets = ['home', 'editions', 'stories', 'trips', 'locations', 'about', 'guestbook'] as const;
@@ -1022,6 +1083,7 @@ export interface TrailsState {
   /** Feature-gated v2-only persistence adapter; absence is a 503, never a v1 fallback. */
   durablePortfolioCategorySync?: DurablePortfolioCategorySync;
   durablePortfolioStore?: DurablePortfolioStore;
+  durableExhibitionThemeStore?: DurableExhibitionThemeStore;
   durableJournalStore?: DurableJournalStore;
   durableRichDocumentStore?: DurableRichDocumentStore;
   durableHikeStore?: DurableHikeStore;
@@ -1030,6 +1092,10 @@ export interface TrailsState {
   durableFinanceStore?: DurableFinanceStore;
   durableMediaCommerceStore?: DurableMediaCommerceStore;
   durableMediaAssetRegistryStore?: DurableMediaAssetRegistryStore;
+  /** Server-only workflow state; never projected through public or workspace actions. */
+  trustedPhotoshopIngestionOperationStore?: import('../repository/trustedPhotoshopIngestionOperationStore').TrustedPhotoshopIngestionOperationStore;
+  /** Server-only durable lease source for public derivative publication. */
+  publicDerivativePublicationJobStore?: import('../repository/mysqlPublicDerivativePublicationJob').TrailsPublicDerivativePublicationJobStore;
   durablePublishingPackageStore?: DurablePublishingPackageStore;
   durablePublicSiteContentStore?: DurablePublicSiteContentStore;
   durableGuidedTripStore?: DurableGuidedTripStore;

@@ -19,6 +19,7 @@ import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-lo
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import { parseCorsAllowedOrigins } from './cors';
 import { prepareGatewayDispatch } from './dispatch-meta';
+import { resolveGatewayRpcTimeout } from './rpc-timeout';
 import gatewayMethods, { createWebSocketManager } from './methods';
 
 // 导入模块化的工具类和类型
@@ -115,7 +116,7 @@ const INTERNAL_ONLY_SERVICES = new Set([
 ]);
 export const isInternalOnlyService = (service: string) => INTERNAL_ONLY_SERVICES.has(service) || isInternalOnlyPublicService(service);
 
-const INTERNAL_ONLY_ACTIONS = new Set(['logs.v1.capture-darwin']);
+const INTERNAL_ONLY_ACTIONS = new Set(['logs.v1.capture-darwin', 'gateway.registry.snapshot']);
 
 const createInternalServiceAccessError = (service: string) => ({
   code: 404,
@@ -820,6 +821,37 @@ async function initializeGatewayService() {
           };
         },
       },
+      'registry.snapshot': {
+        async handler(ctx: Context) {
+          if ((ctx.meta as any)?.internal !== true) {
+            return {
+              status: HttpStatusCode.FORBIDDEN,
+              data: {
+                code: HttpResponseCode.NoPermissionError,
+                content: null,
+                message: 'Gateway registry snapshot is internal only',
+                success: false,
+              },
+            };
+          }
+          const services = Array.from(
+            new Set(
+              ((star.registry?.services.list({ onlyAvaliable: true }) || []) as Array<{ name?: unknown }>)
+                .map((service) => String(service?.name || ''))
+                .filter(Boolean),
+            ),
+          ).sort();
+          return {
+            status: HttpStatusCode.OK,
+            data: {
+              code: HttpResponseCode.Success,
+              content: { services, observedAt: Date.now() },
+              message: 'Gateway registry snapshot retrieved',
+              success: true,
+            },
+          };
+        },
+      },
       // 请求分发
       dispatch: {
         timeout: 0,
@@ -915,7 +947,7 @@ async function initializeGatewayService() {
 
           const callOptions = isLogStreamDispatch
             ? { meta: dispatch.meta }
-            : { meta: dispatch.meta, timeout: GATEWAY_RPC_TIMEOUT_MS };
+            : { meta: dispatch.meta, timeout: resolveGatewayRpcTimeout(service, version, action, dispatch.params, GATEWAY_RPC_TIMEOUT_MS) };
 
           return ctx
             .call(`${service}.${version}.${action}`, dispatch.params, callOptions)
@@ -1001,13 +1033,35 @@ async function initializeGatewayService() {
             };
           }
 
-          const result = (this as any).triggerWebSocketEvent(eventName, data);
+          // Notification persistence happens before this action is called. A
+          // slow WebSocket peer must not keep the alert delivery worker retrying
+          // an already durable notification.
+          const triggerWebSocketEvent = (this as any).triggerWebSocketEvent;
+          if (typeof triggerWebSocketEvent !== 'function') {
+            return {
+              status: HttpStatusCode.SERVICE_UNAVAILABLE,
+              data: {
+                code: HttpResponseCode.ServiceActionFaild,
+                content: null,
+                message: 'WebSocket delivery is unavailable',
+                success: false,
+              },
+            };
+          }
+          queueMicrotask(() => {
+            void Promise.resolve(triggerWebSocketEvent.call(this, eventName, data)).catch((error) => {
+              star.logger?.warn('Gateway WebSocket event delivery failed', {
+                eventName,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          });
           return {
-            status: HttpStatusCode.OK,
+            status: HttpStatusCode.ACCEPTED,
             data: {
               code: HttpResponseCode.Success,
-              content: result,
-              message: 'WebSocket event triggered successfully',
+              content: { accepted: true, eventName },
+              message: 'WebSocket event accepted for delivery',
               success: true,
             },
           };
@@ -1050,6 +1104,29 @@ async function initializeGatewayService() {
       //   'message',
       //   'Message sent successfully',
       // ),
+    },
+
+    events: {
+      'gateway.websocket.trigger': async function gatewayWebSocketTriggerEvent(ctx: Context) {
+        const eventName = String(ctx.params?.eventName || '').trim();
+        if (!eventName) {
+          star.logger?.warn('Dropped Gateway WebSocket event without an event name');
+          return;
+        }
+        const triggerWebSocketEvent = (this as any).triggerWebSocketEvent;
+        if (typeof triggerWebSocketEvent !== 'function') {
+          star.logger?.warn('Dropped Gateway WebSocket event because delivery is unavailable', { eventName });
+          return;
+        }
+        try {
+          await triggerWebSocketEvent.call(this, eventName, ctx.params?.data);
+        } catch (error) {
+          star.logger?.warn('Gateway WebSocket event delivery failed', {
+            eventName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
     },
 
     methods: {

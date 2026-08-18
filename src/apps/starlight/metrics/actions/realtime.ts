@@ -96,6 +96,13 @@ const numberOrNull = (value: unknown, digits = 2) => {
   return toFixed(value, digits);
 };
 
+// Metric maps retain rates as fractions for threshold calculations. Every public
+// response uses percentage points so UI consumers can render a value with "%" directly.
+const errorRatePercent = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return toFixed(Math.max(0, value) * 100, 2);
+};
+
 const roundedNumberOrNull = (value: unknown) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.round(value);
@@ -335,7 +342,7 @@ const buildOverviewSummaryContent = async (
       serviceId: service.id,
       service: service.name,
       healthStatus: service.health,
-      errorRate: Number(service.errorRate || 0),
+      errorRate: errorRatePercent(service.errorRate) ?? 0,
       p95Latency: Number(service.latency || 0),
       activeIncidentCount: activeIncidentMap.get(service.id) || 0,
     }));
@@ -349,13 +356,12 @@ const buildOverviewSummaryContent = async (
         services.reduce((sum: number, item: any) => sum + Number(item.qps || 0), 0),
       ),
       errorRate: errorRateSource.length
-        ? toFixed(
+        ? errorRatePercent(
             errorRateSource.reduce(
               (sum: number, item: any) => sum + Number(item.errorRate || 0),
               0,
             ) / errorRateSource.length,
-            2,
-          )
+          ) ?? 0
         : 0,
       p95Latency: latencySource.length
         ? Math.max(...latencySource.map((item: any) => Number(item.latency || 0)))
@@ -405,7 +411,7 @@ const buildOverviewRiskServicesContent = async (
     serviceId: service.id,
     service: service.name,
     healthStatus: service.health,
-    errorRate: Number(service.errorRate || 0),
+    errorRate: errorRatePercent(service.errorRate) ?? 0,
     p95Latency: Number(service.latency || 0),
     latencyDelta: toFixed(Number(service.latency || 0) - averageLatency, 1),
     activeIncidentCount: activeIncidentMap.get(service.id) || 0,
@@ -496,7 +502,7 @@ const buildServiceDetailContent = async (
           ? Math.round(Number(durationAverage ?? service.latency))
           : null,
       p95Latency: typeof service.latency === 'number' ? Math.round(Number(service.latency)) : null,
-      errorRate: numberOrNull(service.errorRate, 2),
+      errorRate: errorRatePercent(service.errorRate),
       activeIncidentCount,
       cpu: cpuAverage,
       memory: memoryAverage,
@@ -511,7 +517,7 @@ const buildCatalogServicesContent = async (
   serviceContext: any,
   scope: 'tenant' | 'system',
 ) => {
-  serviceContext.logger?.info?.('metrics.catalog.services:build:start', {
+  serviceContext.logger?.debug?.('metrics.catalog.services:build:start', {
     nodeID: serviceContext.star?.nodeID,
     scope,
     params,
@@ -535,7 +541,7 @@ const buildCatalogServicesContent = async (
       activeIncidentMap.set(serviceKey, (activeIncidentMap.get(serviceKey) || 0) + 1);
     });
 
-  serviceContext.logger?.info?.('metrics.catalog.services:build:services-result', {
+  serviceContext.logger?.debug?.('metrics.catalog.services:build:services-result', {
     nodeID: serviceContext.star?.nodeID,
     scope,
     total: servicesResult?.total,
@@ -565,7 +571,7 @@ const buildCatalogServicesContent = async (
       },
       instanceCount: Number(service.instances || 0),
       qps: qpsNumberOrNull(service.qps),
-      errorRate: numberOrNull(service.errorRate, 2),
+      errorRate: errorRatePercent(service.errorRate),
       p95Latency: roundedNumberOrNull(service.latency),
       activeIncidentCount: activeIncidentMap.get(service.id) || 0,
       metricStatus: service.metricStatus,
@@ -573,7 +579,7 @@ const buildCatalogServicesContent = async (
       lastDeployAt: service.lastDeploy || null,
     }));
 
-  serviceContext.logger?.info?.('metrics.catalog.services:response-items', {
+  serviceContext.logger?.debug?.('metrics.catalog.services:response-items', {
     scope,
     items: items.slice(0, 8).map((item: any) => ({
       id: item.identity?.id,
@@ -695,7 +701,7 @@ const buildCatalogServiceQuickViewContent = async (
     },
     redSummary: {
       qps: qpsNumberOrNull(service.qps),
-      errorRate: numberOrNull(service.errorRate, 2),
+      errorRate: errorRatePercent(service.errorRate),
       p95Latency: roundedNumberOrNull(service.latency),
     },
     metricStatus: service.metricStatus,
@@ -910,7 +916,7 @@ const realtime = (star: Starlight) => ({
           instances: service.instances,
           qps: Math.round(Number(service.qps || 0)),
           latency: Math.round(Number(service.latency || 0)),
-          errorRate: toFixed(Number(service.errorRate || 0), 2),
+          errorRate: errorRatePercent(service.errorRate) ?? 0,
         }));
 
         const trafficDistribution = [...services]
@@ -1302,7 +1308,7 @@ const realtime = (star: Starlight) => ({
           return createSystemScopeForbidden();
         }
         const scope = normalizeMetricsScope(ctx.params?.scope);
-        star.logger?.info('metrics.catalog.services:request', {
+        star.logger?.debug?.('metrics.catalog.services:request', {
           nodeID: star.nodeID,
           scope,
           params: ctx.params,
@@ -1311,7 +1317,7 @@ const realtime = (star: Starlight) => ({
         });
         const content = await buildCatalogServicesContent(ctx.params || {}, this as any, scope);
 
-        star.logger?.info('metrics.catalog.services:response', {
+        star.logger?.debug?.('metrics.catalog.services:response', {
           nodeID: star.nodeID,
           scope,
           items: Array.isArray(content?.items) ? content.items.length : 0,

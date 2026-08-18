@@ -37,6 +37,23 @@ const rule = normalizeRegistryMissingRule({ ruleId: 'auth-missing', serviceName:
 const star = (services: unknown) => ({ registry: { services: { list: jest.fn(async () => services) } }, logger: { warn: jest.fn() } });
 
 describe('registry missing alerts', () => {
+  it('uses Chinese text for missing-service and recovery notifications', async () => {
+    const store = repository([rule], []);
+    const outbox = { createNotificationEventInTransaction: jest.fn(async () => true) };
+    const base = new Date('2026-08-12T00:00:00.000Z');
+
+    await evaluateRegistryMissingRules(store, outbox, star([]), base);
+    await evaluateRegistryMissingRules(store, outbox, star([]), new Date(base.getTime() + 180_000));
+    expect(outbox.createNotificationEventInTransaction).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
+      payload: expect.objectContaining({ message: '服务“auth”未注册或连接已断开，请检查服务进程和 Kafka 服务发现。' }),
+    }));
+
+    await evaluateRegistryMissingRules(store, outbox, star([{ name: 'auth' }]), new Date(base.getTime() + 240_000));
+    expect(outbox.createNotificationEventInTransaction).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
+      payload: expect.objectContaining({ message: '服务“auth”已重新注册，服务连接已恢复。' }),
+    }));
+  });
+
   it('accepts every service in the 20-service gateway readiness baseline', () => {
     const services = [
       'gateway', 'auth', 'user', 'file', 'metrics', 'metrics-query', 'metrics-alerts', 'metrics-compat',
@@ -76,6 +93,21 @@ describe('registry missing alerts', () => {
     await evaluateRegistryMissingRules(store, outbox, failedStar, new Date());
     expect(outbox.createNotificationEventInTransaction).not.toHaveBeenCalled();
     expect(await store.loadIncident(rule.ruleId)).toBeNull();
+  });
+
+  it('uses the Gateway registry snapshot when the local view is stale', async () => {
+    const rules: Stored[] = []; const incidents: Stored[] = [];
+    const store = repository(rules, incidents); await store.saveRule({ ...rule, deployGraceSeconds: 0 });
+    const outbox = { createNotificationEventInTransaction: jest.fn(async () => true) };
+    const staleLocalStar = {
+      call: jest.fn(async () => ({ data: { content: { services: ['auth'] } } })),
+      registry: { services: { list: jest.fn(async () => []) } },
+      logger: { warn: jest.fn() },
+    };
+    await evaluateRegistryMissingRules(store, outbox, staleLocalStar, new Date('2026-08-12T00:00:00.000Z'));
+    await evaluateRegistryMissingRules(store, outbox, staleLocalStar, new Date('2026-08-12T00:01:00.000Z'));
+    expect(outbox.createNotificationEventInTransaction).not.toHaveBeenCalled();
+    expect(staleLocalStar.registry.services.list).not.toHaveBeenCalled();
   });
 
   it('recognizes only system administrators for registry rule management', () => {

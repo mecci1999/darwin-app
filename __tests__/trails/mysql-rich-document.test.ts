@@ -60,7 +60,7 @@ describe('MySqlRichDocumentRepository', () => {
   });
 
   it('rejects missing, foreign, draft, and incomplete media before a rich document can be trusted', async () => {
-    const ready = [{ name: 'grid-800', state: 'ready' as const }, { name: 'cover-1600', state: 'ready' as const }, { name: 'preview-2048', state: 'ready' as const }];
+    const ready = [{ name: 'grid-960', state: 'ready' as const }, { name: 'cover-2048', state: 'ready' as const }, { name: 'preview-4096', state: 'ready' as const }];
     const assets = new Map<string, { ownerUserId: string; status: 'draft' | 'published' }>([['ready', { ownerUserId: actor.userId, status: 'published' }], ['foreign', { ownerUserId: 'other', status: 'published' }], ['draft', { ownerUserId: actor.userId, status: 'draft' }], ['partial', { ownerUserId: actor.userId, status: 'published' }]]);
     const validator = createRichDocumentMediaValidator({ assets: { find: jest.fn(async ({ id }) => { const asset = assets.get(id); return asset ? { tenantId: actor.tenantId, id, ...asset } : undefined; }) }, variants: { list: jest.fn(async ({ assetId }) => assetId === 'partial' ? ready.slice(0, 2) : ready) } } as never);
     for (const id of ['missing', 'foreign', 'draft', 'partial']) await expect(validator.validate({}, { tenantId: actor.tenantId, ownerUserId: actor.userId, document: validateRichDocument({ type: 'doc', content: [{ type: 'photo', attrs: { mediaId: id } }] }) })).rejects.toThrow('富文档媒体必须属于当前创作空间且已发布就绪');

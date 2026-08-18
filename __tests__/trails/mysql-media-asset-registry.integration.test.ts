@@ -37,19 +37,19 @@ describeIntegration('durable media asset registry MySQL schema', () => {
   });
   it('persists exactly the private nine-artifact matrix without changing public projection', async () => {
     const registered = await repository.register(owner, { mutationId: 'mysql-artifacts-register', expectedResourceVersion: null, id: 'mysql-artifact-asset', mimeType: 'image/jpeg', privateMasterLocator: 'mysql_artifact_master' });
-    const artifacts: DurableMediaAssetArtifactDescriptor[] = (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as DurableMediaAssetArtifactDescriptor['mimeType'], privateLocator: `${logicalRendition}_${codec}`, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+    const artifacts: DurableMediaAssetArtifactDescriptor[] = (['grid-960', 'cover-2048', 'preview-4096'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as DurableMediaAssetArtifactDescriptor['mimeType'], privateLocator: `${logicalRendition}_${codec}`, width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
     const persisted = await repository.persistArtifacts(owner, { mutationId: 'mysql-artifacts-persist', expectedResourceVersion: registered.resourceVersion, assetId: registered.id, artifacts });
     expect(persisted.resourceVersion).toBe('2');
     expect(await TrailsMediaAssetArtifactTable.count({ where: { tenantId: owner.tenantId, assetId: registered.id } })).toBe(9);
     expect(await TrailsMediaAssetVariantTable.count({ where: { tenantId: owner.tenantId, assetId: registered.id } })).toBe(0);
-    expect(JSON.stringify(persisted)).not.toMatch(/mysql_artifact_master|grid-800_avif|https?:\/\//);
+    expect(JSON.stringify(persisted)).not.toMatch(/mysql_artifact_master|grid-960_avif|https?:\/\//);
   });
   it('persists and replays register, approved derivative, and publish mutations exactly once', async () => {
     const register = { mutationId: 'mysql-register', expectedResourceVersion: null, id: 'mysql-media-asset', mimeType: 'image/jpeg', privateMasterLocator: 'mysql_master_locator' };
     const firstRegister = await repository.register(owner, register);
     const replayRegister = await repository.register(owner, register);
     expect(replayRegister).toEqual(firstRegister);
-    const artifacts: DurableMediaAssetArtifactDescriptor[] = (['grid-800', 'cover-1600', 'preview-2048'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as DurableMediaAssetArtifactDescriptor['mimeType'], privateLocator: `${logicalRendition}_${codec}_approval`, width: 800, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
+    const artifacts: DurableMediaAssetArtifactDescriptor[] = (['grid-960', 'cover-2048', 'preview-4096'] as const).flatMap(logicalRendition => (['avif', 'webp', 'jpeg'] as const).map(codec => ({ logicalRendition, codec, mimeType: `image/${codec}` as DurableMediaAssetArtifactDescriptor['mimeType'], privateLocator: `${logicalRendition}_${codec}_approval`, width: 960, height: 600, byteLength: 100, sha256: 'a'.repeat(64) })));
     const persisted = await repository.persistArtifacts(owner, { mutationId: 'mysql-persist', expectedResourceVersion: firstRegister.resourceVersion, assetId: firstRegister.id, artifacts });
     const approval = { mutationId: 'mysql-approval', expectedResourceVersion: persisted.resourceVersion, assetId: persisted.id, publication: { approvalId: 'approval_1', identityMode: 'workload-identity' as const } };
     const current = await repository.approvePublicDerivatives(owner, approval);

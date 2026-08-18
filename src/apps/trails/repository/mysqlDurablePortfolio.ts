@@ -1,7 +1,7 @@
 import { ModelStatic, Transaction } from 'sequelize';
 import { ITrailsDurablePortfolioTableAttributes, TrailsDurablePortfolioTable } from 'db/mysql/models/trailsDurablePortfolio';
-import { Actor, DurablePortfolio, DurablePortfolioDraftInput, DurablePortfolioStore, DurablePortfolioTransitionInput, DurablePortfolioUpdateInput, PhotoTechnicalMetadata } from '../types';
-import { photoTechnicalMetadata as parsePhotoTechnicalMetadata } from '../validators';
+import { Actor, DurablePortfolio, DurablePortfolioDraftInput, DurablePortfolioStore, DurablePortfolioTransitionInput, DurablePortfolioUpdateInput, ExhibitionPresentation, PhotoTechnicalMetadata } from '../types';
+import { exhibitionPresentation as parseExhibitionPresentation, photoTechnicalMetadata as parsePhotoTechnicalMetadata } from '../validators';
 import { RichDocumentPublishValidator } from './mysqlRichDocument';
 import { creatorSpaceOwnerId } from '../utils/actor';
 import { TrailsSyncInputError, TrailsSyncPersistenceError, TrailsSyncTransaction } from './mysqlPortfolioCategorySync';
@@ -40,13 +40,37 @@ const parseStoredPhotoTechnicalMetadata = (value: string | null | undefined): Ph
     throw new TrailsSyncPersistenceError('portfolio photo technical metadata is invalid');
   }
 };
+const serializeExhibitionPresentation = (value: ExhibitionPresentation | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  try {
+    const validated = parseExhibitionPresentation({ exhibitionPresentation: value });
+    if (!validated) throw new TrailsSyncInputError('exhibitionPresentation无效');
+    return JSON.stringify(validated);
+  } catch (error: unknown) {
+    throw new TrailsSyncInputError(error instanceof Error ? error.message : 'exhibitionPresentation无效');
+  }
+};
+const parseStoredExhibitionPresentation = (value: string | null | undefined): ExhibitionPresentation | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    const validated = parseExhibitionPresentation({ exhibitionPresentation: parsed });
+    if (!validated) throw new TrailsSyncPersistenceError('portfolio exhibition presentation is invalid');
+    return validated;
+  } catch (error: unknown) {
+    if (error instanceof TrailsSyncPersistenceError) throw error;
+    throw new TrailsSyncPersistenceError('portfolio exhibition presentation is invalid');
+  }
+};
 const fromRow = (row: Row): DurablePortfolio => {
   const metadata = parseStoredPhotoTechnicalMetadata(row.photoTechnicalMetadata);
+  const presentation = parseStoredExhibitionPresentation(row.exhibitionPresentation);
   return {
     id: row.id, tenantId: row.tenantId, ownerUserId: row.ownerUserId, title: row.title, summary: row.summary,
     ...(row.categoryId ? { categoryId: row.categoryId } : {}), ...(row.coverMediaId ? { coverMediaId: row.coverMediaId } : {}),
     mediaIds: parseMediaIds(row.mediaIds), ...(row.locationLabel ? { locationLabel: row.locationLabel } : {}),
     ...(metadata ? { photoTechnicalMetadata: metadata } : {}),
+    ...(presentation ? { exhibitionPresentation: presentation } : {}),
     visibility: row.visibility, lifecycle: row.lifecycle, resourceVersion: row.resourceVersion,
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
   };
@@ -66,11 +90,13 @@ export class MySqlDurablePortfolioRepository implements DurablePortfolioStore {
     const ownerUserId = creatorSpaceOwnerId(actor); if (!ownerUserId) throw new TrailsSyncInputError('当前账号没有创作空间管理权限');
     const id = text(input.id, 'id', 160); const timestamp = this.now();
     const metadataJson = serializePhotoTechnicalMetadata(input.photoTechnicalMetadata);
+    const presentationJson = serializeExhibitionPresentation(input.exhibitionPresentation);
     const row: Row = {
       id, tenantId: actor.tenantId, ownerUserId, title: text(input.title, 'title', 160), summary: text(input.summary, 'summary', 65535),
       categoryId: optional(input.categoryId, 'categoryId', 160), coverMediaId: optional(input.coverMediaId, 'coverMediaId', 160),
       mediaIds: JSON.stringify(mediaIds(input.mediaIds)), locationLabel: optional(input.locationLabel, 'locationLabel', 240),
       ...(metadataJson !== undefined ? { photoTechnicalMetadata: metadataJson } : {}),
+      ...(presentationJson !== undefined ? { exhibitionPresentation: presentationJson } : {}),
       visibility: input.visibility, lifecycle: 'draft', resourceVersion: '1', createdAt: timestamp, updatedAt: timestamp,
     };
     if (row.visibility !== 'public' && row.visibility !== 'private' && row.visibility !== 'unlisted') throw new TrailsSyncInputError('visibility无效');
@@ -85,12 +111,14 @@ export class MySqlDurablePortfolioRepository implements DurablePortfolioStore {
       if (current.lifecycle !== 'draft') throw new TrailsSyncInputError('只有草稿作品集可以更新');
       if (current.resourceVersion !== expectedVersion) throw new TrailsDurablePortfolioStaleVersionError('作品集版本已过期');
       const metadataJson = serializePhotoTechnicalMetadata(input.photoTechnicalMetadata);
+      const presentationJson = serializeExhibitionPresentation(input.exhibitionPresentation);
       const next: Row = {
         ...current,
         title: text(input.title, 'title', 160), summary: text(input.summary, 'summary', 65535),
         categoryId: optional(input.categoryId, 'categoryId', 160), coverMediaId: optional(input.coverMediaId, 'coverMediaId', 160),
         mediaIds: JSON.stringify(mediaIds(input.mediaIds)), locationLabel: optional(input.locationLabel, 'locationLabel', 240),
         photoTechnicalMetadata: metadataJson === undefined ? null : metadataJson,
+        exhibitionPresentation: presentationJson === undefined ? null : presentationJson,
         visibility: input.visibility, resourceVersion: (BigInt(current.resourceVersion) + BigInt(1)).toString(), updatedAt: this.now(),
       };
       if (!['public', 'private', 'unlisted'].includes(next.visibility)) throw new TrailsSyncInputError('visibility无效');

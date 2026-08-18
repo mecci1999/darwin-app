@@ -1,5 +1,6 @@
 import microAppActions from '../../src/apps/starlight/micro-app/actions';
 import { createHmac } from 'crypto';
+import { resolveTrailsShard } from '../../../shared/trails-contract';
 
 const app = { appId: 'starlight-trails-workspace', status: 'active', visibility: 'public' };
 const version = {
@@ -10,7 +11,7 @@ const version = {
   packageSha256: 'package-hash',
 };
 
-const canonicalUser = { userId: 'creator-trusted', tenantId: 'tenant-canonical', status: 'active', power: 0 };
+const canonicalUser = { userId: 'creator-trusted', tenantId: 'tenant-canonical', status: 'active', power: 999 };
 const canonicalOwnerMembership = { tenantId: 'tenant-canonical', userId: 'creator-trusted', role: 'creator-space-owner', status: 'active' };
 
 const createActions = (options: {
@@ -61,6 +62,7 @@ const authenticatedContext = (params: Record<string, unknown>) => ({
     tenantId: 'tenant-ticket',
     user: {
       userId: 'creator-trusted',
+      isAdmin: true,
       creatorSpaceRole: 'participant',
     },
   },
@@ -69,6 +71,12 @@ const authenticatedContext = (params: Record<string, unknown>) => ({
 const signSession = (claims: Record<string, unknown>) => {
   const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
   return `${body}.${createHmac('sha256', 'bridge-test-secret').update(body).digest('base64url')}`;
+};
+
+const shardedTrailsAction = (action: string) => {
+  const [, version, ...actionParts] = action.split('.');
+  const actionName = actionParts.join('.');
+  return `${resolveTrailsShard(`${version}.${actionName}`)}.${version}.${actionName}`;
 };
 
 const issueAndExchange = async () => {
@@ -91,6 +99,27 @@ describe('Trails Workspace micro-app bridge', () => {
     else process.env.MICRO_APP_TICKET_SECRET = originalSecret;
   });
 
+  it('issues runtime tickets for the explicitly granted 1.0.4 workspace release', async () => {
+    const { actions } = createActions();
+    const response = await actions['v1.runtime-ticket'].handler(
+      authenticatedContext({ appId: app.appId, appVersion: '1.0.4' }) as never,
+    );
+
+    expect(response.data.success).toBe(true);
+    expect((response.data.content as { version: { version: string } }).version.version).toBe('1.0.4');
+  });
+
+  it('denies the Trails workspace runtime ticket to non-administrators', async () => {
+    const { actions } = createActions({ user: { ...canonicalUser, power: 0 } });
+    const response = await actions['v1.runtime-ticket'].handler({
+      params: { appId: app.appId, appVersion: version.version },
+      meta: { tenantId: 'tenant-ticket', user: { userId: 'creator-trusted', isAdmin: false } },
+    } as never);
+
+    expect(response.status).toBe(403);
+    expect(response.data.success).toBe(false);
+  });
+
   it('uses a server grant rather than manifest permissions and dispatches only mapped Trails v2 actions with fresh canonical metadata', async () => {
     const { actions, sessionResponse } = await issueAndExchange();
     expect(sessionResponse.data.success).toBe(true);
@@ -104,9 +133,24 @@ describe('Trails Workspace micro-app bridge', () => {
     } as never);
 
     expect(response.status).toBe(201);
-    expect(call).toHaveBeenCalledWith('trails.v2.categories.create', { slug: 'alps', nameZh: '阿尔卑斯' }, {
-      meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: false, power: 0 }, creatorSpaceRole: 'creator-space-owner' },
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.categories.create'), { slug: 'alps', nameZh: '阿尔卑斯' }, {
+      meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'creator-space-owner' },
     });
+  });
+
+  it('renews an expired short session without replaying the consumed runtime ticket', async () => {
+    const { actions, sessionResponse } = await issueAndExchange();
+    const initial = sessionResponse.data.content as { refreshToken: string };
+    expect(initial.refreshToken).toBeTruthy();
+
+    const renewed = await actions['v1.exchange-session'].handler({
+      params: { refreshToken: initial.refreshToken },
+      meta: {},
+    } as never);
+
+    expect(renewed.data.success).toBe(true);
+    expect((renewed.data.content as { sessionToken: string }).sessionToken).toBeTruthy();
+    expect((renewed.data.content as { refreshToken: string }).refreshToken).not.toBe(initial.refreshToken);
   });
 
   it.each([
@@ -123,6 +167,8 @@ describe('Trails Workspace micro-app bridge', () => {
     ['journals.rich-document.save', 'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.save', { id: 'journal-1', baseRevision: '0', document: { type: 'doc' } }],
     ['journals.rich-document.preview', 'trails.v2.journals.rich-document.preview', 'trails.v2.journals.rich-document.preview', { id: 'journal-1', document: { type: 'doc' } }],
     ['journals.pin', 'trails.v2.journals.pin', 'trails.v2.journals.pin', { id: 'journal-1', resourceVersion: '1', isPinned: true }],
+    ['exhibitions.workspace', 'trails.v2.exhibitions.workspace', 'trails.v2.exhibitions.workspace', {}],
+    ['exhibitions.mutate', 'trails.v2.exhibitions.workspace.mutate', 'trails.v2.exhibitions.workspace.mutate', { operation: 'publish', id: 'exhibition_1', resourceVersion: '1' }],
     ['site-content.workspace', 'trails.v2.site-content.workspace', 'trails.v2.site-content.workspace', {}],
     ['site-content.draft', 'trails.v2.site-content.draft', 'trails.v2.site-content.draft', { displayName: 'StarLight', biography: { plainText: 'Quiet work.' }, contactLinks: [], licensingCopy: 'Rights reserved.', seo: { title: 'StarLight', description: 'Field work.' }, resourceVersion: '1' }],
     ['site-content.publish', 'trails.v2.site-content.publish', 'trails.v2.site-content.publish', { resourceVersion: '1' }],
@@ -159,7 +205,7 @@ describe('Trails Workspace micro-app bridge', () => {
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation, payload }, meta: {}, call } as never);
 
     expect(response.status).toBe(200);
-    expect(call).toHaveBeenCalledWith(action, payload, expect.objectContaining({ meta: expect.objectContaining({ tenantId: 'tenant-canonical' }) }));
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction(action), payload, expect.objectContaining({ meta: expect.objectContaining({ tenantId: 'tenant-canonical' }) }));
     expect((sessionResponse.data.content as { app: { scopes: string[] } }).app.scopes).toContain(scope);
   });
 
@@ -170,6 +216,28 @@ describe('Trails Workspace micro-app bridge', () => {
       'trails.v2.finance.balance.current', 'trails.v2.finance.balance.record', 'trails.v2.finance.create', 'trails.v2.finance.update', 'trails.v2.finance.workspace',
     ]);
     expect(scopes).not.toContain('trails.v2.finance.dispose-retained');
+  });
+
+  it.each(['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13'])('authorizes Photoshop upload-session and completion bridge operations for version %s', async (appVersion) => {
+    const { actions } = createActions();
+    const ticketResponse = await actions['v1.runtime-ticket'].handler(authenticatedContext({ appId: app.appId, appVersion }) as never);
+    const ticket = (ticketResponse.data.content as { ticket: string }).ticket;
+    const sessionResponse = await actions['v1.exchange-session'].handler({ params: { ticket }, meta: {} } as never);
+    const sessionToken = (sessionResponse.data.content as { sessionToken: string }).sessionToken;
+    const scopes = (sessionResponse.data.content as { app: { scopes: string[] } }).app.scopes;
+    expect(scopes).toEqual(expect.arrayContaining(['trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload']));
+    const request = jest.fn(async () => ({ status: 200, data: { success: true } }));
+    const requestResponse = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'photoshop-ingestion.upload-session', payload: {} }, meta: {}, call: request } as never);
+    expect(requestResponse.status).toBe(200);
+    expect(request).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.media-ingestion.upload-session'), {}, expect.any(Object));
+    const completion = jest.fn(async () => ({ status: 201, data: { success: true } }));
+    const completionResponse = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'photoshop-ingestion.complete-upload', payload: { uploadSession: `${'a'.repeat(64)}.${'b'.repeat(43)}` } }, meta: {}, call: completion } as never);
+    expect(completionResponse.status).toBe(201);
+    expect(completion).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.media-ingestion.complete-upload'), expect.any(Object), expect.any(Object));
+    const blocked = jest.fn();
+    const blockedResponse = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'photoshop-ingestion.complete-upload', payload: { uploadSession: `${'a'.repeat(64)}.${'b'.repeat(43)}`, objectKey: 'private' } }, meta: {}, call: blocked } as never);
+    expect(blockedResponse.status).toBe(403);
+    expect(blocked).not.toHaveBeenCalled();
   });
 
   it('rejects ticket replay through the atomic cacher', async () => {
@@ -304,7 +372,7 @@ describe('Trails Workspace micro-app bridge', () => {
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'categories.create', payload: { slug: 'alps', nameZh: '阿尔卑斯' } }, meta: {}, call } as never);
 
     expect(response.status).toBe(201);
-    expect(call).toHaveBeenCalledWith('trails.v2.categories.create', expect.any(Object), {
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.categories.create'), expect.any(Object), {
       meta: { tenantId: 'tenant-refreshed', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'participant' },
     });
   });
@@ -342,7 +410,7 @@ describe('Trails Workspace micro-app bridge', () => {
     const call = jest.fn(async () => ({ status: 200, data: { success: true } }));
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'hikes.workspace', payload: {} }, meta: {}, call } as never);
     expect(response.status).toBe(200);
-    expect(call).toHaveBeenCalledWith('trails.v2.hikes.workspace', {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: false, power: 0 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.hikes.workspace'), {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
   });
 
   it('preserves the signed-in actor for Gear despite a valid creator-space editor assignment', async () => {
@@ -355,7 +423,7 @@ describe('Trails Workspace micro-app bridge', () => {
     const call = jest.fn(async () => ({ status: 200, data: { success: true } }));
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'gear.workspace', payload: {} }, meta: {}, call } as never);
     expect(response.status).toBe(200);
-    expect(call).toHaveBeenCalledWith('trails.v2.gear.workspace', {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: false, power: 0 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.gear.workspace'), {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
   });
 
   it('preserves the signed-in actor for Packing Plans despite a valid creator-space editor assignment', async () => {
@@ -368,13 +436,13 @@ describe('Trails Workspace micro-app bridge', () => {
     const call = jest.fn(async () => ({ status: 200, data: { success: true } }));
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'packing-plans.workspace', payload: {} }, meta: {}, call } as never);
     expect(response.status).toBe(200);
-    expect(call).toHaveBeenCalledWith('trails.v2.packing-plans.workspace', {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: false, power: 0 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
+    expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.packing-plans.workspace'), {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
   });
 
   it('preserves the signed-in actor for Finance despite a valid creator-space editor assignment', async () => {
     const { actions } = createActions({ membership: { tenantId: 'tenant-canonical', userId: 'creator-trusted', role: 'creator-space-editor', assignedOwnerUserId: 'assigned-owner', status: 'active' }, owner: { userId: 'assigned-owner', tenantId: 'tenant-canonical', status: 'active', power: 0 }, ownerMembership: { tenantId: 'tenant-canonical', userId: 'assigned-owner', role: 'creator-space-owner', status: 'active' } });
     const sessionToken = signSession({ kind: 'micro-app-session', appId: app.appId, version: version.version, aud: 'darwin:micro-app:trails-workspace', jti: 'finance-editor-actor', userId: 'creator-trusted', scopes: ['trails.v2.finance.workspace'], exp: Date.now() + 60_000 }); const call = jest.fn(async () => ({ status: 200, data: { success: true } }));
     const response = await actions['v1.scoped-api'].handler({ params: { sessionToken, operation: 'finance.workspace', payload: {} }, meta: {}, call } as never);
-    expect(response.status).toBe(200); expect(call).toHaveBeenCalledWith('trails.v2.finance.workspace', {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: false, power: 0 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
+    expect(response.status).toBe(200); expect(call).toHaveBeenCalledWith(shardedTrailsAction('trails.v2.finance.workspace'), {}, { meta: { tenantId: 'tenant-canonical', user: { userId: 'creator-trusted', isAdmin: true, power: 999 }, creatorSpaceRole: 'creator-space-editor', creatorSpaceOwnerUserId: 'assigned-owner' } });
   });
 });

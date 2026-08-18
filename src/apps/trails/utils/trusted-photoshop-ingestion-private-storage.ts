@@ -2,8 +2,8 @@ import { createHash } from 'crypto';
 import { TrustedPhotoshopDerivativeStagedArtifact } from './trusted-photoshop-derivative-staging-plan';
 
 export interface TrustedPhotoshopIngestionPrivateStorage {
-  storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }>;
-  storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }>;
+  storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }>;
+  storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }>;
 }
 
 type Stored = { digest: string; buffer: Buffer; privateLocator: string };
@@ -29,11 +29,11 @@ export class InMemoryTrustedPhotoshopIngestionPrivateStorage implements TrustedP
     return { privateLocator };
   }
 
-  async storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }> {
+  async storeMaster(input: { tenantId: string; operationId: string; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; content: Buffer; mimeType: 'image/jpeg'; byteLength: number; sha256: string }): Promise<{ privateLocator: string }> {
     return this.store(input.grant.objectIdentity, input.content, { mimeType: input.mimeType, byteLength: input.byteLength, sha256: input.sha256 });
   }
 
-  async storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }> {
+  async storeArtifact(input: { tenantId: string; operationId: string; slot: TrustedPhotoshopDerivativeStagedArtifact['slot']; grant: { objectIdentity: string; fenceToken: string; intentDigest: string }; artifact: TrustedPhotoshopDerivativeStagedArtifact }): Promise<{ privateLocator: string }> {
     const { artifact } = input;
     if (artifact.slot !== input.slot) throw new Error('private ingestion slot mismatch');
     return this.store(input.grant.objectIdentity, artifact.buffer, { mimeType: artifact.mime, byteLength: artifact.byteLength, sha256: artifact.sha256 });

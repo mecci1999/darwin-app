@@ -356,6 +356,37 @@ describe('Darwin log contract', () => {
     expect(fsPromises.appendFile.mock.calls[0][1]).toContain('capture_action_unavailable');
   });
 
+  it('opens a forwarding circuit after a capture timeout instead of retrying every flush interval', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const star = {
+      call: jest.fn(async () => {
+        throw new Error("Request is timed out when call 'logs.v1.capture-darwin' action");
+      }),
+      registry: {
+        actions: {
+          list: jest.fn(() => [{ name: 'logs.v1.capture-darwin', available: true }]),
+        },
+      },
+    };
+
+    const middleware = createDarwinLogForwardMiddleware()(star);
+    middleware.newLogEntry('warn', ['first log forwarding failure'], { svc: 'gateway' });
+    await jest.advanceTimersByTimeAsync(250);
+    await Promise.resolve();
+
+    expect(star.call).toHaveBeenCalledTimes(1);
+    expect(fsPromises.appendFile.mock.calls.some(([, content]) => String(content).includes('forward_call_failure'))).toBe(true);
+
+    middleware.newLogEntry('warn', ['should wait for the circuit'], { svc: 'gateway' });
+    await jest.advanceTimersByTimeAsync(59_000);
+    expect(star.call).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(1_100);
+    expect(star.call).toHaveBeenCalledTimes(2);
+  });
+
   it('persists overflow records instead of allowing the forwarding queue to grow unbounded', async () => {
     jest.useFakeTimers();
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);

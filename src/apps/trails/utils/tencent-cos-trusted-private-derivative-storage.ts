@@ -67,10 +67,17 @@ const nonEmpty = (value: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
+const runtimeStaticKeyAllowed = (environment: NodeJS.ProcessEnv): boolean => (
+  environment.NODE_ENV === 'production'
+  && environment.TRAILS_MEDIA_PUBLICATION_ENABLED === 'true'
+  && environment.TRAILS_MEDIA_SERVER_IDENTITY_MODE === 'static-scoped-key'
+  && environment.TRAILS_COS_CREDENTIAL_PROVIDER === STATIC_ENV_PROVIDER
+);
+
 const configurationFrom = (environment: NodeJS.ProcessEnv): TencentCosConfiguration | undefined => {
   if (
     environment[PRIVATE_DERIVATIVE_ENABLED] !== 'true'
-    || (environment.NODE_ENV !== 'development' && environment.NODE_ENV !== 'test')
+    || (!['development', 'test'].includes(environment.NODE_ENV || '') && !runtimeStaticKeyAllowed(environment))
   ) return undefined;
 
   const secretId = nonEmpty(environment.TRAILS_COS_SECRET_ID);

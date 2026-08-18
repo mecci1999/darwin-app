@@ -42,6 +42,25 @@ describe('MySqlPublicSiteContentRepository canonicalization', () => {
     expect(saved.chrome).toEqual(validContent.chrome);
     expect(JSON.parse(store.update.mock.calls[0][1].contentJson).chrome).toEqual(validContent.chrome);
   });
+  it('normalizes a safe numeric BIGINT resource version returned by MySQL before publishing', async () => {
+    const store = model(); store.find.mockResolvedValue({ ...row(JSON.stringify(validContent)), resourceVersion: 1 } as never); store.update.mockImplementation(async (_current, next) => next);
+    const repository = new MySqlPublicSiteContentRepository(connection, store, () => timestamp);
+    await expect(repository.publish(actor, { resourceVersion: '1' })).resolves.toMatchObject({ status: 'published', resourceVersion: '2' });
+    expect(store.update).toHaveBeenCalledTimes(1);
+  });
+  it('hydrates supported public contact channels and official social profile paths', async () => {
+    const contactLinks = [
+      { kind: 'instagram', href: 'https://www.instagram.com/starlightodyssey21' },
+      { kind: 'linkedin', href: 'https://www.linkedin.com/in/starlight-odyssey' },
+      { kind: 'bilibili', href: 'https://space.bilibili.com/123456' },
+      { kind: 'xiaohongshu', href: 'https://www.xiaohongshu.com/user/profile/abcdef123456' },
+      { kind: 'email', href: 'mailto:hello@example.com' },
+      { kind: 'wechat', href: 'wechat:starlight_photo' },
+    ];
+    const store = model(); store.find.mockResolvedValue(row(JSON.stringify({ ...validContent, contactLinks })));
+    const repository = new MySqlPublicSiteContentRepository(connection, store, () => timestamp);
+    await expect(repository.readWorkspace(actor)).resolves.toMatchObject({ contactLinks });
+  });
   it('keeps legacy chrome footers without an ICP filing number valid and persists a valid optional number', async () => {
     const store = model(); store.find.mockResolvedValue(row(JSON.stringify(validContent))); store.update.mockImplementation(async (_current, next) => next);
     const repository = new MySqlPublicSiteContentRepository(connection, store, () => timestamp);

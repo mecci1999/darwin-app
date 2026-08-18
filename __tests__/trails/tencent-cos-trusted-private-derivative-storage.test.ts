@@ -23,8 +23,8 @@ const environment = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 });
 
 const artifact = (content: string, mime: 'image/avif' | 'image/webp' | 'image/jpeg' = 'image/jpeg'): TrustedPhotoshopDerivativeStagedArtifact => ({
-  slot: 'grid-800:jpeg', logicalRendition: 'grid-800', codec: 'jpeg', mime,
-  width: 800, height: 400, byteLength: Buffer.byteLength(content), sha256: 'a'.repeat(64), buffer: Buffer.from(content),
+  slot: 'grid-960:jpeg', logicalRendition: 'grid-960', codec: 'jpeg', mime,
+  width: 960, height: 400, byteLength: Buffer.byteLength(content), sha256: 'a'.repeat(64), buffer: Buffer.from(content),
 });
 
 const client = (): jest.Mocked<TencentCosPrivateDerivativeClient> => ({

@@ -1,0 +1,6 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Grant the packaged Trails workspace 1.0.9 its existing narrow server-side
+# operation allowlist. No other service code or runtime dependency changes.
+COPY dist/apps/starlight/micro-app/actions/index.js /app/dist/apps/starlight/micro-app/actions/index.js

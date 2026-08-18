@@ -5,6 +5,7 @@ import { TrailsPortfolioCategoryTable } from 'db/mysql/models/trailsPortfolioCat
 import { TrailsSyncChangeTable } from 'db/mysql/models/trailsSyncChange';
 import { TrailsSyncMutationTable } from 'db/mysql/models/trailsSyncMutation';
 import { TrailsDurablePortfolioTable } from 'db/mysql/models/trailsDurablePortfolio';
+import { TrailsDurableExhibitionThemeTable } from 'db/mysql/models/trailsDurableExhibitionTheme';
 import { TrailsDurableJournalTable } from 'db/mysql/models/trailsDurableJournal';
 import { TrailsRichDocumentTable } from 'db/mysql/models/trailsRichDocument';
 import { TrailsRichDocumentRevisionTable } from 'db/mysql/models/trailsRichDocumentRevision';
@@ -24,6 +25,7 @@ import { TrailsMediaAssetRegistryMutationTable } from 'db/mysql/models/trailsMed
 import { TrailsTrustedPhotoshopIngestionOperationTable } from 'db/mysql/models/trailsTrustedPhotoshopIngestionOperation';
 import { TrailsTrustedPhotoshopIngestionArtifactTable } from 'db/mysql/models/trailsTrustedPhotoshopIngestionArtifact';
 import { TrailsTrustedPhotoshopStorageWriteFenceTable } from 'db/mysql/models/trailsTrustedPhotoshopStorageWriteFence';
+import { TrailsPublicDerivativePublicationJobTable } from 'db/mysql/models/trailsPublicDerivativePublicationJob';
 import { TrailsDurablePublishingPackageTable } from 'db/mysql/models/trailsDurablePublishingPackage';
 import { TrailsDurablePublishingPackageMutationTable } from 'db/mysql/models/trailsDurablePublishingPackageMutation';
 import { TrailsDurablePublishingPackageAuditTable } from 'db/mysql/models/trailsDurablePublishingPackageAudit';
@@ -45,6 +47,7 @@ import { TrailsShootingLocationMutationTable } from 'db/mysql/models/trailsShoot
 import { TrailsShootingLocationAuditTable } from 'db/mysql/models/trailsShootingLocationAudit';
 import { createSequelizeTrailsPortfolioCategorySyncModels, MySqlPortfolioCategorySyncRepository, TrailsSyncConnection } from './repository/mysqlPortfolioCategorySync';
 import { createSequelizeDurablePortfolioModel, MySqlDurablePortfolioRepository } from './repository/mysqlDurablePortfolio';
+import { createSequelizeDurableExhibitionThemeModel, MySqlDurableExhibitionThemeRepository } from './repository/mysqlDurableExhibitionTheme';
 import { createSequelizeDurableJournalModel, MySqlDurableJournalRepository } from './repository/mysqlDurableJournal';
 import { createRichDocumentMediaValidator, createRichDocumentPublishValidator, createSequelizeRichDocumentModels, MySqlRichDocumentRepository } from './repository/mysqlRichDocument';
 import { createSequelizeDurableHikeModel, MySqlDurableHikeRepository } from './repository/mysqlDurableHike';
@@ -53,6 +56,8 @@ import { createSequelizeDurablePackingPlanModels, MySqlDurablePackingPlanReposit
 import { createSequelizeDurableFinanceModels, MySqlDurableFinanceRepository } from './repository/mysqlDurableFinance';
 import { createSequelizeDurableMediaCommerceModels, MySqlDurableMediaCommerceRepository } from './repository/mysqlDurableMediaCommerce';
 import { createSequelizeMediaAssetRegistryModels, MySqlMediaAssetRegistryRepository } from './repository/mysqlMediaAssetRegistry';
+import { createSequelizeTrustedPhotoshopIngestionModels, MySqlTrustedPhotoshopIngestionOperationRepository } from './repository/mysqlTrustedPhotoshopIngestionOperation';
+import { MySqlPublicDerivativePublicationJobRepository } from './repository/mysqlPublicDerivativePublicationJob';
 import { createSequelizeDurablePublishingPackageModels, MySqlDurablePublishingPackageRepository } from './repository/mysqlDurablePublishingPackage';
 import { createSequelizePublicSiteContentModel, MySqlPublicSiteContentRepository } from './repository/mysqlPublicSiteContent';
 import { createSequelizeGuestCommentStorage, MySqlGuestCommentRepository } from './repository/mysqlGuestComment';
@@ -69,6 +74,7 @@ export const durableCategorySyncModelKeys = [
   DataBaseTableNames.TrailsSyncChange,
   DataBaseTableNames.TrailsSyncMutation,
   DataBaseTableNames.TrailsDurablePortfolio,
+  DataBaseTableNames.TrailsDurableExhibitionTheme,
   DataBaseTableNames.TrailsDurableJournal,
   DataBaseTableNames.TrailsRichDocument,
   DataBaseTableNames.TrailsRichDocumentRevision,
@@ -88,6 +94,7 @@ export const durableCategorySyncModelKeys = [
   DataBaseTableNames.TrailsTrustedPhotoshopIngestionOperation,
   DataBaseTableNames.TrailsTrustedPhotoshopIngestionArtifact,
   DataBaseTableNames.TrailsTrustedPhotoshopStorageWriteFence,
+  DataBaseTableNames.TrailsPublicDerivativePublicationJob,
   DataBaseTableNames.TrailsDurablePublishingPackage,
   DataBaseTableNames.TrailsDurablePublishingPackageMutation,
   DataBaseTableNames.TrailsDurablePublishingPackageAudit,
@@ -166,6 +173,7 @@ export class DurableCategorySyncLifecycle {
       const changes = connection.getModel<TrailsSyncChangeTable>(DataBaseTableNames.TrailsSyncChange);
       const mutations = connection.getModel<TrailsSyncMutationTable>(DataBaseTableNames.TrailsSyncMutation);
       const portfolios = connection.getModel<TrailsDurablePortfolioTable>(DataBaseTableNames.TrailsDurablePortfolio);
+      const exhibitionThemes = connection.getModel<TrailsDurableExhibitionThemeTable>(DataBaseTableNames.TrailsDurableExhibitionTheme);
       const journals = connection.getModel<TrailsDurableJournalTable>(DataBaseTableNames.TrailsDurableJournal);
       const richDocuments = connection.getModel<TrailsRichDocumentTable>(DataBaseTableNames.TrailsRichDocument);
       const richDocumentRevisions = connection.getModel<TrailsRichDocumentRevisionTable>(DataBaseTableNames.TrailsRichDocumentRevision);
@@ -185,6 +193,7 @@ export class DurableCategorySyncLifecycle {
       const ingestionOperations = connection.getModel<TrailsTrustedPhotoshopIngestionOperationTable>(DataBaseTableNames.TrailsTrustedPhotoshopIngestionOperation);
       const ingestionArtifacts = connection.getModel<TrailsTrustedPhotoshopIngestionArtifactTable>(DataBaseTableNames.TrailsTrustedPhotoshopIngestionArtifact);
       const storageWriteFences = connection.getModel<TrailsTrustedPhotoshopStorageWriteFenceTable>(DataBaseTableNames.TrailsTrustedPhotoshopStorageWriteFence);
+      const publicDerivativePublicationJobs = connection.getModel<TrailsPublicDerivativePublicationJobTable>(DataBaseTableNames.TrailsPublicDerivativePublicationJob);
       const publishingPackages = connection.getModel<TrailsDurablePublishingPackageTable>(DataBaseTableNames.TrailsDurablePublishingPackage);
       const publishingPackageMutations = connection.getModel<TrailsDurablePublishingPackageMutationTable>(DataBaseTableNames.TrailsDurablePublishingPackageMutation);
       const publishingPackageAudits = connection.getModel<TrailsDurablePublishingPackageAuditTable>(DataBaseTableNames.TrailsDurablePublishingPackageAudit);
@@ -205,7 +214,7 @@ export class DurableCategorySyncLifecycle {
       const shootingLocationMutations = connection.getModel<TrailsShootingLocationMutationTable>(DataBaseTableNames.TrailsShootingLocationMutation);
       const shootingLocationAudits = connection.getModel<TrailsShootingLocationAuditTable>(DataBaseTableNames.TrailsShootingLocationAudit);
       const notificationKey = process.env.TRAILS_GUEST_COMMENT_NOTIFICATION_KEY;
-      if (!categories || !changes || !mutations || !portfolios || !journals || !richDocuments || !richDocumentRevisions || !hikes || !gear || !packingPlans || !packingPlanItems || !finance || !financeBalanceSnapshots || !financeDeletionAudits || !commerce || !commerceMutations || !mediaAssets || !mediaVariants || !mediaArtifacts || !mediaAssetMutations || !ingestionOperations || !ingestionArtifacts || !storageWriteFences || !publishingPackages || !publishingPackageMutations || !publishingPackageAudits || !publicSiteContent || !guestComments || !guestCommentAudits || !guestCommentNotifications || !guidedTrips || !guidedTripMutations || !guidedTripAudits || !externalVideoReferences || !externalVideoReferenceMutations || !externalVideoReferenceAudits || !locationCards || !locationCardMutations || !locationCardAudits || !shootingLocations || !shootingLocationMutations || !shootingLocationAudits || !notificationKey) throw new Error('Trails durable persistence models are unavailable');
+      if (!categories || !changes || !mutations || !portfolios || !exhibitionThemes || !journals || !richDocuments || !richDocumentRevisions || !hikes || !gear || !packingPlans || !packingPlanItems || !finance || !financeBalanceSnapshots || !financeDeletionAudits || !commerce || !commerceMutations || !mediaAssets || !mediaVariants || !mediaArtifacts || !mediaAssetMutations || !ingestionOperations || !ingestionArtifacts || !storageWriteFences || !publicDerivativePublicationJobs || !publishingPackages || !publishingPackageMutations || !publishingPackageAudits || !publicSiteContent || !guestComments || !guestCommentAudits || !guestCommentNotifications || !guidedTrips || !guidedTripMutations || !guidedTripAudits || !externalVideoReferences || !externalVideoReferenceMutations || !externalVideoReferenceAudits || !locationCards || !locationCardMutations || !locationCardAudits || !shootingLocations || !shootingLocationMutations || !shootingLocationAudits || !notificationKey) throw new Error('Trails durable persistence models are unavailable');
 
       state.durablePortfolioCategorySync = new MySqlPortfolioCategorySyncRepository(
         connection,
@@ -221,6 +230,12 @@ export class DurableCategorySyncLifecycle {
         const category = await categories.findOne({ where: input, transaction, lock: transaction.LOCK.UPDATE });
         return category ? { ownerUserId: category.ownerUserId, visibility: category.visibility, status: category.status, lifecycle: category.lifecycle } : undefined;
       } }, undefined, richDocumentPublishValidator);
+      state.durableExhibitionThemeStore = new MySqlDurableExhibitionThemeRepository(connection, createSequelizeDurableExhibitionThemeModel(exhibitionThemes), { find: async (input, options) => {
+        const transaction = options.transaction;
+        if (!(transaction instanceof Transaction)) throw new Error('Trails exhibition portfolio lookup requires a managed transaction');
+        const portfolio = await portfolios.findOne({ where: input, transaction, lock: transaction.LOCK.UPDATE });
+        return portfolio ? { ownerUserId: portfolio.ownerUserId, visibility: portfolio.visibility, lifecycle: portfolio.lifecycle } : undefined;
+      } });
       state.durableJournalStore = new MySqlDurableJournalRepository(connection, createSequelizeDurableJournalModel(journals), undefined, richDocumentPublishValidator);
       state.durableRichDocumentStore = new MySqlRichDocumentRepository(connection, richDocumentModels.documents, richDocumentModels.revisions, richDocumentModels.subjects, richDocumentMediaValidator);
       state.durableHikeStore = new MySqlDurableHikeRepository(connection, createSequelizeDurableHikeModel(hikes));
@@ -232,6 +247,8 @@ export class DurableCategorySyncLifecycle {
       state.durableMediaCommerceStore = new MySqlDurableMediaCommerceRepository(connection, commerceModels.records, commerceModels.mutations);
       const registry = new MySqlMediaAssetRegistryRepository(connection, mediaAssetModels);
       state.durableMediaAssetRegistryStore = registry;
+      state.trustedPhotoshopIngestionOperationStore = new MySqlTrustedPhotoshopIngestionOperationRepository(connection, createSequelizeTrustedPhotoshopIngestionModels(ingestionOperations, ingestionArtifacts, storageWriteFences));
+      state.publicDerivativePublicationJobStore = new MySqlPublicDerivativePublicationJobRepository(connection, publicDerivativePublicationJobs, mediaArtifacts);
       const publishingModels = createSequelizeDurablePublishingPackageModels(publishingPackages, publishingPackageMutations, publishingPackageAudits);
       state.durablePublishingPackageStore = new MySqlDurablePublishingPackageRepository(connection, publishingModels.packages, publishingModels.mutations, publishingModels.audits);
       state.durablePublicSiteContentStore = new MySqlPublicSiteContentRepository(connection, createSequelizePublicSiteContentModel(publicSiteContent));
@@ -251,6 +268,7 @@ export class DurableCategorySyncLifecycle {
     } catch (error: unknown) {
       state.durablePortfolioCategorySync = undefined;
       state.durablePortfolioStore = undefined;
+      state.durableExhibitionThemeStore = undefined;
       state.durableJournalStore = undefined;
       state.durableRichDocumentStore = undefined;
       state.durableHikeStore = undefined;
@@ -259,6 +277,8 @@ export class DurableCategorySyncLifecycle {
       state.durableFinanceStore = undefined;
       state.durableMediaCommerceStore = undefined;
       state.durableMediaAssetRegistryStore = undefined;
+      state.trustedPhotoshopIngestionOperationStore = undefined;
+      state.publicDerivativePublicationJobStore = undefined;
       state.durablePublishingPackageStore = undefined;
       state.durablePublicSiteContentStore = undefined;
       state.durableGuestCommentStore = undefined;
@@ -285,6 +305,7 @@ export class DurableCategorySyncLifecycle {
       this.connection = undefined;
       state.durablePortfolioCategorySync = undefined;
       state.durablePortfolioStore = undefined;
+      state.durableExhibitionThemeStore = undefined;
       state.durableJournalStore = undefined;
       state.durableRichDocumentStore = undefined;
       state.durableHikeStore = undefined;
@@ -293,6 +314,8 @@ export class DurableCategorySyncLifecycle {
       state.durableFinanceStore = undefined;
       state.durableMediaCommerceStore = undefined;
       state.durableMediaAssetRegistryStore = undefined;
+      state.trustedPhotoshopIngestionOperationStore = undefined;
+      state.publicDerivativePublicationJobStore = undefined;
       state.durablePublishingPackageStore = undefined;
       state.durablePublicSiteContentStore = undefined;
       state.durableGuestCommentStore = undefined;

@@ -4,7 +4,7 @@ import { pipeline } from 'stream/promises';
 import sharp from 'sharp';
 import { Actor, DurableMediaAssetArtifactDescriptor, DurableMediaAssetVariantName } from '../types';
 
-const renditions: readonly DurableMediaAssetVariantName[] = ['grid-800', 'cover-1600', 'preview-2048'];
+const renditions: readonly DurableMediaAssetVariantName[] = ['grid-960', 'cover-2048', 'preview-4096'];
 const codecs = ['avif', 'webp', 'jpeg'] as const;
 const opaqueLocator = /^[A-Za-z0-9_-]{1,512}$/;
 const opaqueReference = /^[A-Za-z0-9_-]{1,160}$/;
@@ -24,6 +24,8 @@ export interface TrailsPublicDerivativePublicationJob {
 
 export interface TrailsPublicDerivativePublicationJobSource {
   takeOne(): Promise<TrailsPublicDerivativePublicationJob | undefined>;
+  /** Called after a claimed job reaches a terminal worker outcome. */
+  complete?(input: { jobId: string; outcome: 'published' | 'failed' }): Promise<void>;
 }
 
 /** This resolver is the only private-storage read seam. Its implementation may map a locator to COS internally. */
@@ -31,26 +33,27 @@ export interface TrailsPrivateJpegLocatorResolver {
   openPrivateJpeg(locator: string): Promise<{ body: Readable; contentType: string; byteLength: number }>;
 }
 
-export interface TrailsWorkloadIdentityCredentials {
-  mode: 'workload-identity';
-}
+export interface TrailsWorkloadIdentityCredentials { mode: 'workload-identity'; }
+export interface TrailsStaticScopedKeyCredentials { mode: 'static-scoped-key'; }
+export type TrailsPublicationCredentials = TrailsWorkloadIdentityCredentials | TrailsStaticScopedKeyCredentials;
 
 /**
  * Production composition supplies this from the platform workload identity provider.
  * It deliberately has no environment/static-secret implementation in this foundation.
  */
 export interface TrailsWorkloadIdentityCredentialProvider {
-  getCredentials(): Promise<TrailsWorkloadIdentityCredentials>;
+  getCredentials(): Promise<TrailsPublicationCredentials>;
 }
 
 /** Provider-neutral COS writer boundary. Implementations must obtain credentials from workload identity, never environment secrets. */
 export interface TrailsPublicDerivativeObjectStore {
-  putImmutable(input: { credentials: TrailsWorkloadIdentityCredentials; key: string; body: Readable; contentType: 'image/jpeg'; cacheControl: string; contentLength: number; signal: AbortSignal }): Promise<void>;
-  head(input: { credentials: TrailsWorkloadIdentityCredentials; key: string; signal: AbortSignal }): Promise<{ contentType: string; cacheControl: string; contentLength: number; sha256: string }>;
+  putImmutable(input: { credentials: TrailsPublicationCredentials; key: string; body: Readable; contentType: 'image/jpeg'; cacheControl: string; contentLength: number; sha256: string; signal: AbortSignal }): Promise<void>;
+  head(input: { credentials: TrailsPublicationCredentials; key: string; signal: AbortSignal }): Promise<{ contentType: string; cacheControl: string; contentLength: number; sha256: string }>;
 }
 
 export interface TrailsPublicDerivativeRegistryApprover {
-  approvePublicDerivatives(actor: Actor, input: { mutationId: string; expectedResourceVersion: string; assetId: string; publication: { approvalId: string; identityMode: 'workload-identity' } }): Promise<unknown>;
+  approvePublicDerivatives(actor: Actor, input: { mutationId: string; expectedResourceVersion: string; assetId: string; publication: { approvalId: string; identityMode: TrailsPublicationCredentials['mode'] } }): Promise<{ id: string; status: 'draft' | 'published'; resourceVersion: string }>;
+  publish(actor: Actor, input: { mutationId: string; expectedResourceVersion: string; id: string }): Promise<{ id: string; status: 'draft' | 'published'; resourceVersion: string }>;
 }
 
 export interface TrailsPublicationWorkerLogger {
@@ -119,22 +122,21 @@ const validatePrivateJpeg = async (resolver: TrailsPrivateJpegLocatorResolver, a
   if (receivedByteLength !== artifact.byteLength || hash.digest('hex') !== artifact.sha256) throw new Error('private JPEG content mismatch');
 };
 
-const publishJpeg = async (job: TrailsPublicDerivativePublicationJob, artifact: DurableMediaAssetArtifactDescriptor, dependencies: TrailsPublicDerivativePublicationWorkerDependencies, timeoutMs: number): Promise<void> => {
+const publishJpeg = async (job: TrailsPublicDerivativePublicationJob, artifact: DurableMediaAssetArtifactDescriptor, credentials: TrailsPublicationCredentials, dependencies: TrailsPublicDerivativePublicationWorkerDependencies, timeoutMs: number): Promise<void> => {
   await validatePrivateJpeg(dependencies.privateLocatorResolver, artifact);
   const source = await dependencies.privateLocatorResolver.openPrivateJpeg(artifact.privateLocator);
   if (source.contentType !== 'image/jpeg' || source.byteLength !== artifact.byteLength) throw new Error('private JPEG source metadata mismatch');
   let uploadedByteLength = 0;
   const body = source.body.pipe(new Transform({ transform(chunk: Buffer, _encoding, callback) { uploadedByteLength += chunk.length; callback(null, chunk); } }));
   const key = publicObjectKey(job.publicReferences[artifact.logicalRendition]);
-  const credentials = await dependencies.credentialProvider.getCredentials();
-  if (credentials.mode !== 'workload-identity') throw new Error('publication worker credentials are invalid');
-  await timeout(timeoutMs, signal => dependencies.objectStore.putImmutable({ credentials, key, body, contentType: 'image/jpeg', cacheControl: immutableCacheControl, contentLength: artifact.byteLength, signal }));
+  if (credentials.mode !== 'workload-identity' && credentials.mode !== 'static-scoped-key') throw new Error('publication worker credentials are invalid');
+  await timeout(timeoutMs, signal => dependencies.objectStore.putImmutable({ credentials, key, body, contentType: 'image/jpeg', cacheControl: immutableCacheControl, contentLength: artifact.byteLength, sha256: artifact.sha256, signal }));
   if (uploadedByteLength !== artifact.byteLength) throw new Error('public JPEG upload length mismatch');
   const stored = await timeout(timeoutMs, signal => dependencies.objectStore.head({ credentials, key, signal }));
   if (stored.contentType !== 'image/jpeg' || stored.cacheControl !== immutableCacheControl || stored.contentLength !== artifact.byteLength || stored.sha256 !== artifact.sha256) throw new Error('public JPEG verification failed');
 };
 
-/** Runs at most one job. No HTTP action, service registration, polling loop, or deployment composition is provided. */
+/** Runs at most one job. Callers own scheduling and must retain single-worker concurrency. */
 export const runOneTrailsPublicDerivativePublicationJob = async (dependencies: TrailsPublicDerivativePublicationWorkerDependencies): Promise<TrailsPublicDerivativeWorkerRunResult> => {
   const timeoutMs = dependencies.cosOperationTimeoutMs ?? 15_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('publication worker configuration is invalid');
@@ -143,15 +145,22 @@ export const runOneTrailsPublicDerivativePublicationJob = async (dependencies: T
   try {
     if (!opaqueReference.test(job.jobId) || !opaqueReference.test(job.assetId) || !opaqueReference.test(job.approvalId) || !/^(0|[1-9][0-9]*)$/.test(job.expectedResourceVersion)) throw new Error('publication job is invalid');
     exactMatrix(job.artifacts);
+    const credentials = await dependencies.credentialProvider.getCredentials();
+    if (credentials.mode !== 'workload-identity' && credentials.mode !== 'static-scoped-key') throw new Error('publication worker credentials are invalid');
     for (const rendition of renditions) {
       const jpeg = job.artifacts.find(artifact => artifact.logicalRendition === rendition && artifact.codec === 'jpeg');
       if (!jpeg) throw new Error('private JPEG derivative is missing');
-      await publishJpeg(job, jpeg, dependencies, timeoutMs);
+      await publishJpeg(job, jpeg, credentials, dependencies, timeoutMs);
     }
-    await dependencies.registry.approvePublicDerivatives(job.actor, { mutationId: `${job.jobId}:approve`, expectedResourceVersion: job.expectedResourceVersion, assetId: job.assetId, publication: { approvalId: job.approvalId, identityMode: 'workload-identity' } });
+    const approved = await dependencies.registry.approvePublicDerivatives(job.actor, { mutationId: `${job.jobId}:approve`, expectedResourceVersion: job.expectedResourceVersion, assetId: job.assetId, publication: { approvalId: job.approvalId, identityMode: credentials.mode } });
+    if (!approved || approved.id !== job.assetId || approved.status !== 'draft' || !/^(0|[1-9][0-9]*)$/.test(approved.resourceVersion)) throw new Error('public derivative approval result is invalid');
+    const published = await dependencies.registry.publish(job.actor, { mutationId: `${job.jobId}:publish`, expectedResourceVersion: approved.resourceVersion, id: job.assetId });
+    if (!published || published.id !== job.assetId || published.status !== 'published') throw new Error('public derivative publication result is invalid');
+    await dependencies.jobs.complete?.({ jobId: job.jobId, outcome: 'published' });
     dependencies.logger?.info('published', { jobId: job.jobId, assetId: job.assetId });
     return { outcome: 'published', jobId: job.jobId, assetId: job.assetId };
   } catch (_error: unknown) {
+    try { await dependencies.jobs.complete?.({ jobId: job.jobId, outcome: 'failed' }); } catch (_completionError: unknown) { /* retain the primary publication failure */ }
     dependencies.logger?.error('failed', { jobId: job.jobId, assetId: job.assetId });
     return { outcome: 'failed', jobId: job.jobId, assetId: job.assetId };
   }

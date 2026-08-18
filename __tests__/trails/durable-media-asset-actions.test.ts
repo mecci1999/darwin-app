@@ -8,7 +8,7 @@ const participant: Actor = { tenantId: 'tenant-a', userId: 'person-a', isAdmin: 
 const star = { emit: jest.fn() } as unknown as Starlight;
 const ctx = (actor: Actor | undefined, params: object) => ({ meta: actor ? { tenantId: actor.tenantId, user: actor } : {}, params });
 const record = { id: 'asset-1', tenantId: owner.tenantId, ownerUserId: owner.userId, mimeType: 'image/jpeg', status: 'draft' as const, resourceVersion: '1', createdAt: '', updatedAt: '' };
-const pickerRecord: WorkspaceMediaAssetPickerItem = { id: 'asset-1', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg', renditions: [{ name: 'grid-800', width: 800, height: 600, reference: 'grid_ref' }, { name: 'cover-1600', width: 1600, height: 1000, reference: 'cover_ref' }, { name: 'preview-2048', width: 2048, height: 1365, reference: 'preview_ref' }] };
+const pickerRecord: WorkspaceMediaAssetPickerItem = { id: 'asset-1', lifecycle: 'published', readiness: 'ready', mimeType: 'image/jpeg', renditions: [{ name: 'grid-960', width: 960, height: 600, reference: 'grid_ref' }, { name: 'cover-2048', width: 2048, height: 1000, reference: 'cover_ref' }, { name: 'preview-4096', width: 4096, height: 1365, reference: 'preview_ref' }] };
 const registry = (overrides: Partial<DurableMediaAssetRegistryStore> = {}): DurableMediaAssetRegistryStore => ({ listWorkspacePicker: jest.fn(async () => [pickerRecord]), listPublic: jest.fn(async () => [pickerRecord]), register: jest.fn(async () => record), approvePublicDerivatives: jest.fn(async () => record), persistArtifacts: jest.fn(async () => record), publish: jest.fn(async () => ({ ...record, status: 'published' as const })), ...overrides });
 
 describe('v2 durable media asset registry actions', () => {
@@ -60,7 +60,7 @@ describe('v2 durable media asset registry actions', () => {
     const response = await trailsActions(star, { repository: new InMemoryTrailsRepository(), durableMediaAssetRegistryStore: durable, publicOwnerResolver: { resolve: () => ({ tenantId: owner.tenantId, ownerUserId: owner.userId }) } })['v2.media-assets.public'].handler(ctx(undefined, { ownerUserId: 'spoofed' }) as never);
     expect(response.status).toBe(200);
     expect(durable.listPublic).toHaveBeenCalledWith({ tenantId: owner.tenantId, userId: owner.userId });
-    expect(response.data.content).toEqual([{ id: 'asset-1', renditions: [{ reference: 'grid_ref', width: 800, height: 600 }, { reference: 'cover_ref', width: 1600, height: 1000 }, { reference: 'preview_ref', width: 2048, height: 1365 }] }]);
+    expect(response.data.content).toEqual([{ id: 'asset-1', renditions: [{ reference: 'grid_ref', width: 960, height: 600 }, { reference: 'cover_ref', width: 2048, height: 1000 }, { reference: 'preview_ref', width: 4096, height: 1365 }] }]);
     expect(JSON.stringify(response)).not.toMatch(/tenantId|ownerUserId|privateMasterLocator|privateLocator|objectKey|https?:\/\//);
   });
   it('caches anonymous public projections and clears them after a successful configured-owner publication', async () => {

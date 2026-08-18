@@ -11,13 +11,13 @@ const asset: DurableMediaAsset = { id: 'asset_1', tenantId: actor.tenantId, owne
 const jpeg = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: 'navy' } }).jpeg().toBuffer();
 const plan = async (): Promise<TrustedPhotoshopDerivativeStagingPlan> => stageTrustedPhotoshopPackageDerivatives(await processTrustedPhotoshopPackageDerivatives([
   { name: 'manifest.json', buffer: Buffer.from(JSON.stringify({ schema: 'trails.publishing-package/v1', outcome: 'complete', outputs: [
-    { relativePath: 'website/grid-800.v1.jpg', filename: 'grid-800.v1.jpg', presetId: 'website-grid-800', status: 'saved' },
-    { relativePath: 'website/cover-1600.v1.jpg', filename: 'cover-1600.v1.jpg', presetId: 'website-cover-1600', status: 'saved' },
-    { relativePath: 'website/preview-2048.v1.jpg', filename: 'preview-2048.v1.jpg', presetId: 'website-preview-2048', status: 'saved' },
+    { relativePath: 'website/grid-960.v1.jpg', filename: 'grid-960.v1.jpg', presetId: 'website-grid-960', status: 'saved' },
+    { relativePath: 'website/cover-2048.v1.jpg', filename: 'cover-2048.v1.jpg', presetId: 'website-cover-2048', status: 'saved' },
+    { relativePath: 'website/preview-4096.v1.jpg', filename: 'preview-4096.v1.jpg', presetId: 'website-preview-4096', status: 'saved' },
   ] })) },
-  { name: 'website/grid-800.v1.jpg', buffer: await jpeg(800, 400) },
-  { name: 'website/cover-1600.v1.jpg', buffer: await jpeg(1600, 800) },
-  { name: 'website/preview-2048.v1.jpg', buffer: await jpeg(2048, 1024) },
+  { name: 'website/grid-960.v1.jpg', buffer: await jpeg(960, 400) },
+  { name: 'website/cover-2048.v1.jpg', buffer: await jpeg(2048, 960) },
+  { name: 'website/preview-4096.v1.jpg', buffer: await jpeg(4096, 1024) },
 ]));
 
 const registry = (persistArtifacts: jest.Mock): DurableMediaAssetRegistryStore => ({
@@ -48,7 +48,7 @@ describe('trusted Photoshop derivative persistence orchestrator', () => {
     expect(storage.countForTest()).toBe(9);
     const [, mutation] = persistArtifacts.mock.calls[0];
     expect(mutation.artifacts.map((descriptor: DurableMediaAssetArtifactDescriptor) => `${descriptor.logicalRendition}:${descriptor.codec}`)).toEqual([
-      'grid-800:avif', 'grid-800:webp', 'grid-800:jpeg', 'cover-1600:avif', 'cover-1600:webp', 'cover-1600:jpeg', 'preview-2048:avif', 'preview-2048:webp', 'preview-2048:jpeg',
+      'grid-960:avif', 'grid-960:webp', 'grid-960:jpeg', 'cover-2048:avif', 'cover-2048:webp', 'cover-2048:jpeg', 'preview-4096:avif', 'preview-4096:webp', 'preview-4096:jpeg',
     ]);
     expect(mutation.artifacts).toEqual(stagingPlan.artifacts.map((artifact, index) => ({
       logicalRendition: artifact.logicalRendition, codec: artifact.codec, privateLocator: `trusted_private_derivative_${(index + 1).toString().padStart(8, '0')}`,

@@ -2,6 +2,7 @@ const LOCAL_AND_TAURI_ORIGINS = [
   'http://localhost:6130',
   'http://127.0.0.1:6130',
   'tauri://localhost',
+  'starlight-micro://localhost',
   'http://tauri.localhost',
   'https://tauri.localhost',
   'https://localhost',

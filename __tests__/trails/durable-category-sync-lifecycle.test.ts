@@ -58,6 +58,7 @@ const models: RegisteredModels = {
   [DataBaseTableNames.TrailsMediaAssetVariant]: {} as ModelStatic<Model>,
   [DataBaseTableNames.TrailsMediaAssetArtifact]: {} as ModelStatic<Model>,
   [DataBaseTableNames.TrailsMediaAssetRegistryMutation]: {} as ModelStatic<Model>,
+  [DataBaseTableNames.TrailsPublicDerivativePublicationJob]: {} as ModelStatic<Model>,
   [DataBaseTableNames.TrailsTrustedPhotoshopIngestionOperation]: {} as ModelStatic<Model>,
   [DataBaseTableNames.TrailsTrustedPhotoshopIngestionArtifact]: {} as ModelStatic<Model>,
   [DataBaseTableNames.TrailsTrustedPhotoshopStorageWriteFence]: {} as ModelStatic<Model>,

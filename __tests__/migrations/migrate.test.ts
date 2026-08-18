@@ -281,6 +281,20 @@ describe('migration runner', () => {
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsTrustedPhotoshopStorageWriteFence', ['tenant_id', 'operation_id'], { name: 'trails_photoshop_storage_fence_operation' });
   });
 
+  it('widens rendition enums without redefining existing composite primary keys', async () => {
+    const migration = migrationDefinitions.migrations.find((item: { id: string }) => item.id === migrationDefinitions.TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID);
+    const tables = ['TrailsMediaAssetVariant', 'TrailsMediaAssetArtifact', 'TrailsTrustedPhotoshopIngestionArtifact', 'TrailsTrustedPhotoshopStorageWriteFence'];
+    const queryInterface = { showAllTables: jest.fn(async () => tables), changeColumn: jest.fn() };
+    const sequelize = { query: jest.fn() };
+    if (!migration) throw new Error('4K rendition migration is not registered');
+    await migration.up({ queryInterface, sequelize });
+    for (const [, , definition] of queryInterface.changeColumn.mock.calls) expect(definition.primaryKey).toBeUndefined();
+    const expandedFenceDefinition = queryInterface.changeColumn.mock.calls
+      .find(([table, column]) => table === 'TrailsTrustedPhotoshopStorageWriteFence' && column === 'slot')?.[2];
+    expect(expandedFenceDefinition).toBeDefined();
+    expect(new Set(expandedFenceDefinition.type.values).size).toBe(expandedFenceDefinition.type.values.length);
+  });
+
   it('applies the isolated Trails durable migrations without production runner state or Sequelize synchronization', async () => {
     const tables: string[] = [];
     const queryInterface = {
@@ -296,7 +310,9 @@ describe('migration runner', () => {
     };
     const sequelize = { getQueryInterface: () => queryInterface, sync: jest.fn(), query: jest.fn() };
     await migrationDefinitions.applyTrailsCategoryMigrations(sequelize);
-    expect(queryInterface.createTable).toHaveBeenCalledTimes(50);
+    expect(queryInterface.createTable).toHaveBeenCalledTimes(52);
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableExhibitionTheme', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), slug: expect.any(Object), payload_json: expect.any(Object), published_at: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsPublicDerivativePublicationJob', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), job_id: expect.objectContaining({ primaryKey: true }), lease_expires_at: expect.any(Object), status: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsRichDocument', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), subject_type: expect.objectContaining({ primaryKey: true }), subject_id: expect.objectContaining({ primaryKey: true }), document_json: expect.any(Object), revision: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsRichDocumentRevision', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), subject_type: expect.objectContaining({ primaryKey: true }), subject_id: expect.objectContaining({ primaryKey: true }), revision: expect.objectContaining({ primaryKey: true }), created_by_user_id: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsPublicSiteContent', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), content_json: expect.any(Object), resource_version: expect.any(Object) }));

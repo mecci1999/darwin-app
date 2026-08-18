@@ -1,4 +1,4 @@
-import { GuestAvatarId, GuestCommentSubjectType, PhotoTechnicalMetadata, PhotoTechnicalMetadataVisibility, PhotoTechnicalTagId, PublishingApprovalChecklist, PublishingContentOrigin, PublishingExportVariant, PublishingFactualClaim, PublishingLocationPolicy, PublishingPath, PublishingPlatform, PublishingRightsStatus, Visibility, guestAvatarIds, photoTechnicalTagIds } from '../types';
+import { ExhibitionPresentation, GuestAvatarId, GuestCommentSubjectType, PhotoTechnicalMetadata, PhotoTechnicalMetadataVisibility, PhotoTechnicalTagId, PublishingApprovalChecklist, PublishingContentOrigin, PublishingExportVariant, PublishingFactualClaim, PublishingLocationPolicy, PublishingPath, PublishingPlatform, PublishingRightsStatus, Visibility, guestAvatarIds, photoTechnicalTagIds } from '../types';
 
 export type Input = Record<string, unknown>;
 
@@ -204,6 +204,22 @@ const metadataVisibility = (value: unknown): PhotoTechnicalMetadataVisibility =>
     result[key] = enabled === true;
     return result;
   }, { captureSettings: false, locationLabel: false, technicalTags: false, creationNote: false });
+};
+
+export const exhibitionPresentation = (params: Input, key = 'exhibitionPresentation'): ExhibitionPresentation | undefined => {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  const input = record(value, key);
+  const fields = ['fit', 'focalPoint', 'matte', 'breathingRoom', 'captionPlacement', 'showTechnicalInfo'];
+  if (!Object.keys(input).every((field) => fields.includes(field))) throw new Error(`${key}包含不允许字段`);
+  const { fit, focalPoint, matte, breathingRoom, captionPlacement, showTechnicalInfo } = input;
+  if (fit !== 'contain' && fit !== 'cover') throw new Error(`${key}.fit无效`);
+  if (!['center', 'top', 'right', 'bottom', 'left'].includes(String(focalPoint))) throw new Error(`${key}.focalPoint无效`);
+  if (matte !== 'dark' && matte !== 'light') throw new Error(`${key}.matte无效`);
+  if (!['none', 'small', 'large'].includes(String(breathingRoom))) throw new Error(`${key}.breathingRoom无效`);
+  if (captionPlacement !== 'below' && captionPlacement !== 'overlay') throw new Error(`${key}.captionPlacement无效`);
+  if (typeof showTechnicalInfo !== 'boolean') throw new Error(`${key}.showTechnicalInfo必须是布尔值`);
+  return { fit, focalPoint: focalPoint as ExhibitionPresentation['focalPoint'], matte, breathingRoom: breathingRoom as ExhibitionPresentation['breathingRoom'], captionPlacement, showTechnicalInfo };
 };
 
 export const photoTechnicalMetadata = (params: Input, key = 'photoTechnicalMetadata'): PhotoTechnicalMetadata | undefined => {
