@@ -310,7 +310,7 @@ describe('migration runner', () => {
     };
     const sequelize = { getQueryInterface: () => queryInterface, sync: jest.fn(), query: jest.fn() };
     await migrationDefinitions.applyTrailsCategoryMigrations(sequelize);
-    expect(queryInterface.createTable).toHaveBeenCalledTimes(52);
+    expect(queryInterface.createTable).toHaveBeenCalledTimes(56);
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableExhibitionTheme', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), slug: expect.any(Object), payload_json: expect.any(Object), published_at: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsPublicDerivativePublicationJob', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), job_id: expect.objectContaining({ primaryKey: true }), lease_expires_at: expect.any(Object), status: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsRichDocument', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), subject_type: expect.objectContaining({ primaryKey: true }), subject_id: expect.objectContaining({ primaryKey: true }), document_json: expect.any(Object), revision: expect.any(Object) }));
@@ -336,6 +336,7 @@ describe('migration runner', () => {
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsAnalyticsDaily', ['tenant_id', 'owner_user_id', 'day', 'content_type', 'content_id'], { name: 'trails_analytics_content_metrics' });
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsGuestComment', ['tenant_id', 'owner_user_id', 'status', 'created_at', 'subject_type', 'subject_id'], { name: 'trails_comment_approved_metrics' });
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableTripRegistration', expect.objectContaining({ id: expect.objectContaining({ primaryKey: true }), tenant_id: expect.any(Object), trip_id: expect.any(Object), participant_user_id: expect.any(Object), status: expect.any(Object), release_version: expect.any(Object), resource_version: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableTripPayment', expect.objectContaining({ id: expect.objectContaining({ primaryKey: true }), registration_id: expect.any(Object), stage: expect.any(Object), amount_minor: expect.any(Object), due_at: expect.any(Object), status: expect.any(Object) }));
     expect(queryInterface.addColumn).toHaveBeenCalledWith('TrailsGuestCommentNotification', 'delivery_id', expect.objectContaining({ allowNull: true }));
     expect(queryInterface.addColumn).toHaveBeenCalledWith('TrailsGuestCommentNotification', 'next_attempt_at', expect.objectContaining({ allowNull: true }));
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsGuestCommentNotification', ['status', 'next_attempt_at', 'lease_expires_at'], { name: 'trails_guest_comment_notification_claim' });

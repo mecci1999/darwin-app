@@ -27,7 +27,8 @@ type TrailsWorkspaceOperation =
   | 'categories.reorder'
   | 'media-assets.workspace-picker'
   | 'photoshop-ingestion.upload-session' | 'photoshop-ingestion.complete-upload' | 'photoshop-ingestion.workspace'
-  | 'catalog.workspace' | 'media.create' | 'media.transition' | 'editions.create' | 'editions.transition'
+  | 'catalog.workspace' | 'media.create' | 'media.update' | 'media.transition' | 'editions.create' | 'editions.transition'
+  | 'sales.workspace' | 'sales.configuration.save' | 'sales.products.create' | 'sales.products.update' | 'sales.products.transition' | 'sales.orders.create' | 'sales.orders.transition'
   | 'portfolios.workspace'
   | 'portfolios.draft'
   | 'portfolios.update'
@@ -54,6 +55,7 @@ type TrailsWorkspaceOperation =
   | 'site-content.workspace' | 'site-content.draft' | 'site-content.publish' | 'site-content.unpublish'
   | 'trips.workspace' | 'trips.draft' | 'trips.update' | 'trips.publish' | 'trips.unpublish' | 'trips.cancel'
   | 'trip-registrations.summary' | 'trip-registrations.capacity'
+  | 'trip-payments.workspace' | 'trip-payments.terms.save' | 'trip-payments.deposit.approve' | 'trip-payments.transition'
   | 'video-references.workspace' | 'video-references.draft' | 'video-references.update' | 'video-references.publish' | 'video-references.unpublish' | 'video-references.archive'
   | 'locations.workspace' | 'locations.draft' | 'locations.update' | 'locations.publish' | 'locations.unpublish' | 'locations.archive'
   | 'shooting-locations.workspace' | 'shooting-locations.create' | 'shooting-locations.update' | 'shooting-locations.archive'
@@ -98,7 +100,7 @@ const TRAILS_WORKSPACE_GRANTS: readonly TrailsWorkspaceGrant[] = [{
   scopes: [
     'trails.v2.categories.workspace', 'trails.v2.categories.create', 'trails.v2.categories.update',
     'trails.v2.categories.archive', 'trails.v2.categories.reorder', 'trails.v2.media-assets.workspace-picker',
-    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition',     'trails.v2.portfolios.workspace',
+    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.update', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition',     'trails.v2.portfolios.workspace',
     'trails.v2.portfolios.draft', 'trails.v2.portfolios.update', 'trails.v2.portfolios.publish', 'trails.v2.portfolios.unpublish', 'trails.v2.portfolios.rich-document.read',
     'trails.v2.portfolios.rich-document.save', 'trails.v2.portfolios.rich-document.preview', 'trails.v2.journals.workspace',
     'trails.v2.journals.draft', 'trails.v2.journals.update', 'trails.v2.journals.publish', 'trails.v2.journals.unpublish', 'trails.v2.journals.pin', 'trails.v2.journals.rich-document.read',
@@ -126,7 +128,7 @@ const TRAILS_WORKSPACE_GRANTS: readonly TrailsWorkspaceGrant[] = [{
   scopes: [
     'trails.v2.categories.workspace', 'trails.v2.categories.create', 'trails.v2.categories.update',
     'trails.v2.categories.archive', 'trails.v2.categories.reorder', 'trails.v2.media-assets.workspace-picker',
-    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition', 'trails.v2.portfolios.workspace',
+    'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.update', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.transition', 'trails.v2.portfolios.workspace',
     'trails.v2.portfolios.draft', 'trails.v2.portfolios.update', 'trails.v2.portfolios.publish', 'trails.v2.portfolios.unpublish', 'trails.v2.portfolios.rich-document.read', 'trails.v2.portfolios.rich-document.save', 'trails.v2.portfolios.rich-document.preview',
     'trails.v2.journals.workspace', 'trails.v2.journals.draft', 'trails.v2.journals.update', 'trails.v2.journals.publish', 'trails.v2.journals.unpublish', 'trails.v2.journals.pin', 'trails.v2.journals.rich-document.read', 'trails.v2.journals.rich-document.save', 'trails.v2.journals.rich-document.preview',
     'trails.v2.publishing-packages.workspace', 'trails.v2.publishing-packages.create', 'trails.v2.publishing-packages.transition', 'trails.v2.publishing-packages.measure', 'trails.v2.publishing-packages.learn',
@@ -157,9 +159,17 @@ const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { acti
   'photoshop-ingestion.workspace': { action: 'trails.v2.media-ingestion.workspace', scope: 'trails.v2.media-ingestion.workspace' },
   'catalog.workspace': { action: 'trails.v2.commerce.catalog.workspace', scope: 'trails.v2.commerce.catalog.workspace' },
   'media.create': { action: 'trails.v2.commerce.catalog.media.create', scope: 'trails.v2.commerce.catalog.media.create' },
+  'media.update': { action: 'trails.v2.commerce.catalog.media.update', scope: 'trails.v2.commerce.catalog.media.update' },
   'media.transition': { action: 'trails.v2.commerce.catalog.media.transition', scope: 'trails.v2.commerce.catalog.media.transition' },
   'editions.create': { action: 'trails.v2.commerce.catalog.editions.create', scope: 'trails.v2.commerce.catalog.editions.create' },
   'editions.transition': { action: 'trails.v2.commerce.catalog.editions.transition', scope: 'trails.v2.commerce.catalog.editions.transition' },
+  'sales.workspace': { action: 'trails.v2.commerce.sales.workspace', scope: 'trails.v2.commerce.sales.workspace' },
+  'sales.configuration.save': { action: 'trails.v2.commerce.sales.configuration.save', scope: 'trails.v2.commerce.sales.configuration.save' },
+  'sales.products.create': { action: 'trails.v2.commerce.sales.products.create', scope: 'trails.v2.commerce.sales.products.create' },
+  'sales.products.update': { action: 'trails.v2.commerce.sales.products.update', scope: 'trails.v2.commerce.sales.products.update' },
+  'sales.products.transition': { action: 'trails.v2.commerce.sales.products.transition', scope: 'trails.v2.commerce.sales.products.transition' },
+  'sales.orders.create': { action: 'trails.v2.commerce.sales.orders.create', scope: 'trails.v2.commerce.sales.orders.create' },
+  'sales.orders.transition': { action: 'trails.v2.commerce.sales.orders.transition', scope: 'trails.v2.commerce.sales.orders.transition' },
   'portfolios.workspace': { action: 'trails.v2.portfolios.workspace', scope: 'trails.v2.portfolios.workspace' },
   'portfolios.draft': { action: 'trails.v2.portfolios.draft', scope: 'trails.v2.portfolios.draft' },
   'portfolios.update': { action: 'trails.v2.portfolios.update', scope: 'trails.v2.portfolios.update' },
@@ -196,6 +206,10 @@ const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { acti
   'trips.cancel': { action: 'trails.v2.trips.workspace.cancel', scope: 'trails.v2.trips.workspace.cancel' },
   'trip-registrations.summary': { action: 'trails.v2.trip-registrations.summary', scope: 'trails.v2.trip-registrations.summary' },
   'trip-registrations.capacity': { action: 'trails.v2.trip-registrations.capacity', scope: 'trails.v2.trip-registrations.capacity' },
+  'trip-payments.workspace': { action: 'trails.v2.trip-payments.workspace', scope: 'trails.v2.trip-payments.workspace' },
+  'trip-payments.terms.save': { action: 'trails.v2.trip-payments.terms.save', scope: 'trails.v2.trip-payments.terms.save' },
+  'trip-payments.deposit.approve': { action: 'trails.v2.trip-payments.deposit.approve', scope: 'trails.v2.trip-payments.deposit.approve' },
+  'trip-payments.transition': { action: 'trails.v2.trip-payments.transition', scope: 'trails.v2.trip-payments.transition' },
   'video-references.workspace': { action: 'trails.v2.video-references.workspace', scope: 'trails.v2.video-references.workspace' },
   'video-references.draft': { action: 'trails.v2.video-references.workspace.draft', scope: 'trails.v2.video-references.workspace.draft' },
   'video-references.update': { action: 'trails.v2.video-references.workspace.update', scope: 'trails.v2.video-references.workspace.update' },
@@ -442,8 +456,10 @@ const registeredTrailsWorkspaceGrant = (appId: string, version: string): TrailsW
   const exact = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === appId && grant.version === version);
   if (exact) return exact;
   const prior = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === 'starlight-trails-workspace' && grant.version === '1.0.1');
-  return appId === 'starlight-trails-workspace' && ['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13'].includes(version) && prior
-    ? { ...prior, version, scopes: [...prior.scopes, 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace'] }
+  if (appId === 'starlight-trails-workspace' && version === '1.0.17' && prior) return { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace', 'trails.v2.commerce.sales.workspace', 'trails.v2.commerce.sales.configuration.save', 'trails.v2.commerce.sales.products.create', 'trails.v2.commerce.sales.products.update', 'trails.v2.commerce.sales.products.transition', 'trails.v2.commerce.sales.orders.create', 'trails.v2.commerce.sales.orders.transition', 'trails.v2.trip-payments.workspace', 'trails.v2.trip-payments.terms.save', 'trails.v2.trip-payments.deposit.approve', 'trails.v2.trip-payments.transition'] };
+  if (appId === 'starlight-trails-workspace' && version === '1.0.16' && prior) return { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace', 'trails.v2.commerce.sales.workspace', 'trails.v2.commerce.sales.configuration.save', 'trails.v2.commerce.sales.products.create', 'trails.v2.commerce.sales.products.update', 'trails.v2.commerce.sales.products.transition', 'trails.v2.commerce.sales.orders.create', 'trails.v2.commerce.sales.orders.transition'] };
+  return appId === 'starlight-trails-workspace' && ['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13', '1.0.14', '1.0.15'].includes(version) && prior
+    ? { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace'] }
     : undefined;
 };
 const isRuntimeTicketClaims = (value: Record<string, unknown>): value is RuntimeTicketClaims =>
@@ -541,6 +557,13 @@ const isAnalyticsContentMetricsPayload = (payload: Record<string, unknown>): boo
 };
 const isTripRegistrationSummaryPayload = (payload: Record<string, unknown>): boolean => Object.keys(payload).length === 1 && typeof payload.tripId === 'string';
 const isTripRegistrationCapacityPayload = (payload: Record<string, unknown>): boolean => Object.keys(payload).length === 3 && typeof payload.tripId === 'string' && typeof payload.capacity === 'number' && typeof payload.mutationId === 'string';
+const isTripPaymentPayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const exact = (keys: readonly string[]) => Object.keys(payload).length === keys.length && Object.keys(payload).every(key => keys.includes(key));
+  if (operation === 'trip-payments.workspace') return exact([]);
+  if (operation === 'trip-payments.terms.save') return exact(['tripId', 'currency', 'depositMinor', 'balanceMinor', 'depositDueHours', 'balanceDueDays', 'refundPolicySummary', 'expectedResourceVersion', 'mutationId']);
+  if (operation === 'trip-payments.deposit.approve') return exact(['registrationId', 'expectedResourceVersion', 'mutationId']);
+  return exact(['id', 'status', 'expectedResourceVersion', 'mutationId']);
+};
 const isShootingLocationPayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
   const allowed = operation === 'shooting-locations.workspace' ? [] : operation === 'shooting-locations.archive' ? ['id', 'mutationId', 'expectedResourceVersion'] : ['id', 'name', 'latitude', 'longitude', 'notes', 'mutationId', 'expectedResourceVersion'];
   return Object.keys(payload).length === allowed.length && Object.keys(payload).every(key => allowed.includes(key));
@@ -548,6 +571,33 @@ const isShootingLocationPayload = (operation: TrailsWorkspaceOperation, payload:
 const isPhotoshopIngestionPayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => operation === 'photoshop-ingestion.upload-session'
   ? Object.keys(payload).length === 0
   : Object.keys(payload).length === 1 && typeof payload.uploadSession === 'string' && payload.uploadSession.length >= 64 && payload.uploadSession.length <= 2048;
+const isCatalogWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const allowed = operation === 'catalog.workspace' ? []
+    : operation === 'media.create' ? ['assetId', 'title', 'summary', 'mutationId', 'expectedResourceVersion']
+      : operation === 'media.update' ? ['id', 'title', 'summary', 'mutationId', 'expectedResourceVersion']
+        : operation === 'media.transition' ? ['id', 'status', 'mutationId', 'expectedResourceVersion']
+          : operation === 'editions.create' ? ['mediaId', 'title', 'description', 'mutationId', 'expectedResourceVersion']
+            : ['id', 'status', 'mutationId', 'expectedResourceVersion'];
+  return Object.keys(payload).length === allowed.length && Object.keys(payload).every(key => allowed.includes(key));
+};
+const isSalesWorkspacePayload = (operation: TrailsWorkspaceOperation, payload: Record<string, unknown>): boolean => {
+  const exact = (keys: readonly string[]) => Object.keys(payload).length === keys.length && Object.keys(payload).every(key => keys.includes(key));
+  if (operation === 'sales.workspace') return exact([]);
+  if (operation === 'sales.configuration.save') return exact(['salesMode', 'currency', 'reservationHours', 'mutationId', 'expectedResourceVersion']);
+  if (operation === 'sales.orders.create') return exact(['productId', 'skuId', 'quantity', 'mutationId', 'expectedResourceVersion']);
+  if (operation === 'sales.orders.transition') return Object.keys(payload).every(key => ['id', 'status', 'trackingReference', 'mutationId', 'expectedResourceVersion'].includes(key)) && ['id', 'status', 'mutationId', 'expectedResourceVersion'].every(key => key in payload);
+  const productKeys = operation === 'sales.products.create'
+    ? ['mediaId', 'productType', 'title', 'description', 'productionLeadDays', 'editionSize', 'certificateIncluded', 'skus', 'mutationId', 'expectedResourceVersion']
+    : operation === 'sales.products.update'
+      ? ['id', 'mediaId', 'productType', 'title', 'description', 'productionLeadDays', 'editionSize', 'certificateIncluded', 'skus', 'mutationId', 'expectedResourceVersion']
+      : ['id', 'status', 'mutationId', 'expectedResourceVersion'];
+  const required = operation === 'sales.products.create'
+    ? ['productType', 'title', 'description', 'productionLeadDays', 'certificateIncluded', 'skus', 'mutationId', 'expectedResourceVersion']
+    : operation === 'sales.products.update'
+      ? ['id', 'productType', 'title', 'description', 'productionLeadDays', 'certificateIncluded', 'skus', 'mutationId', 'expectedResourceVersion']
+      : productKeys;
+  return Object.keys(payload).every(key => productKeys.includes(key)) && required.every(key => key in payload);
+};
 
 const publicVersion = (version: any, includePackage = false) => {
   if (!version) return null;
@@ -962,8 +1012,11 @@ export default function microAppActions(star: Starlight) {
   if (operation === 'analytics.content-metrics' && !isAnalyticsContentMetricsPayload(payload)) return fail('内容指标请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if (operation === 'trip-registrations.summary' && !isTripRegistrationSummaryPayload(payload)) return fail('报名摘要请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if (operation === 'trip-registrations.capacity' && !isTripRegistrationCapacityPayload(payload)) return fail('行摄名额请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'trip-payments.workspace' || operation === 'trip-payments.terms.save' || operation === 'trip-payments.deposit.approve' || operation === 'trip-payments.transition') && !isTripPaymentPayload(operation, payload)) return fail('摄影团付款请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if ((operation === 'shooting-locations.workspace' || operation === 'shooting-locations.create' || operation === 'shooting-locations.update' || operation === 'shooting-locations.archive') && !isShootingLocationPayload(operation, payload)) return fail('拍摄地点请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
   if ((operation === 'photoshop-ingestion.upload-session' || operation === 'photoshop-ingestion.complete-upload') && !isPhotoshopIngestionPayload(operation, payload)) return fail('Photoshop导入请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'catalog.workspace' || operation === 'media.create' || operation === 'media.update' || operation === 'media.transition' || operation === 'editions.create' || operation === 'editions.transition') && !isCatalogWorkspacePayload(operation, payload)) return fail('目录请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
+  if ((operation === 'sales.workspace' || operation === 'sales.configuration.save' || operation === 'sales.products.create' || operation === 'sales.products.update' || operation === 'sales.products.transition' || operation === 'sales.orders.create' || operation === 'sales.orders.transition') && !isSalesWorkspacePayload(operation, payload)) return fail('销售请求包含不允许字段', HttpResponseCode.NoPermissionError, 403);
           if (typeof ctx.call !== 'function') return fail('Trails 服务当前不可用', HttpResponseCode.ServiceActionFaild, 503);
           const trustedActor = await resolveTrailsWorkspaceActor(star.db, session.userId);
           if (!trustedActor) return fail('当前用户没有有效的 Trails 创作者空间权限', HttpResponseCode.NoPermissionError, 403);

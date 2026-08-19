@@ -893,8 +893,26 @@ export interface DownloadLicenseRequest extends DurableCommerceBase { mediaId: s
 export interface DownloadEntitlement extends DurableCommerceBase { mediaId: string; buyerUserId: string; requestId: string; status: 'active' | 'revoked'; }
 export interface ManualOrder extends DurableCommerceBase { buyerUserId: string; editionId: string; titleSnapshot: string; currencySnapshot: string; priceMinorSnapshot: number; status: ManualOrderStatus; paidMinor: number; refundedMinor: number; }
 export interface DurableCommerceMutation { mutationId: string; expectedResourceVersion: DurableDecimalString | null; }
+/**
+ * The sales preparation boundary is intentionally provider-free. It supports a
+ * creator's manual order process now and reserves a separately reviewed
+ * provider checkout mode for later. No payment credential, address, or buyer
+ * contact data belongs in this aggregate.
+ */
+export type SalesMode = 'disabled' | 'manual' | 'provider-checkout';
+export type SalesProductType = 'postcard-set' | 'photographic-print' | 'printed-work';
+export type SalesProductStatus = 'draft' | 'ready' | 'archived';
+export type SalesInventoryMode = 'finite' | 'made-to-order';
+export type ManualSalesOrderStatus = 'awaiting-payment' | 'payment-confirmed' | 'in-production' | 'shipped' | 'completed' | 'cancelled' | 'refund-pending' | 'refunded';
+export interface SalesConfiguration extends DurableCommerceBase { salesMode: SalesMode; currency: string; reservationHours: number; }
+export interface SalesProductSku { id: string; label: string; priceMinor: number; inventoryMode: SalesInventoryMode; stockQuantity?: number; }
+export interface SalesProduct extends DurableCommerceBase { mediaId?: string; productType: SalesProductType; title: string; description: string; productionLeadDays: number; editionSize?: number; certificateIncluded: boolean; status: SalesProductStatus; skus: SalesProductSku[]; }
+/** Private creator-operated record; the customer and payment live outside the system until a reviewed privacy/payment integration exists. */
+export interface ManualSalesOrder extends DurableCommerceBase { productId: string; skuId: string; quantity: number; titleSnapshot: string; skuLabelSnapshot: string; currencySnapshot: string; unitPriceMinorSnapshot: number; totalPriceMinorSnapshot: number; reservationExpiresAt: string; status: ManualSalesOrderStatus; shippedAt?: string; trackingReference?: string; }
+export interface SalesWorkspace { configuration: SalesConfiguration; products: SalesProduct[]; orders: ManualSalesOrder[]; }
 export interface DurableMediaCommerceStore {
   createMedia(actor: Actor, mutation: DurableCommerceMutation & { id: string; title: string; summary: string; derivativeReferences: Array<{ reference: string; width?: number; height?: number }> }): Promise<DurableMedia>;
+  updateMedia(actor: Actor, mutation: DurableCommerceMutation & { id: string; title: string; summary: string }): Promise<DurableMedia>;
   transitionMedia(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: DurableMediaStatus }): Promise<DurableMedia>;
   createEdition(actor: Actor, mutation: DurableCommerceMutation & { id: string; mediaId: string; title: string; description: string; currency: string; priceMinor: number }): Promise<PrintEdition>;
   transitionEdition(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: PrintEditionStatus }): Promise<PrintEdition>;
@@ -903,6 +921,13 @@ export interface DurableMediaCommerceStore {
   decideDownloadLicense(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: 'granted' | 'declined' | 'revoked' }): Promise<DownloadLicenseRequest>;
   createOrder(actor: Actor, mutation: DurableCommerceMutation & { id: string; editionId: string }): Promise<ManualOrder>;
   transitionOrder(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: ManualOrderStatus; refundMinor?: number }): Promise<ManualOrder>;
+  readSalesWorkspace(actor: Actor): Promise<SalesWorkspace>;
+  saveSalesConfiguration(actor: Actor, mutation: DurableCommerceMutation & { salesMode: Exclude<SalesMode, 'provider-checkout'>; currency: string; reservationHours: number }): Promise<SalesConfiguration>;
+  createSalesProduct(actor: Actor, mutation: DurableCommerceMutation & { id: string; mediaId?: string; productType: SalesProductType; title: string; description: string; productionLeadDays: number; editionSize?: number; certificateIncluded: boolean; skus: SalesProductSku[] }): Promise<SalesProduct>;
+  updateSalesProduct(actor: Actor, mutation: DurableCommerceMutation & { id: string; mediaId?: string; productType: SalesProductType; title: string; description: string; productionLeadDays: number; editionSize?: number; certificateIncluded: boolean; skus: SalesProductSku[] }): Promise<SalesProduct>;
+  transitionSalesProduct(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: SalesProductStatus }): Promise<SalesProduct>;
+  createManualSalesOrder(actor: Actor, mutation: DurableCommerceMutation & { id: string; productId: string; skuId: string; quantity: number }): Promise<ManualSalesOrder>;
+  transitionManualSalesOrder(actor: Actor, mutation: DurableCommerceMutation & { id: string; status: ManualSalesOrderStatus; trackingReference?: string }): Promise<ManualSalesOrder>;
   listPublic(owner: Pick<Actor, 'tenantId' | 'userId'>): Promise<{ media: DurableMedia[]; editions: PrintEdition[] }>;
   listBuyer(actor: Actor): Promise<{ inquiries: CommercialLicenseInquiry[]; requests: DownloadLicenseRequest[]; entitlements: DownloadEntitlement[]; orders: ManualOrder[] }>;
   listOwner(actor: Actor): Promise<{ media: DurableMedia[]; editions: PrintEdition[]; inquiries: CommercialLicenseInquiry[]; requests: DownloadLicenseRequest[]; entitlements: DownloadEntitlement[]; orders: ManualOrder[] }>;
@@ -934,7 +959,7 @@ export interface DurableGuidedTripMutation { mutationId: string; expectedResourc
 export interface DurableGuidedTripStore { createDraft(actor: Actor, input: DurableGuidedTripMutation & DurableGuidedTripDraftInput): Promise<DurableGuidedTrip>; updateDraft(actor: Actor, input: DurableGuidedTripMutation & DurableGuidedTripDraftInput): Promise<DurableGuidedTrip>; publish(actor: Actor, input: DurableGuidedTripMutation & { id: string }): Promise<DurableGuidedTrip>; unpublish(actor: Actor, input: DurableGuidedTripMutation & { id: string }): Promise<DurableGuidedTrip>; cancel(actor: Actor, input: DurableGuidedTripMutation & { id: string }): Promise<DurableGuidedTrip>; listWorkspace(actor: Actor): Promise<DurableGuidedTrip[]>; listPublic(owner: Pick<Actor, 'tenantId' | 'userId'>): Promise<DurableGuidedTrip[]>; readPublic(owner: Pick<Actor, 'tenantId' | 'userId'>, id: string): Promise<DurableGuidedTrip | undefined>; }
 
 /** Private operational record. It deliberately excludes contact, health, identity-document, and payment data. */
-export type DurableTripRegistrationStatus = 'submitted' | 'waitlisted' | 'confirmed' | 'rejected' | 'cancelled';
+export type DurableTripRegistrationStatus = 'submitted' | 'waitlisted' | 'deposit-pending' | 'balance-pending' | 'confirmed' | 'rejected' | 'cancelled';
 export interface DurableTripRegistration { id: string; tripId: string; status: DurableTripRegistrationStatus; requiredAcknowledgementAcceptedAt: string; releaseAcceptedAt: string; releaseVersion: string; resourceVersion: DurableDecimalString; createdAt: string; updatedAt: string; }
 export interface DurableTripRegistrationStore {
   submit(actor: Actor, input: { mutationId: string; tripId: string; requiredAcknowledgement: true; releaseAccepted: true; releaseVersion: string }): Promise<DurableTripRegistration>;
@@ -943,6 +968,52 @@ export interface DurableTripRegistrationStore {
   transition(actor: Actor, input: { id: string; status: Exclude<DurableTripRegistrationStatus, 'submitted'>; resourceVersion: DurableDecimalString; mutationId: string }): Promise<DurableTripRegistration>;
   configureCapacity(actor: Actor, input: { tripId: string; capacity: number; mutationId: string }): Promise<{ tripId: string; capacity: number }>;
   summary(actor: Actor, input: { tripId: string }): Promise<{ tripId: string; capacity: number; confirmed: number; remaining: number; counts: Record<DurableTripRegistrationStatus, number> }>;
+}
+
+/**
+ * Creator-operated payment terms and records for a guided trip. These records are
+ * deliberately private: they do not contain a participant identity, contact data,
+ * collection instructions, receipt images, account numbers, or provider metadata.
+ */
+export type DurableTripPaymentStage = 'deposit' | 'balance';
+export type DurableTripPaymentStatus = 'awaiting-payment' | 'confirmed' | 'refund-pending' | 'refunded' | 'expired' | 'cancelled';
+export interface DurableTripPaymentTerms {
+  tripId: string;
+  currency: string;
+  depositMinor: number;
+  balanceMinor: number;
+  depositDueHours: number;
+  balanceDueDays: number;
+  refundPolicySummary: string;
+  resourceVersion: DurableDecimalString;
+  updatedAt: string;
+}
+export interface DurableTripPayment {
+  id: string;
+  tripId: string;
+  registrationId: string;
+  stage: DurableTripPaymentStage;
+  amountMinor: number;
+  currency: string;
+  dueAt: string;
+  status: DurableTripPaymentStatus;
+  resourceVersion: DurableDecimalString;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string;
+  refundRequestedAt?: string;
+  refundedAt?: string;
+}
+export interface DurableTripPaymentWorkspace {
+  terms: DurableTripPaymentTerms[];
+  registrations: Array<Pick<DurableTripRegistration, 'id' | 'tripId' | 'status' | 'resourceVersion' | 'createdAt' | 'updatedAt'>>;
+  payments: DurableTripPayment[];
+}
+export interface DurableTripPaymentStore {
+  workspace(actor: Actor): Promise<DurableTripPaymentWorkspace>;
+  saveTerms(actor: Actor, input: { tripId: string; currency: string; depositMinor: number; balanceMinor: number; depositDueHours: number; balanceDueDays: number; refundPolicySummary: string; expectedResourceVersion: DurableDecimalString | null; mutationId: string }): Promise<DurableTripPaymentTerms>;
+  approveDeposit(actor: Actor, input: { registrationId: string; expectedResourceVersion: DurableDecimalString; mutationId: string }): Promise<{ registration: DurableTripRegistration; payment: DurableTripPayment }>;
+  transitionPayment(actor: Actor, input: { id: string; status: DurableTripPaymentStatus; expectedResourceVersion: DurableDecimalString; mutationId: string }): Promise<{ registration: DurableTripRegistration; payment: DurableTripPayment }>;
 }
 
 /** Metadata-only Bilibili reference. No media, player, embed, provider, or remote content belongs to this boundary. */
@@ -1105,6 +1176,7 @@ export interface TrailsState {
   durableGuestCommentStore?: DurableGuestCommentStore;
   durableAnalyticsStore?: DurableAnalyticsStore;
   durableTripRegistrationStore?: DurableTripRegistrationStore;
+  durableTripPaymentStore?: DurableTripPaymentStore;
   /** Optional only for tests; production composition uses the server-owned default resolver. */
   publicOwnerResolver?: PublicOwnerResolver;
   /** Optional deployment-provided anti-abuse assessment; absence denies submissions. */

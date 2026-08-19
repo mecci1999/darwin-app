@@ -54,7 +54,13 @@ const parsePositiveTimeout = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const parsePositiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const GATEWAY_RPC_TIMEOUT_MS = parsePositiveTimeout(process.env.GATEWAY_RPC_TIMEOUT_MS, 15000);
+const GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD = parsePositiveInteger(process.env.GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD, 4);
 const UPLOADS_PUBLIC_PREFIX = '/uploads/';
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 const JSON_BODY_LIMIT = process.env.GATEWAY_JSON_BODY_LIMIT || '16mb';
@@ -1166,6 +1172,7 @@ async function initializeGatewayService() {
       }
 
       registryWatchdog = new GatewayRegistryWatchdog(star, {
+        registryRecoveryExitThreshold: GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD,
         onDiagnostic: (event) => {
           registryObservability?.record(event);
           if (!registryAlerts) registryAlerts = getAlertOutboxRepository().then(createGatewayRegistryAlertAdapter);

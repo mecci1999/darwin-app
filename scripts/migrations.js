@@ -43,6 +43,7 @@ const TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID = '040-trails-media-rendition-4k-v1
 const TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID = '041-trails-public-derivative-publication-job-v1';
 const TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID = '042-trails-durable-exhibition-theme-v1';
 const TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID = '043-trails-durable-portfolio-exhibition-presentation-v1';
+const TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID = '044-trails-durable-trip-payment-v1';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -790,6 +791,32 @@ const migrations = [
       await ensureIndex(queryInterface, 'TrailsDurableExhibitionTheme', ['tenant_id', 'owner_user_id', 'status', 'published_at'], { name: 'trails_exhibition_theme_public' });
     },
   },
+  {
+    // This extends the private registration state without exposing payment data on the public site.
+    id: TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      if (tableExists(await queryInterface.showAllTables(), 'TrailsDurableTripRegistration')) {
+        await queryInterface.changeColumn('TrailsDurableTripRegistration', 'status', { type: DataTypes.ENUM('submitted', 'waitlisted', 'deposit-pending', 'balance-pending', 'confirmed', 'rejected', 'cancelled'), allowNull: false });
+      }
+      await ensureTable(queryInterface, 'TrailsDurableTripPaymentTerms', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, trip_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, currency: { type: DataTypes.CHAR(3), allowNull: false }, deposit_minor: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, balance_minor: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, deposit_due_hours: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, balance_due_days: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, refund_policy_summary: { type: DataTypes.TEXT, allowNull: false }, resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, updated_at: { type: DataTypes.DATE, allowNull: false },
+      });
+      await ensureTable(queryInterface, 'TrailsDurableTripPayment', {
+        id: { type: DataTypes.STRING(80), allowNull: false, primaryKey: true }, tenant_id: { type: DataTypes.STRING(64), allowNull: false }, trip_id: { type: DataTypes.STRING(160), allowNull: false }, registration_id: { type: DataTypes.STRING(80), allowNull: false }, stage: { type: DataTypes.ENUM('deposit', 'balance'), allowNull: false }, amount_minor: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false }, currency: { type: DataTypes.CHAR(3), allowNull: false }, due_at: { type: DataTypes.DATE, allowNull: false }, status: { type: DataTypes.ENUM('awaiting-payment', 'confirmed', 'refund-pending', 'refunded', 'expired', 'cancelled'), allowNull: false }, resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false }, confirmed_at: { type: DataTypes.DATE, allowNull: true }, refund_requested_at: { type: DataTypes.DATE, allowNull: true }, refunded_at: { type: DataTypes.DATE, allowNull: true }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }, updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsDurableTripPayment', ['tenant_id', 'registration_id', 'stage'], { unique: true, name: 'trails_trip_payment_registration_stage_unique' });
+      await ensureIndex(queryInterface, 'TrailsDurableTripPayment', ['tenant_id', 'trip_id', 'status', 'due_at'], { name: 'trails_trip_payment_queue' });
+      await ensureTable(queryInterface, 'TrailsDurableTripPaymentMutation', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, actor_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true }, mutation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, fingerprint: { type: DataTypes.CHAR(64), allowNull: false }, result_json: { type: DataTypes.TEXT('long'), allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureTable(queryInterface, 'TrailsDurableTripPaymentAudit', {
+        event_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true }, tenant_id: { type: DataTypes.STRING(64), allowNull: false }, trip_id: { type: DataTypes.STRING(160), allowNull: false }, registration_id: { type: DataTypes.STRING(80), allowNull: false }, payment_id: { type: DataTypes.STRING(80), allowNull: true }, actor_user_id: { type: DataTypes.STRING(64), allowNull: false }, operation: { type: DataTypes.STRING(80), allowNull: false }, occurred_at: { type: DataTypes.DATE, allowNull: false }, created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsDurableTripPaymentAudit', ['tenant_id', 'trip_id', 'occurred_at'], { name: 'trails_trip_payment_audit' });
+    },
+  },
 ];
 
 // Numeric migration IDs are the deployment ordering authority; keep append-only migrations ordered even when their definitions are grouped by resource.
@@ -798,7 +825,7 @@ migrations.sort((left, right) => left.id.localeCompare(right.id));
 /** Test-only schema bootstrap for the isolated Trails MySQL harness. It never uses migration ledger/locks. */
 const applyTrailsCategoryMigrations = async sequelize => {
   const queryInterface = sequelize.getQueryInterface();
-  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID, TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID, TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID, TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID];
+  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID, TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID, TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID, TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID];
   for (const id of requiredIds) {
     const migration = migrations.find(candidate => candidate.id === id);
     if (!migration) throw new Error(`Required Trails category migration is not registered: ${id}`);
@@ -847,6 +874,7 @@ module.exports = {
   TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID,
   TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID,
   TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID,
+  TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID,
   ALERT_DURABLE_OUTBOX_MIGRATION_ID,
   BASELINE_MIGRATION_ID,
   getModelTableNames,

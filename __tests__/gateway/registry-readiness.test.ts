@@ -27,7 +27,7 @@ describe('gateway registry readiness', () => {
 
   it('requires two missing observations before requesting discovery reconciliation', async () => {
     const { star, discoverAllNodes } = createStar(['gateway']);
-    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, reconciliationCooldownMs: 60_000 });
+    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, reconciliationCooldownMs: 60_000, registryStalenessMs: 0 });
 
     await watchdog.tick();
     expect(discoverAllNodes).not.toHaveBeenCalled();
@@ -37,7 +37,7 @@ describe('gateway registry readiness', () => {
 
   it('does not issue repeated reconciliation requests during cooldown', async () => {
     const { star, discoverAllNodes } = createStar(['gateway']);
-    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, reconciliationCooldownMs: 60_000 });
+    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, reconciliationCooldownMs: 60_000, registryStalenessMs: 0 });
 
     await watchdog.tick();
     await watchdog.tick();
@@ -63,6 +63,7 @@ describe('gateway registry readiness', () => {
       requiredServices,
       criticalServices: requiredServices,
       reconciliationCooldownMs: 60_000,
+      registryStalenessMs: 0,
     });
 
     await expect(watchdog.tick()).resolves.toMatchObject({ ready: true, status: 'healthy' });
@@ -74,6 +75,30 @@ describe('gateway registry readiness', () => {
       missingCriticalServices: ['metrics'],
       consecutiveMissingObservations: 1,
     });
+  });
+
+  it('does not degrade readiness when a previously seen critical service is briefly absent from Kafka discovery', async () => {
+    const { star, list } = createStar(['gateway', 'metrics']);
+    let now = 0;
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: requiredServices,
+      registryStalenessMs: 45_000,
+      now: () => now,
+    });
+
+    await expect(watchdog.tick()).resolves.toMatchObject({ ready: true, missingCriticalServices: [] });
+    list.mockReturnValue([{ name: 'gateway' }]);
+    now = 30_000;
+
+    await expect(watchdog.tick()).resolves.toMatchObject({
+      ready: true,
+      missingServices: ['metrics'],
+      missingCriticalServices: [],
+    });
+    now = 45_000;
+
+    await expect(watchdog.inspect()).resolves.toMatchObject({ missingCriticalServices: ['metrics'] });
   });
 
   it('does not make optional service loss a gateway readiness failure', async () => {
@@ -99,7 +124,7 @@ describe('gateway registry readiness', () => {
           resolveDiscovery = () => resolve(undefined);
         }),
     );
-    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, confirmationThreshold: 1 });
+    const watchdog = new GatewayRegistryWatchdog(star, { requiredServices, confirmationThreshold: 1, registryStalenessMs: 0 });
 
     const first = watchdog.tick();
     const second = watchdog.tick();
@@ -108,6 +133,78 @@ describe('gateway registry readiness', () => {
     resolveDiscovery?.();
     await Promise.all([first, second]);
     expect(discoverAllNodes).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts a connected gateway only after the same non-critical registry gap survives repeated successful discovery', async () => {
+    const { star } = createStar(['gateway']);
+    const exitProcess = jest.fn();
+    let now = 0;
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: ['gateway'],
+      confirmationThreshold: 1,
+      reconciliationCooldownMs: 1,
+      registryStalenessMs: 0,
+      registryRecoveryExitThreshold: 2,
+      now: () => now,
+      exitProcess,
+    });
+
+    await watchdog.tick();
+    expect(exitProcess).not.toHaveBeenCalled();
+    now += 1;
+    await watchdog.tick();
+
+    expect(exitProcess).toHaveBeenCalledWith(1);
+    expect(watchdog.getReadiness()).toMatchObject({ persistentMissingReconciliations: 2, missingServices: ['metrics'] });
+  });
+
+  it('never restarts gateway for a persistent critical-service outage', async () => {
+    const { star } = createStar(['gateway']);
+    const exitProcess = jest.fn();
+    let now = 0;
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: requiredServices,
+      confirmationThreshold: 1,
+      reconciliationCooldownMs: 1,
+      registryStalenessMs: 0,
+      registryRecoveryExitThreshold: 1,
+      now: () => now,
+      exitProcess,
+    });
+
+    await watchdog.tick();
+    now += 1;
+    await watchdog.tick();
+
+    expect(exitProcess).not.toHaveBeenCalled();
+    expect(watchdog.getReadiness()).toMatchObject({ persistentMissingReconciliations: 0, missingCriticalServices: ['metrics'] });
+  });
+
+  it('clears persistent-registry recovery state as soon as discovery sees the missing service again', async () => {
+    const { star, list } = createStar(['gateway']);
+    const exitProcess = jest.fn();
+    let now = 0;
+    const watchdog = new GatewayRegistryWatchdog(star, {
+      requiredServices,
+      criticalServices: ['gateway'],
+      confirmationThreshold: 1,
+      reconciliationCooldownMs: 1,
+      registryStalenessMs: 0,
+      registryRecoveryExitThreshold: 2,
+      now: () => now,
+      exitProcess,
+    });
+
+    await watchdog.tick();
+    expect(watchdog.getReadiness()).toMatchObject({ persistentMissingReconciliations: 1 });
+    list.mockReturnValue([{ name: 'gateway' }, { name: 'metrics' }]);
+    now += 1;
+    await watchdog.tick();
+
+    expect(exitProcess).not.toHaveBeenCalled();
+    expect(watchdog.getReadiness()).toMatchObject({ persistentMissingReconciliations: 0, missingServices: [] });
   });
 
   it('does not treat a registry read failure as a successfully reconciled registry', async () => {

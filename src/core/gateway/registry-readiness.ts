@@ -19,6 +19,7 @@ export const DEFAULT_GATEWAY_REQUIRED_SERVICES = [
   'trails-durable-trips',
   'trails-durable-site',
   'trails-durable-site-public',
+  'trails-durable-sales',
   'user',
   'video',
 ] as const;
@@ -37,6 +38,7 @@ export const DEFAULT_GATEWAY_CRITICAL_SERVICES = [
   'trails-durable-trips',
   'trails-durable-site',
   'trails-durable-site-public',
+  'trails-durable-sales',
   'user',
 ] as const;
 
@@ -56,6 +58,7 @@ export type GatewayRegistryReadiness = {
   status: 'healthy' | 'degraded' | 'reconciling';
   consecutiveMissingObservations: number;
   reconciliationAttempts: number;
+  persistentMissingReconciliations: number;
   lastReconciliationAt: number | null;
   lastError: string | null;
 };
@@ -66,6 +69,7 @@ export type GatewayRegistryDiagnosticEvent = {
     | 'reconciliation_requested'
     | 'reconciliation_succeeded'
     | 'reconciliation_failed'
+    | 'registry_self_heal_exit'
     | 'node_reconnected'
     | 'node_disconnected'
     | 'transporter_connected'
@@ -88,12 +92,17 @@ export type GatewayRegistryWatchdogOptions = {
   criticalServices?: readonly string[];
   confirmationThreshold?: number;
   reconciliationCooldownMs?: number;
+  registryStalenessMs?: number;
+  registryRecoveryExitThreshold?: number;
+  exitProcess?: (code: number) => void;
   now?: () => number;
   onDiagnostic?: (event: GatewayRegistryDiagnosticEvent) => void;
 };
 
 const DEFAULT_CONFIRMATION_THRESHOLD = 2;
 const DEFAULT_RECONCILIATION_COOLDOWN_MS = 30_000;
+const DEFAULT_REGISTRY_STALENESS_MS = 45_000;
+const DEFAULT_REGISTRY_RECOVERY_EXIT_THRESHOLD = 4;
 
 const serviceNamesFromEnvironment = (value: string | undefined, defaults: readonly string[]): readonly string[] => {
   if (!value?.trim()) return defaults;
@@ -124,7 +133,7 @@ const toErrorMessage = (error: unknown) => (error instanceof Error ? error.messa
 export class GatewayRegistryWatchdog {
   private consecutiveMissingObservations = 0;
   private reconciliationAttempts = 0;
-  private reconciliationInFlight: Promise<void> | null = null;
+  private reconciliationInFlight: Promise<boolean> | null = null;
   private tickInFlight: Promise<GatewayRegistryReadiness> | null = null;
   private lastReconciliationAt: number | null = null;
   private lastError: string | null = null;
@@ -134,8 +143,15 @@ export class GatewayRegistryWatchdog {
   private readonly criticalServices: readonly string[];
   private readonly confirmationThreshold: number;
   private readonly reconciliationCooldownMs: number;
+  private readonly registryStalenessMs: number;
+  private readonly registryRecoveryExitThreshold: number;
+  private readonly exitProcess: (code: number) => void;
   private readonly now: () => number;
   private readonly onDiagnostic?: (event: GatewayRegistryDiagnosticEvent) => void;
+  private readonly lastSeenAtByService = new Map<string, number>();
+  private persistentMissingSignature: string | null = null;
+  private persistentMissingReconciliations = 0;
+  private selfHealing = false;
 
   constructor(private readonly star: Starlight, options: GatewayRegistryWatchdogOptions = {}) {
     this.requiredServices = options.requiredServices || requiredGatewayServicesFromEnvironment();
@@ -143,6 +159,9 @@ export class GatewayRegistryWatchdog {
     this.criticalServices = criticalServices.filter((service) => this.requiredServices.includes(service));
     this.confirmationThreshold = options.confirmationThreshold ?? DEFAULT_CONFIRMATION_THRESHOLD;
     this.reconciliationCooldownMs = options.reconciliationCooldownMs ?? DEFAULT_RECONCILIATION_COOLDOWN_MS;
+    this.registryStalenessMs = options.registryStalenessMs ?? DEFAULT_REGISTRY_STALENESS_MS;
+    this.registryRecoveryExitThreshold = options.registryRecoveryExitThreshold ?? DEFAULT_REGISTRY_RECOVERY_EXIT_THRESHOLD;
+    this.exitProcess = options.exitProcess ?? process.exit.bind(process);
     this.now = options.now || Date.now;
     this.onDiagnostic = options.onDiagnostic;
     if (!Number.isInteger(this.confirmationThreshold) || this.confirmationThreshold < 1) {
@@ -150,6 +169,12 @@ export class GatewayRegistryWatchdog {
     }
     if (!Number.isInteger(this.reconciliationCooldownMs) || this.reconciliationCooldownMs < 1) {
       throw new Error('reconciliationCooldownMs must be a positive integer');
+    }
+    if (!Number.isInteger(this.registryStalenessMs) || this.registryStalenessMs < 0) {
+      throw new Error('registryStalenessMs must be a non-negative integer');
+    }
+    if (!Number.isInteger(this.registryRecoveryExitThreshold) || this.registryRecoveryExitThreshold < 1) {
+      throw new Error('registryRecoveryExitThreshold must be a positive integer');
     }
     this.latestReadiness = this.snapshot(this.now(), false, 0, [...this.requiredServices], [...this.criticalServices], false);
   }
@@ -175,7 +200,12 @@ export class GatewayRegistryWatchdog {
 
       const registered = new Set(services);
       const missingServices = this.requiredServices.filter((service) => !registered.has(service));
-      const missingCriticalServices = this.criticalServices.filter((service) => !registered.has(service));
+      for (const service of registered) this.lastSeenAtByService.set(service, checkedAt);
+      const missingCriticalServices = this.criticalServices.filter((service) => {
+        if (registered.has(service)) return false;
+        const lastSeenAt = this.lastSeenAtByService.get(service);
+        return lastSeenAt === undefined || checkedAt - lastSeenAt >= this.registryStalenessMs;
+      });
       this.lastError = null;
       return this.snapshot(checkedAt, true, services.length, missingServices, missingCriticalServices, transportConnected);
     } catch (error) {
@@ -196,7 +226,12 @@ export class GatewayRegistryWatchdog {
     const readiness = await this.inspect();
     if (!readiness.registryReadable || readiness.missingServices.length === 0) {
       this.consecutiveMissingObservations = 0;
-      return this.store(readiness);
+      this.clearPersistentMissingReconciliations();
+      return this.store({
+        ...readiness,
+        consecutiveMissingObservations: this.consecutiveMissingObservations,
+        persistentMissingReconciliations: this.persistentMissingReconciliations,
+      });
     }
 
     this.consecutiveMissingObservations += 1;
@@ -204,8 +239,17 @@ export class GatewayRegistryWatchdog {
       return this.store(this.withUnconfirmedState(readiness));
     }
 
-    await this.reconcileIfEligible(readiness.missingServices);
-    return this.store(await this.inspect());
+    const reconciled = await this.reconcileIfEligible(readiness.missingServices);
+    const afterReconciliation = await this.inspect();
+    if (!afterReconciliation.registryReadable || afterReconciliation.missingServices.length === 0) {
+      this.clearPersistentMissingReconciliations();
+    } else if (reconciled) {
+      this.observePersistentMissingReconciliations(afterReconciliation);
+    }
+    return this.store({
+      ...afterReconciliation,
+      persistentMissingReconciliations: this.persistentMissingReconciliations,
+    });
   }
 
   private store(readiness: GatewayRegistryReadiness): GatewayRegistryReadiness {
@@ -240,6 +284,7 @@ export class GatewayRegistryWatchdog {
         status: 'healthy',
         consecutiveMissingObservations: this.consecutiveMissingObservations,
         reconciliationAttempts: this.reconciliationAttempts,
+        persistentMissingReconciliations: this.persistentMissingReconciliations,
         lastReconciliationAt: this.lastReconciliationAt,
         lastError: this.lastError,
       };
@@ -251,6 +296,7 @@ export class GatewayRegistryWatchdog {
       status: this.latestReadiness.ready && readiness.registryReadable && readiness.transportConnected ? 'healthy' : readiness.status,
       consecutiveMissingObservations: this.consecutiveMissingObservations,
       reconciliationAttempts: this.reconciliationAttempts,
+      persistentMissingReconciliations: this.persistentMissingReconciliations,
       lastReconciliationAt: this.lastReconciliationAt,
       lastError: this.lastError,
     };
@@ -277,20 +323,63 @@ export class GatewayRegistryWatchdog {
       status: reconciling ? 'reconciling' : ready ? 'healthy' : 'degraded',
       consecutiveMissingObservations: this.consecutiveMissingObservations,
       reconciliationAttempts: this.reconciliationAttempts,
+      persistentMissingReconciliations: this.persistentMissingReconciliations,
       lastReconciliationAt: this.lastReconciliationAt,
       lastError: this.lastError,
     };
   }
 
-  private async reconcileIfEligible(missingServices: string[]): Promise<void> {
+  private clearPersistentMissingReconciliations(): void {
+    this.persistentMissingSignature = null;
+    this.persistentMissingReconciliations = 0;
+  }
+
+  private observePersistentMissingReconciliations(readiness: GatewayRegistryReadiness): void {
+    // A missing core service is a downstream incident. Restarting Gateway cannot repair it
+    // and would turn the incident into a restart loop. This escape hatch is only for a
+    // connected Gateway whose own non-critical directory view has remained stale.
+    if (!readiness.transportConnected || readiness.missingCriticalServices.length > 0 || this.selfHealing) {
+      this.clearPersistentMissingReconciliations();
+      return;
+    }
+
+    const signature = readiness.missingServices.slice().sort().join(',');
+    if (this.persistentMissingSignature !== signature) {
+      this.persistentMissingSignature = signature;
+      this.persistentMissingReconciliations = 0;
+    }
+    this.persistentMissingReconciliations += 1;
+    if (this.persistentMissingReconciliations < this.registryRecoveryExitThreshold) return;
+
+    this.selfHealing = true;
+    this.star.logger?.warn('gateway.registry-self-heal-terminal-failure', {
+      missingServices: readiness.missingServices,
+      successfulReconciliations: this.persistentMissingReconciliations,
+      threshold: this.registryRecoveryExitThreshold,
+      action: 'exit_for_compose_restart',
+    });
+    this.onDiagnostic?.({
+      kind: 'registry_self_heal_exit',
+      occurredAt: this.now(),
+      outcome: 'failure',
+      reason: 'persistent_noncritical_registry_staleness',
+      service: 'gateway',
+      missingServiceCount: readiness.missingServices.length,
+      registeredServiceCount: readiness.registeredServiceCount,
+      transportConnected: true,
+    });
+    this.exitProcess(1);
+  }
+
+  private async reconcileIfEligible(missingServices: string[]): Promise<boolean> {
     if (this.reconciliationInFlight) return this.reconciliationInFlight;
     const now = this.now();
-    if (this.lastReconciliationAt !== null && now - this.lastReconciliationAt < this.reconciliationCooldownMs) return;
+    if (this.lastReconciliationAt !== null && now - this.lastReconciliationAt < this.reconciliationCooldownMs) return false;
 
     const discoverer = this.star.registry?.discoverer as RegistryDiscoverer | undefined;
     if (!discoverer?.discoverAllNodes) {
       this.lastError = 'Gateway registry discoverer is unavailable';
-      return;
+      return false;
     }
 
     this.lastReconciliationAt = now;
@@ -319,6 +408,7 @@ export class GatewayRegistryWatchdog {
           missingServiceCount: missingServices.length,
           durationMs: this.now() - startedAt,
         });
+        return true;
       })
       .catch((error) => {
         this.lastError = toErrorMessage(error);
@@ -335,6 +425,7 @@ export class GatewayRegistryWatchdog {
           missingServiceCount: missingServices.length,
           durationMs: this.now() - startedAt,
         });
+        return false;
       })
       .finally(() => {
         this.reconciliationInFlight = null;

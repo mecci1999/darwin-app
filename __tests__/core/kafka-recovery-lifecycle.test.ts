@@ -86,4 +86,103 @@ describe('Darwin Kafka recovery lifecycle bridge', () => {
 
     bridge.stop();
   });
+
+  it('periodically reannounces an otherwise healthy local service catalog without a discovery flood', async () => {
+    jest.useFakeTimers();
+    const localBus = new EventEmitter();
+    const sendLocalNodeInfo = jest.fn(async () => undefined);
+    const discoverAllNodes = jest.fn(async () => undefined);
+    const star = {
+      started: true,
+      stopping: false,
+      nodeID: 'metrics-production-metrics',
+      services: [{ fullName: 'metrics', _serviceSpecification: { name: 'metrics', fullName: 'metrics' } }],
+      localBus,
+      registry: {
+        nodes: { localNode: { id: 'metrics-production-metrics', available: true } },
+        services: { list: jest.fn(() => [{ fullName: 'metrics' }]) },
+        discoverer: { sendLocalNodeInfo, discoverAllNodes },
+      },
+      call: jest.fn(async () => undefined),
+      stop: jest.fn(async () => undefined),
+      logger: { warn: jest.fn() },
+    } as unknown as Starlight;
+    const bridge = installDarwinKafkaRecoveryLifecycle(star);
+
+    jest.advanceTimersByTime(30_000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendLocalNodeInfo).toHaveBeenCalledTimes(1);
+    expect(discoverAllNodes).not.toHaveBeenCalled();
+    bridge.stop();
+    jest.useRealTimers();
+  });
+
+  it('terminates a recovered process when Kafka cannot complete a self PING/PONG round trip', async () => {
+    const localBus = new EventEmitter();
+    const exitProcess = jest.fn();
+    const star = {
+      started: true,
+      stopping: false,
+      nodeID: 'metrics-production-metrics',
+      localBus,
+      call: jest.fn(async () => undefined),
+      stop: jest.fn(async () => undefined),
+      logger: { warn: jest.fn(), info: jest.fn() },
+    } as unknown as Starlight;
+    const bridge = installDarwinKafkaRecoveryLifecycle(star, {
+      livenessEnabled: true,
+      recoveryProbeDelayMs: 0,
+      recoveryProbeAttempts: 1,
+      watchdogInitialDelayMs: 60_000,
+      transportProbe: jest.fn(async () => { throw new Error('request timed out'); }),
+      exitProcess,
+    });
+
+    localBus.emit('$transporter.consumer.recovery.succeeded', lifecyclePayload);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(exitProcess).toHaveBeenCalledWith(1);
+    bridge.stop();
+  });
+
+  it('keeps a recovered process running after an internal health RPC completes through Kafka', async () => {
+    const localBus = new EventEmitter();
+    const exitProcess = jest.fn();
+    const endpoint = { id: 'metrics-production-metrics' };
+    const context: { nodeID?: string } = {};
+    const request = jest.fn(async () => ({ status: 'healthy' }));
+    const star = {
+      started: true,
+      stopping: false,
+      nodeID: 'metrics-production-metrics',
+      localBus,
+      registry: { getActionEndpointByNodeId: jest.fn(() => endpoint) },
+      ContextFactory: { create: jest.fn(() => context) },
+      transit: { request },
+      call: jest.fn(async () => undefined),
+      stop: jest.fn(async () => undefined),
+      logger: { warn: jest.fn(), info: jest.fn() },
+    } as unknown as Starlight;
+    const bridge = installDarwinKafkaRecoveryLifecycle(star, {
+      livenessEnabled: true,
+      recoveryProbeDelayMs: 0,
+      recoveryProbeAttempts: 1,
+      watchdogInitialDelayMs: 60_000,
+      exitProcess,
+    });
+
+    localBus.emit('$transporter.consumer.recovery.succeeded', lifecyclePayload);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(exitProcess).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith(context);
+    expect(context.nodeID).toBe('metrics-production-metrics');
+    expect((star as unknown as { logger: { info: jest.Mock } }).logger.info).toHaveBeenCalledWith(
+      'kafka.transport-liveness-verified',
+      expect.objectContaining({ reason: 'consumer_recovered' }),
+    );
+    bridge.stop();
+  });
 });

@@ -67,6 +67,7 @@ import { createSequelizeDurableLocationCardModels, MySqlDurableLocationCardRepos
 import { createSequelizeShootingLocationModels, MySqlShootingLocationRepository } from './repository/mysqlShootingLocation';
 import { MySqlDurableAnalyticsRepository } from './repository/mysqlDurableAnalytics';
 import { MySqlDurableTripRegistrationRepository } from './repository/mysqlDurableTripRegistration';
+import { MySqlDurableTripPaymentRepository } from './repository/mysqlDurableTripPayment';
 import { TrailsState } from './types';
 
 export const durableCategorySyncModelKeys = [
@@ -264,6 +265,7 @@ export class DurableCategorySyncLifecycle {
       const analyticsSecret = process.env.TRAILS_ANALYTICS_HMAC_SECRET?.trim();
       state.durableAnalyticsStore = analyticsSecret ? new MySqlDurableAnalyticsRepository(connection, analyticsSecret) : undefined;
       state.durableTripRegistrationStore = new MySqlDurableTripRegistrationRepository(connection);
+      state.durableTripPaymentStore = new MySqlDurableTripPaymentRepository(connection);
       this.connection = connection;
     } catch (error: unknown) {
       state.durablePortfolioCategorySync = undefined;
@@ -288,6 +290,7 @@ export class DurableCategorySyncLifecycle {
       state.shootingLocationStore = undefined;
       state.durableAnalyticsStore = undefined;
       state.durableTripRegistrationStore = undefined;
+      state.durableTripPaymentStore = undefined;
       try {
         await connection.close();
       } catch {
@@ -325,6 +328,7 @@ export class DurableCategorySyncLifecycle {
       state.shootingLocationStore = undefined;
       state.durableAnalyticsStore = undefined;
       state.durableTripRegistrationStore = undefined;
+      state.durableTripPaymentStore = undefined;
     }
   }
 }

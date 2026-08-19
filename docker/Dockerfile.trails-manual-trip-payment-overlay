@@ -1,0 +1,15 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep the verified Trails release intact while adding the private, creator-only
+# manual payment queue for guided trips. No public-site or payment-provider code
+# is included in this layer.
+COPY --chown=node:node dist/apps/trails/actions/index.js /app/dist/apps/trails/actions/index.js
+COPY --chown=node:node dist/apps/trails/durable-category-sync-lifecycle.js /app/dist/apps/trails/durable-category-sync-lifecycle.js
+COPY --chown=node:node dist/apps/trails/repository/mysqlDurableTripPayment.js /app/dist/apps/trails/repository/mysqlDurableTripPayment.js
+COPY --chown=node:node dist/apps/trails/repository/mysqlDurableTripRegistration.js /app/dist/apps/trails/repository/mysqlDurableTripRegistration.js
+COPY --chown=node:node dist/apps/trails/repository/mysqlDurableMediaCommerce.js /app/dist/apps/trails/repository/mysqlDurableMediaCommerce.js
+COPY --chown=node:node scripts/migrations.js /app/scripts/migrations.js
+# The payment actions use the dedicated durable-sales shard. Keep this shared
+# routing contract in sync with the action bundle in the overlay image.
+COPY --chown=node:node trails-contract/index.js /shared/trails-contract/index.js

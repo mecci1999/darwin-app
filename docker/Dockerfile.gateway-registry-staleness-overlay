@@ -1,0 +1,9 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Gateway-only layer: keep the current business release while updating the
+# Kafka catalog staleness guard and its configured terminal recovery threshold.
+COPY --chown=node:node dist/core/gateway/index.js /app/dist/core/gateway/index.js
+COPY --chown=node:node dist/core/gateway/registry-readiness.js /app/dist/core/gateway/registry-readiness.js
+# Gateway remaps external Trails requests through the same durable shard map.
+COPY --chown=node:node trails-contract/index.js /shared/trails-contract/index.js

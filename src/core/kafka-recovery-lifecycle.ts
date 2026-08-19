@@ -48,10 +48,30 @@ export type KafkaRecoveryLifecycleReport = {
 
 export type DarwinKafkaRecoveryLifecycle = { stop(): void };
 
+export type KafkaRecoveryLifecycleOptions = {
+  livenessEnabled?: boolean;
+  recoveryProbeDelayMs?: number;
+  recoveryProbeAttempts?: number;
+  recoveryProbeTimeoutMs?: number;
+  recoveryProbeRetryDelayMs?: number;
+  watchdogInitialDelayMs?: number;
+  watchdogIntervalMs?: number;
+  watchdogFailureThreshold?: number;
+  transportProbe?: () => Promise<unknown>;
+  exitProcess?: (code: number) => void;
+};
+
 const MAX_INSTANCE_ID_LENGTH = 160;
 const MAX_SERVICE_NAME_LENGTH = 96;
 const MAX_REASON_LENGTH = 64;
 const REGISTRY_RECONCILIATION_INTERVAL_MS = 30_000;
+const RECOVERY_PROBE_DELAY_MS = 4_000;
+const RECOVERY_PROBE_ATTEMPTS = 3;
+const RECOVERY_PROBE_TIMEOUT_MS = 5_000;
+const RECOVERY_PROBE_RETRY_DELAY_MS = 2_000;
+const TRANSPORT_WATCHDOG_INITIAL_DELAY_MS = 60_000;
+const TRANSPORT_WATCHDOG_INTERVAL_MS = 60_000;
+const TRANSPORT_WATCHDOG_FAILURE_THRESHOLD = 3;
 const EVENT_KINDS: Record<string, KafkaRecoveryLifecycleKind> = {
   '$transporter.consumer.recovery.scheduled': 'scheduled',
   '$transporter.consumer.recovery.succeeded': 'succeeded',
@@ -111,12 +131,101 @@ export const sanitizeKafkaRecoveryLifecycleReport = (kind: KafkaRecoveryLifecycl
   return report;
 };
 
-export const installDarwinKafkaRecoveryLifecycle = (star: Starlight): DarwinKafkaRecoveryLifecycle => {
+export const installDarwinKafkaRecoveryLifecycle = (
+  star: Starlight,
+  options: KafkaRecoveryLifecycleOptions = {},
+): DarwinKafkaRecoveryLifecycle => {
   const localBus = star.localBus as LocalBus | undefined;
   const listeners: Array<{ eventName: string; listener: (payload: unknown) => void }> = [];
   const registry = star.registry as unknown as LocalRegistry | undefined;
+  const livenessEnabled = options.livenessEnabled ?? process.env.NODE_ENV === 'production';
+  const recoveryProbeDelayMs = options.recoveryProbeDelayMs ?? RECOVERY_PROBE_DELAY_MS;
+  const recoveryProbeAttempts = options.recoveryProbeAttempts ?? RECOVERY_PROBE_ATTEMPTS;
+  const recoveryProbeTimeoutMs = options.recoveryProbeTimeoutMs ?? RECOVERY_PROBE_TIMEOUT_MS;
+  const recoveryProbeRetryDelayMs = options.recoveryProbeRetryDelayMs ?? RECOVERY_PROBE_RETRY_DELAY_MS;
+  const watchdogInitialDelayMs = options.watchdogInitialDelayMs ?? TRANSPORT_WATCHDOG_INITIAL_DELAY_MS;
+  const watchdogIntervalMs = options.watchdogIntervalMs ?? TRANSPORT_WATCHDOG_INTERVAL_MS;
+  const watchdogFailureThreshold = options.watchdogFailureThreshold ?? TRANSPORT_WATCHDOG_FAILURE_THRESHOLD;
   let reconciliationInFlight: Promise<void> | null = null;
+  let livenessProbeInFlight: Promise<boolean> | null = null;
+  let consecutiveLivenessFailures = 0;
+  let terminating = false;
   let stopped = false;
+
+  const wait = (delay: number) => new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, delay);
+    timer.unref();
+  });
+
+  const terminateUnhealthyProcess = (reason: string) => {
+    if (stopped || terminating) return;
+    terminating = true;
+    star.logger?.warn('kafka.transport-liveness-terminal-failure', {
+      reason,
+      nodeID: star.nodeID,
+      action: 'exit_for_compose_restart',
+    });
+    stop();
+    if (options.exitProcess) options.exitProcess(1);
+    else process.exit(1);
+  };
+
+  // Node-Universe discards self-addressed PING packets. A forced remote call
+  // to this node's internal health action instead traverses Kafka as REQ/RES,
+  // proving both consumer ingress and response egress after recovery.
+  const verifyTransportLiveness = (reason: string, attempts: number): Promise<boolean> => {
+    if (!livenessEnabled || stopped || star.stopping || star.started !== true) return Promise.resolve(true);
+    if (livenessProbeInFlight) return livenessProbeInFlight;
+
+    livenessProbeInFlight = Promise.resolve()
+      .then(async () => {
+        const probe = options.transportProbe || (async () => {
+          const transportStar = star as unknown as {
+            nodeID?: string;
+            registry?: { getActionEndpointByNodeId?: (action: string, nodeID: string) => unknown };
+            ContextFactory?: { create?: (star: unknown, endpoint: unknown, params: unknown, options: unknown) => { nodeID?: string } };
+            transit?: { request?: (context: unknown) => Promise<unknown> };
+          };
+          const nodeID = String(transportStar.nodeID || '');
+          const endpoint = transportStar.registry?.getActionEndpointByNodeId?.('$node.health', nodeID);
+          const context = transportStar.ContextFactory?.create?.(star, endpoint, {}, {
+            timeout: recoveryProbeTimeoutMs,
+            meta: { internal: true, system: 'darwin-kafka-liveness' },
+          });
+          if (!nodeID || !endpoint || !context || !transportStar.transit?.request) {
+            throw new Error('Kafka transport liveness probe is unavailable');
+          }
+          context.nodeID = nodeID;
+          return transportStar.transit.request(context);
+        });
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          try {
+            await probe();
+            consecutiveLivenessFailures = 0;
+            star.logger?.info('kafka.transport-liveness-verified', {
+              reason,
+              nodeID: star.nodeID,
+              attempt,
+            });
+            return true;
+          } catch (error) {
+            star.logger?.warn('kafka.transport-liveness-probe-failed', {
+              reason,
+              nodeID: star.nodeID,
+              attempt,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          if (attempt < attempts) await wait(recoveryProbeRetryDelayMs);
+        }
+        return false;
+      })
+      .finally(() => {
+        livenessProbeInFlight = null;
+      });
+
+    return livenessProbeInFlight;
+  };
 
   const reconcileLocalRegistration = (reason: string): Promise<void> => {
     if (stopped || star.stopping || star.started !== true) return Promise.resolve();
@@ -149,15 +258,20 @@ export const installDarwinKafkaRecoveryLifecycle = (star: Starlight): DarwinKafk
           star.registerLocalService(service._serviceSpecification as never);
         }
 
-        if (!nodeReactivated && missing.length === 0) return;
-
+        const restoredLocalRegistration = nodeReactivated || missing.length > 0;
+        // Node-Universe's remote registry is per-process. Reannounce this
+        // node's complete service catalog periodically so a peer that missed
+        // a transient INFO packet cannot retain a permanently stale view.
+        if (!restoredLocalRegistration && reason !== 'watchdog') return;
         await registry?.discoverer?.sendLocalNodeInfo?.();
-        await registry?.discoverer?.discoverAllNodes?.();
-        star.logger?.warn('registry.local-registration-reconciled', {
-          reason,
-          nodeReactivated,
-          restoredServices: missing.map((service) => service.fullName),
-        });
+        if (restoredLocalRegistration) {
+          await registry?.discoverer?.discoverAllNodes?.();
+          star.logger?.warn('registry.local-registration-reconciled', {
+            reason,
+            nodeReactivated,
+            restoredServices: missing.map((service) => service.fullName),
+          });
+        }
       })
       .catch((error) => {
         star.logger?.warn('registry.local-registration-reconciliation-failed', {
@@ -177,10 +291,38 @@ export const installDarwinKafkaRecoveryLifecycle = (star: Starlight): DarwinKafk
   }, REGISTRY_RECONCILIATION_INTERVAL_MS);
   watchdog.unref();
 
+  let transportWatchdog: NodeJS.Timeout | null = null;
+  const startTransportWatchdog = () => {
+    if (!livenessEnabled || stopped || transportWatchdog) return;
+    const tick = () => {
+      void verifyTransportLiveness('watchdog', 1).then((healthy) => {
+        if (healthy) return;
+        consecutiveLivenessFailures += 1;
+        star.logger?.warn('kafka.transport-liveness-watchdog-failed', {
+          nodeID: star.nodeID,
+          consecutiveFailures: consecutiveLivenessFailures,
+          failureThreshold: watchdogFailureThreshold,
+        });
+        if (consecutiveLivenessFailures >= watchdogFailureThreshold) {
+          terminateUnhealthyProcess('watchdog_probe_threshold_exceeded');
+        }
+      });
+    };
+    const initial = setTimeout(() => {
+      tick();
+      transportWatchdog = setInterval(tick, watchdogIntervalMs);
+      transportWatchdog.unref();
+    }, watchdogInitialDelayMs);
+    initial.unref();
+    transportWatchdog = initial;
+  };
+
   const stop = () => {
     if (stopped) return;
     stopped = true;
     clearInterval(watchdog);
+    if (transportWatchdog) clearTimeout(transportWatchdog);
+    transportWatchdog = null;
     for (const { eventName, listener } of listeners) {
       if (localBus?.off) localBus.off(eventName, listener);
       else localBus?.removeListener?.(eventName, listener);
@@ -204,7 +346,16 @@ export const installDarwinKafkaRecoveryLifecycle = (star: Starlight): DarwinKafk
           delay: report.delay || 0,
         });
       }
-      if (report.kind === 'succeeded') void reconcileLocalRegistration('consumer_recovered');
+      if (report.kind === 'succeeded') {
+        void reconcileLocalRegistration('consumer_recovered');
+        if (livenessEnabled) {
+          void wait(recoveryProbeDelayMs)
+            .then(() => verifyTransportLiveness('consumer_recovered', recoveryProbeAttempts))
+            .then((healthy) => {
+              if (!healthy) terminateUnhealthyProcess('consumer_recovered_but_ping_pong_failed');
+            });
+        }
+      }
       void star.call('gateway.kafkaRecovery.report', report, {
         meta: { internal: true, system: 'darwin-kafka-recovery' },
       }).catch(() => {
@@ -228,6 +379,7 @@ export const installDarwinKafkaRecoveryLifecycle = (star: Starlight): DarwinKafk
   };
   const reconcileAfterStartup = () => {
     void reconcileLocalRegistration('star_started');
+    startTransportWatchdog();
   };
   if (localBus?.on) {
     localBus.on('$node.disconnected', reconcileOnLocalNodeLoss);

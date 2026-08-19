@@ -1,0 +1,8 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep the current production release intact while adding the version-checked
+# catalog-media metadata update action and its durable repository operation.
+COPY --chown=node:node dist/apps/trails/actions/index.js /app/dist/apps/trails/actions/index.js
+COPY --chown=node:node dist/apps/trails/repository/mysqlDurableMediaCommerce.js /app/dist/apps/trails/repository/mysqlDurableMediaCommerce.js
+COPY --chown=node:node trails-contract/index.js /shared/trails-contract/index.js

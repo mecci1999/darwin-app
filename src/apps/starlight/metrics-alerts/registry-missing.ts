@@ -21,6 +21,7 @@ export const MANAGED_SYSTEM_SERVICES = [
   'trails-durable-trips',
   'trails-durable-site',
   'trails-durable-site-public',
+  'trails-durable-sales',
   'video',
 ] as const;
 export type ManagedSystemService = typeof MANAGED_SYSTEM_SERVICES[number];

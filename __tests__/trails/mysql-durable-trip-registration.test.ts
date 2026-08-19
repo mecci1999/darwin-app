@@ -50,14 +50,14 @@ describe('durable v2 trip registrations', () => {
   it('returns only aggregate status counts to the creator', async () => {
     const { store } = setup(); await store.submit(participant, { mutationId: 'registration_mutation_1', tripId: 'trip_iceland_2027', requiredAcknowledgement: true, releaseAccepted: true, releaseVersion: 'release_2026_08' });
     const summary = await store.summary(owner, { tripId: 'trip_iceland_2027' });
-    expect(summary).toEqual({ tripId: 'trip_iceland_2027', capacity: 0, confirmed: 0, remaining: 0, counts: { submitted: 1, waitlisted: 0, confirmed: 0, rejected: 0, cancelled: 0 } }); expect(JSON.stringify(summary)).not.toContain('participant-a');
+    expect(summary).toEqual({ tripId: 'trip_iceland_2027', capacity: 0, confirmed: 0, remaining: 0, counts: { submitted: 1, waitlisted: 0, 'deposit-pending': 0, 'balance-pending': 0, confirmed: 0, rejected: 0, cancelled: 0 } }); expect(JSON.stringify(summary)).not.toContain('participant-a');
   });
 
-  it('requires a private capacity before confirmation and rejects confirmation beyond that capacity', async () => {
+  it('requires the payment workflow rather than allowing direct confirmation', async () => {
     const { store } = setup(); const first = await store.submit(participant, { mutationId: 'registration_mutation_1', tripId: 'trip_iceland_2027', requiredAcknowledgement: true, releaseAccepted: true, releaseVersion: 'release_2026_08' });
-    await expect(store.transition(owner, { id: first.id, status: 'confirmed', resourceVersion: '1', mutationId: 'confirm_without_capacity' })).rejects.toThrow('请先配置行摄名额');
+    await expect(store.transition(owner, { id: first.id, status: 'confirmed', resourceVersion: '1', mutationId: 'confirm_without_capacity' })).rejects.toThrow('审核通过必须经定金流程');
     await expect(store.configureCapacity(owner, { tripId: 'trip_iceland_2027', capacity: 1, mutationId: 'capacity_mutation_1' })).resolves.toEqual({ tripId: 'trip_iceland_2027', capacity: 1 });
     await expect(store.configureCapacity(owner, { tripId: 'trip_iceland_2027', capacity: 1, mutationId: 'capacity_mutation_1' })).resolves.toEqual({ tripId: 'trip_iceland_2027', capacity: 1 });
-    await expect(store.transition(owner, { id: first.id, status: 'confirmed', resourceVersion: '1', mutationId: 'confirm_first' })).resolves.toMatchObject({ status: 'confirmed' });
+    await expect(store.transition(owner, { id: first.id, status: 'confirmed', resourceVersion: '1', mutationId: 'confirm_first' })).rejects.toThrow('审核通过必须经定金流程');
   });
 });

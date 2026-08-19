@@ -1,0 +1,6 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep each service's existing release intact while replacing the shared
+# Kafka recovery lifecycle compiled from the verified source tree.
+COPY --chown=node:node dist/core/kafka-recovery-lifecycle.js /app/dist/core/kafka-recovery-lifecycle.js

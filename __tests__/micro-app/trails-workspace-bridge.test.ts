@@ -157,6 +157,7 @@ describe('Trails Workspace micro-app bridge', () => {
     ['media-assets.workspace-picker', 'trails.v2.media-assets.workspace-picker', 'trails.v2.media-assets.workspace-picker', {}],
     ['catalog.workspace', 'trails.v2.commerce.catalog.workspace', 'trails.v2.commerce.catalog.workspace', {}],
     ['media.create', 'trails.v2.commerce.catalog.media.create', 'trails.v2.commerce.catalog.media.create', { assetId: 'asset_1', title: 'Night', summary: 'Sky', mutationId: 'media_create_1', expectedResourceVersion: null }],
+    ['media.update', 'trails.v2.commerce.catalog.media.update', 'trails.v2.commerce.catalog.media.update', { id: 'media_1', title: 'Night revised', summary: 'Sky revised', mutationId: 'media_update_1', expectedResourceVersion: '1' }],
     ['media.transition', 'trails.v2.commerce.catalog.media.transition', 'trails.v2.commerce.catalog.media.transition', { id: 'media_1', status: 'published', mutationId: 'media_publish_1', expectedResourceVersion: '1' }],
     ['editions.create', 'trails.v2.commerce.catalog.editions.create', 'trails.v2.commerce.catalog.editions.create', { mediaId: 'media_1', title: 'Paper', description: 'Fine', mutationId: 'edition_create_1', expectedResourceVersion: null }],
     ['editions.transition', 'trails.v2.commerce.catalog.editions.transition', 'trails.v2.commerce.catalog.editions.transition', { id: 'edition_1', status: 'sellable', mutationId: 'edition_sellable_1', expectedResourceVersion: '1' }],
@@ -218,7 +219,7 @@ describe('Trails Workspace micro-app bridge', () => {
     expect(scopes).not.toContain('trails.v2.finance.dispose-retained');
   });
 
-  it.each(['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13'])('authorizes Photoshop upload-session and completion bridge operations for version %s', async (appVersion) => {
+  it.each(['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13', '1.0.14', '1.0.15'])('authorizes Photoshop upload-session and completion bridge operations for version %s', async (appVersion) => {
     const { actions } = createActions();
     const ticketResponse = await actions['v1.runtime-ticket'].handler(authenticatedContext({ appId: app.appId, appVersion }) as never);
     const ticket = (ticketResponse.data.content as { ticket: string }).ticket;
