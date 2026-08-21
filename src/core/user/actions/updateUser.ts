@@ -70,6 +70,13 @@ export default function updateUser(star: Starlight) {
             };
           }
 
+          try {
+            await star.cacher?.delete?.(`user:profile:${params.userId}:v2`);
+          } catch (cacheError) {
+            // The database write is authoritative; a cache outage must not turn a completed profile update into a failure.
+            star.logger?.warn('用户资料缓存失效失败', { userId: params.userId, cacheError });
+          }
+
           star.logger?.info(`用户${params.userId}信息更新成功`);
 
           // 发布用户更新事件

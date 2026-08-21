@@ -86,6 +86,7 @@ const buildServiceNodeFromCatalog = (service: any, manualLayers?: Record<string,
     latency: service?.latency,
     errorRate: service?.errorRate,
     version: service?.version,
+    sourceType: service?.sourceType,
     source: 'service-catalog-fallback',
     manualLayer: manualLayers?.[id] || manualLayers?.[service?.name],
   };
@@ -253,7 +254,15 @@ const mergeCatalogNodes = async (
     if (id) byId.set(id, node);
   });
 
-  const servicesSnapshot = await ctx.getServicesList({ page: 1, pageSize: 500, scope });
+  // A catalog view may intentionally merge Trails shards into one product service.
+  // A topology must instead show each registered runtime so an operator can locate
+  // a degraded durable shard without losing it inside the logical "trails" node.
+  const servicesSnapshot = await ctx.getServicesList({
+    page: 1,
+    pageSize: 500,
+    scope,
+    granularity: scope === 'system' ? 'runtime' : 'logical',
+  });
   (servicesSnapshot?.services || []).forEach((service: any) => {
     const node = buildServiceNodeFromCatalog(service, manualLayers);
     if (!node) return;
@@ -443,7 +452,8 @@ const topology = (star: Starlight) => ({
         const timeRangeSeconds = parseTimeRangeSeconds(timeRange);
 
         // 从 InfluxDB 获取真实拓扑数据
-        const topologyData = await InfluxDBHandler.getTopologyData(star, timeRange);
+        const topologyData: { nodes: any[]; edges: any[]; meta?: Record<string, unknown> } =
+          await InfluxDBHandler.getTopologyData(star, timeRange);
         const isAdmin = Boolean(
           (ctx.meta as any)?.user?.isAdmin || (ctx.meta as any)?.adminMetrics,
         );
@@ -475,7 +485,11 @@ const topology = (star: Starlight) => ({
         const candidateNodes = mergeTopologyNodesForScope(candidateNodesRaw, scope);
 
         const filteredNodes = candidateNodes.filter((node: any) => {
-          const isSystemNode = isDarwinSystemService(node?.id) || isDarwinSystemService(node?.name);
+          const isSystemNode =
+            node?.sourceType === 'darwin-system' ||
+            node?.source === 'service-catalog-fallback' ||
+            isDarwinSystemService(node?.id) ||
+            isDarwinSystemService(node?.name);
           if (scope === 'tenant' && tenantGatewayNodeIds.has(String(node?.id || node?.name))) return true;
           return scope === 'system' ? isSystemNode : !isSystemNode;
         });
@@ -513,6 +527,7 @@ const topology = (star: Starlight) => ({
             edges: [],
             meta: {
               source: 'service-catalog-fallback',
+              granularity: scope === 'system' ? 'runtime' : 'logical',
               reason: 'No topology dependency telemetry rows matched queries; nodes were built from service catalog only.',
             },
           };
@@ -556,6 +571,10 @@ const topology = (star: Starlight) => ({
           topologyData.nodes = filteredNodes;
           topologyData.edges = filteredEdges;
         }
+        topologyData.meta = {
+          ...(topologyData.meta || {}),
+          granularity: scope === 'system' ? 'runtime' : 'logical',
+        };
 
         return {
           status: 200,

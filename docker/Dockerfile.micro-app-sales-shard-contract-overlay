@@ -1,0 +1,6 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Keep the micro-app process on the same durable shard map as Trails.
+COPY --chown=node:node shared/trails-contract/index.js /shared/trails-contract/index.js
+COPY --chown=node:node shared/trails-contract/index.d.ts /shared/trails-contract/index.d.ts

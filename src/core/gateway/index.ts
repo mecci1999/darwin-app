@@ -61,6 +61,22 @@ const parsePositiveInteger = (value: string | undefined, fallback: number) => {
 
 const GATEWAY_RPC_TIMEOUT_MS = parsePositiveTimeout(process.env.GATEWAY_RPC_TIMEOUT_MS, 15000);
 const GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD = parsePositiveInteger(process.env.GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD, 4);
+const GATEWAY_REGISTRY_DIRECTORY_DRIFT_MISSING_SERVICE_THRESHOLD = parsePositiveInteger(
+  process.env.GATEWAY_REGISTRY_DIRECTORY_DRIFT_MISSING_SERVICE_THRESHOLD,
+  3,
+);
+const GATEWAY_TRANSIENT_SERVICE_REFRESH_TIMEOUT_MS = parsePositiveTimeout(
+  process.env.GATEWAY_TRANSIENT_SERVICE_REFRESH_TIMEOUT_MS,
+  2000,
+);
+const GATEWAY_TRANSIENT_SERVICE_REFRESH_INTERVAL_MS = parsePositiveTimeout(
+  process.env.GATEWAY_TRANSIENT_SERVICE_REFRESH_INTERVAL_MS,
+  100,
+);
+const GATEWAY_TRANSIENT_SERVICE_REFRESH_COOLDOWN_MS = parsePositiveTimeout(
+  process.env.GATEWAY_TRANSIENT_SERVICE_REFRESH_COOLDOWN_MS,
+  1000,
+);
 const UPLOADS_PUBLIC_PREFIX = '/uploads/';
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 const JSON_BODY_LIMIT = process.env.GATEWAY_JSON_BODY_LIMIT || '16mb';
@@ -659,7 +675,7 @@ async function initializeGatewayService() {
         },
         // 主要API路由（多段 action）
         {
-          path: '/:service/:version/:action*',
+          path: '/:service/:version/:action+',
           authorization: false,
           aliases: {
             '/': 'gateway.dispatch',
@@ -894,8 +910,11 @@ async function initializeGatewayService() {
             });
           }
 
-          const isTargetServiceReady = await waitForRegisteredService(star, service);
+          const isTargetServiceReady = await waitForRegisteredService(star, service, {
+            transientDirectory: registryWatchdog,
+          });
           if (!isTargetServiceReady) {
+            (ctx.meta as any).$statusCode = HttpStatusCode.SERVICE_UNAVAILABLE;
             return {
               status: HttpStatusCode.SERVICE_UNAVAILABLE,
               data: {
@@ -1173,6 +1192,10 @@ async function initializeGatewayService() {
 
       registryWatchdog = new GatewayRegistryWatchdog(star, {
         registryRecoveryExitThreshold: GATEWAY_REGISTRY_RECOVERY_EXIT_THRESHOLD,
+        registryDirectoryDriftMissingServiceThreshold: GATEWAY_REGISTRY_DIRECTORY_DRIFT_MISSING_SERVICE_THRESHOLD,
+        transientServiceRefreshTimeoutMs: GATEWAY_TRANSIENT_SERVICE_REFRESH_TIMEOUT_MS,
+        transientServiceRefreshIntervalMs: GATEWAY_TRANSIENT_SERVICE_REFRESH_INTERVAL_MS,
+        transientServiceRefreshCooldownMs: GATEWAY_TRANSIENT_SERVICE_REFRESH_COOLDOWN_MS,
         onDiagnostic: (event) => {
           registryObservability?.record(event);
           if (!registryAlerts) registryAlerts = getAlertOutboxRepository().then(createGatewayRegistryAlertAdapter);

@@ -19,6 +19,7 @@ import {
 } from '../../../../../../shared/trails-contract';
 
 type MetricsDatasetScope = 'tenant' | 'system';
+export type ServiceCatalogGranularity = 'logical' | 'runtime';
 
 type ServiceRuntimeMetrics = {
   cpu: number | null;
@@ -42,13 +43,17 @@ type ServiceMetricMapCacheEntry = {
 
 const SERVICE_METRIC_MAP_CACHE_TTL_MS = 30_000;
 const SERVICE_METRIC_MAP_MAX_STALE_MS = 5 * 60_000;
-const serviceMetricMapCache = new WeakMap<object, Map<MetricsDatasetScope, ServiceMetricMapCacheEntry>>();
+const serviceMetricMapCache = new WeakMap<object, Map<string, ServiceMetricMapCacheEntry>>();
 
 const toFixed = (value: number, digits = 2) => Number(value.toFixed(digits));
 
-const normalizeServiceMetricKey = (value: unknown) => {
+const normalizeServiceMetricKey = (
+  value: unknown,
+  granularity: ServiceCatalogGranularity = 'logical',
+) => {
   const raw = String(value || '').trim();
-  return projectTrailsCatalogService(raw.startsWith('system:') ? raw.slice('system:'.length) : raw);
+  const serviceName = raw.startsWith('system:') ? raw.slice('system:'.length) : raw;
+  return granularity === 'logical' ? projectTrailsCatalogService(serviceName) : serviceName;
 };
 
 const serviceMetricKeyFlux = `if exists r.source and string(v: r.source) == "gateway-ingress" and exists r.service then string(v: r.service) else if exists r.target_service then string(v: r.target_service) else if exists r.targetService then string(v: r.targetService) else if exists r.destination_service then string(v: r.destination_service) else if exists r.peer_service then string(v: r.peer_service) else if exists r.service then string(v: r.service) else if exists r.serviceId then string(v: r.serviceId) else if exists r["service.name"] then string(v: r["service.name"]) else if exists r["service.id"] then string(v: r["service.id"]) else if exists r.service_name then string(v: r.service_name) else ""`;
@@ -56,15 +61,25 @@ const serviceMetricKeyFlux = `if exists r.source and string(v: r.source) == "gat
 const withServiceMetricKey = `|> map(fn: (r) => ({ r with service_metric_key: ${serviceMetricKeyFlux} }))
       |> filter(fn: (r) => r.service_metric_key != "")`;
 
-const addMetricValue = (map: Map<string, number>, key: unknown, value: unknown) => {
-  const normalizedKey = normalizeServiceMetricKey(key);
+const addMetricValue = (
+  map: Map<string, number>,
+  key: unknown,
+  value: unknown,
+  granularity: ServiceCatalogGranularity,
+) => {
+  const normalizedKey = normalizeServiceMetricKey(key, granularity);
   const numericValue = Number(value || 0);
   if (!normalizedKey || !Number.isFinite(numericValue)) return;
   map.set(normalizedKey, (map.get(normalizedKey) || 0) + numericValue);
 };
 
-const setMaximumMetricValue = (map: Map<string, number>, key: unknown, value: unknown) => {
-  const normalizedKey = normalizeServiceMetricKey(key);
+const setMaximumMetricValue = (
+  map: Map<string, number>,
+  key: unknown,
+  value: unknown,
+  granularity: ServiceCatalogGranularity,
+) => {
+  const normalizedKey = normalizeServiceMetricKey(key, granularity);
   const numericValue = Number(value || 0);
   if (!normalizedKey || !Number.isFinite(numericValue)) return;
   map.set(normalizedKey, Math.max(map.get(normalizedKey) || 0, numericValue));
@@ -76,10 +91,15 @@ const mergeMissingMetricValues = (target: Map<string, number>, fallback: Map<str
   });
 };
 
-const getMetricMapValue = (map: Map<string, number>, serviceName: string, serviceId: string) => {
-  const keys = [serviceName, serviceId, normalizeServiceMetricKey(serviceId)];
+const getMetricMapValue = (
+  map: Map<string, number>,
+  serviceName: string,
+  serviceId: string,
+  granularity: ServiceCatalogGranularity,
+) => {
+  const keys = [serviceName, serviceId, normalizeServiceMetricKey(serviceId, granularity)];
   for (const key of keys) {
-    const normalizedKey = normalizeServiceMetricKey(key);
+    const normalizedKey = normalizeServiceMetricKey(key, granularity);
     if (map.has(normalizedKey)) return Number(map.get(normalizedKey));
   }
   return null;
@@ -103,7 +123,11 @@ const metricSourceStatus = (value: number | null) => {
   return 'unavailable';
 };
 
-const queryServiceQpsMap = async (bucket: string, star: Star) => {
+const queryServiceQpsMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -115,7 +139,9 @@ const queryServiceQpsMap = async (bucket: string, star: Star) => {
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
-  rows.forEach((row: any) => addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300));
+  rows.forEach((row: any) =>
+    addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300, granularity),
+  );
   star.logger?.debug?.('metrics.catalog.service-qps-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
@@ -123,7 +149,11 @@ const queryServiceQpsMap = async (bucket: string, star: Star) => {
   return new Map(Array.from(map.entries()).map(([key, value]) => [key, toFixed(value, 2)]));
 };
 
-const queryServiceQpsFallbackMap = async (bucket: string, star: Star) => {
+const queryServiceQpsFallbackMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -136,7 +166,9 @@ const queryServiceQpsFallbackMap = async (bucket: string, star: Star) => {
   `;
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
-  rows.forEach((row: any) => addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300));
+  rows.forEach((row: any) =>
+    addMetricValue(map, row?.service_metric_key, Number(row?._value || 0) / 300, granularity),
+  );
   star.logger?.debug?.('metrics.catalog.service-qps-fallback-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
@@ -144,7 +176,11 @@ const queryServiceQpsFallbackMap = async (bucket: string, star: Star) => {
   return new Map(Array.from(map.entries()).map(([key, value]) => [key, toFixed(value, 2)]));
 };
 
-const queryServiceLatencyMap = async (bucket: string, star: Star) => {
+const queryServiceLatencyMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -159,7 +195,9 @@ const queryServiceLatencyMap = async (bucket: string, star: Star) => {
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, number>();
   // P95 values cannot be summed when several internal shards form one logical service.
-  rows.forEach((row: any) => setMaximumMetricValue(map, row?.service_metric_key, Math.round(Number(row?._value || 0))));
+  rows.forEach((row: any) =>
+    setMaximumMetricValue(map, row?.service_metric_key, Math.round(Number(row?._value || 0)), granularity),
+  );
   star.logger?.debug?.('metrics.catalog.service-p95-map', {
     rowCount: rows.length,
     keySample: getMapKeySample(map),
@@ -167,7 +205,11 @@ const queryServiceLatencyMap = async (bucket: string, star: Star) => {
   return map;
 };
 
-const queryServiceErrorRateMap = async (bucket: string, star: Star) => {
+const queryServiceErrorRateMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const totalQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -192,9 +234,9 @@ const queryServiceErrorRateMap = async (bucket: string, star: Star) => {
     InfluxDBHandler.queryMetrics(errorQuery, star).catch(() => []),
   ]);
   const totalMap = new Map<string, number>();
-  totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value));
+  totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value, granularity));
   const errorMap = new Map<string, number>();
-  errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value));
+  errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value, granularity));
   star.logger?.debug?.('metrics.catalog.service-error-rate-map', {
     totalRowCount: totalRows.length,
     errorRowCount: errorRows.length,
@@ -209,7 +251,11 @@ const queryServiceErrorRateMap = async (bucket: string, star: Star) => {
   );
 };
 
-const queryServiceErrorRateFallbackMap = async (bucket: string, star: Star) => {
+const queryServiceErrorRateFallbackMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const totalQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -236,9 +282,9 @@ const queryServiceErrorRateFallbackMap = async (bucket: string, star: Star) => {
     InfluxDBHandler.queryMetrics(errorQuery, star).catch(() => []),
   ]);
   const totalMap = new Map<string, number>();
-  totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value));
+  totalRows.forEach((row: any) => addMetricValue(totalMap, row?.service_metric_key, row?._value, granularity));
   const errorMap = new Map<string, number>();
-  errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value));
+  errorRows.forEach((row: any) => addMetricValue(errorMap, row?.service_metric_key, row?._value, granularity));
   star.logger?.debug?.('metrics.catalog.service-error-rate-fallback-map', {
     totalRowCount: totalRows.length,
     errorRowCount: errorRows.length,
@@ -253,7 +299,11 @@ const queryServiceErrorRateFallbackMap = async (bucket: string, star: Star) => {
   );
 };
 
-const queryServiceRuntimeMetricMap = async (bucket: string, star: Star) => {
+const queryServiceRuntimeMetricMap = async (
+  bucket: string,
+  star: Star,
+  granularity: ServiceCatalogGranularity,
+) => {
   const fluxQuery = `
     from(bucket: "${bucket}")
       |> range(start: -5m)
@@ -267,7 +317,7 @@ const queryServiceRuntimeMetricMap = async (bucket: string, star: Star) => {
   const rows = await InfluxDBHandler.queryMetrics(fluxQuery, star);
   const map = new Map<string, ServiceRuntimeMetrics>();
   rows.forEach((row: any) => {
-    const key = normalizeServiceMetricKey(row?.service_metric_key);
+    const key = normalizeServiceMetricKey(row?.service_metric_key, granularity);
     if (!key) return;
     const current = map.get(key) || { cpu: null, memory: null, lastSampleAt: null };
     const value = Number(row?._value || 0);
@@ -287,10 +337,11 @@ const getRuntimeMetricMapValue = (
   map: Map<string, ServiceRuntimeMetrics>,
   serviceName: string,
   serviceId: string,
+  granularity: ServiceCatalogGranularity,
 ) => {
-  const keys = [serviceName, serviceId, normalizeServiceMetricKey(serviceId)];
+  const keys = [serviceName, serviceId, normalizeServiceMetricKey(serviceId, granularity)];
   for (const key of keys) {
-    const normalizedKey = normalizeServiceMetricKey(key);
+    const normalizedKey = normalizeServiceMetricKey(key, granularity);
     const value = map.get(normalizedKey);
     if (value) return value;
   }
@@ -313,12 +364,13 @@ const buildServiceMetricMaps = async (
   bucket: string,
   star: Star,
   serviceNames: ReadonlySet<string>,
+  granularity: ServiceCatalogGranularity,
 ): Promise<ServiceMetricMaps> => {
   const [qpsMap, latencyMap, errorRateMap, runtimeMap] = await Promise.all([
-    queryServiceQpsMap(bucket, star)
+    queryServiceQpsMap(bucket, star, granularity)
       .then(async (map) => {
         if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
-        const fallback = await queryServiceQpsFallbackMap(bucket, star).catch((error) => {
+        const fallback = await queryServiceQpsFallbackMap(bucket, star, granularity).catch((error) => {
           star.logger?.error('metrics.catalog.service-qps-fallback-map-failed', {
             message: error?.message,
             stack: error?.stack,
@@ -333,19 +385,19 @@ const buildServiceMetricMaps = async (
           message: error?.message,
           stack: error?.stack,
         });
-        return queryServiceQpsFallbackMap(bucket, star).catch(() => new Map());
+        return queryServiceQpsFallbackMap(bucket, star, granularity).catch(() => new Map());
       }),
-    queryServiceLatencyMap(bucket, star).catch((error) => {
+    queryServiceLatencyMap(bucket, star, granularity).catch((error) => {
       star.logger?.error('metrics.catalog.service-p95-map-failed', {
         message: error?.message,
         stack: error?.stack,
       });
       return new Map();
     }),
-    queryServiceErrorRateMap(bucket, star)
+    queryServiceErrorRateMap(bucket, star, granularity)
       .then(async (map) => {
         if (map.size > 0 && !hasMissingSystemServiceMetric(map, serviceNames)) return map;
-        const fallback = await queryServiceErrorRateFallbackMap(bucket, star).catch((error) => {
+        const fallback = await queryServiceErrorRateFallbackMap(bucket, star, granularity).catch((error) => {
           star.logger?.error('metrics.catalog.service-error-rate-fallback-map-failed', {
             message: error?.message,
             stack: error?.stack,
@@ -360,9 +412,9 @@ const buildServiceMetricMaps = async (
           message: error?.message,
           stack: error?.stack,
         });
-        return queryServiceErrorRateFallbackMap(bucket, star).catch(() => new Map());
+        return queryServiceErrorRateFallbackMap(bucket, star, granularity).catch(() => new Map());
       }),
-    queryServiceRuntimeMetricMap(bucket, star).catch((error) => {
+    queryServiceRuntimeMetricMap(bucket, star, granularity).catch((error) => {
       star.logger?.error('metrics.catalog.service-runtime-map-failed', {
         message: error?.message,
         stack: error?.stack,
@@ -378,6 +430,7 @@ const getServiceMetricMaps = (
   star: Star,
   scope: MetricsDatasetScope,
   serviceNames: ReadonlySet<string>,
+  granularity: ServiceCatalogGranularity,
 ): Promise<ServiceMetricMaps> => {
   let scopeEntries = serviceMetricMapCache.get(star);
   if (!scopeEntries) {
@@ -385,8 +438,9 @@ const getServiceMetricMaps = (
     serviceMetricMapCache.set(star, scopeEntries);
   }
 
+  const cacheKey = `${scope}:${granularity}`;
   const refresh = (entry: ServiceMetricMapCacheEntry) => {
-    entry.inFlight = buildServiceMetricMaps(bucket, star, serviceNames)
+    entry.inFlight = buildServiceMetricMaps(bucket, star, serviceNames, granularity)
     .then((value) => {
       entry.value = value;
       entry.expiresAt = Date.now() + SERVICE_METRIC_MAP_CACHE_TTL_MS;
@@ -395,7 +449,7 @@ const getServiceMetricMaps = (
     })
     .catch((error) => {
       // Keep the last complete snapshot during a transient Influx or CPU stall.
-      if (!entry.value && scopeEntries?.get(scope) === entry) scopeEntries.delete(scope);
+      if (!entry.value && scopeEntries?.get(cacheKey) === entry) scopeEntries.delete(cacheKey);
       throw error;
     })
     .finally(() => {
@@ -405,7 +459,7 @@ const getServiceMetricMaps = (
   };
 
   const now = Date.now();
-  const existing = scopeEntries.get(scope);
+  const existing = scopeEntries.get(cacheKey);
   if (existing?.value && existing.expiresAt > now) return Promise.resolve(existing.value);
   if (existing?.value && (existing.staleUntil || 0) > now) {
     if (!existing.inFlight) void refresh(existing).catch(() => undefined);
@@ -414,7 +468,7 @@ const getServiceMetricMaps = (
   if (existing?.inFlight) return existing.inFlight;
 
   const entry: ServiceMetricMapCacheEntry = existing || { expiresAt: 0 };
-  scopeEntries.set(scope, entry);
+  scopeEntries.set(cacheKey, entry);
   return refresh(entry);
 };
 
@@ -425,6 +479,7 @@ export const buildServiceCatalogSnapshot = async (
     status?: string[] | string;
     keyword?: string;
     scope?: MetricsDatasetScope;
+    granularity?: ServiceCatalogGranularity;
   },
   star: Star,
 ) => {
@@ -437,15 +492,18 @@ export const buildServiceCatalogSnapshot = async (
       : [];
   const keyword = String(params?.keyword || '').trim();
   const scope = normalizeMetricsScope(params?.scope);
+  const granularity = params?.granularity === 'runtime' ? 'runtime' : 'logical';
   const nodes = star.registry?.getNodeList({ onlyAvaiable: true, withServices: true }) || [];
   const bucket = InfluxDBHandler.getBucketName();
   const serviceNames = new Set<string>();
   nodes.forEach((node: any) => {
-    getNodeServiceNames(node).forEach((name: string) => serviceNames.add(projectTrailsCatalogService(name)));
+    getNodeServiceNames(node).forEach((name: string) =>
+      serviceNames.add(granularity === 'logical' ? projectTrailsCatalogService(name) : name),
+    );
   });
 
   const { qpsMap, latencyMap, errorRateMap, runtimeMap } = bucket
-    ? await getServiceMetricMaps(bucket, star, scope, serviceNames)
+    ? await getServiceMetricMaps(bucket, star, scope, serviceNames, granularity)
     : {
         qpsMap: new Map<string, number>(),
         latencyMap: new Map<string, number>(),
@@ -460,27 +518,27 @@ export const buildServiceCatalogSnapshot = async (
     errorRateKeys: getMapKeySample(errorRateMap),
     runtimeKeys: getMapKeySample(runtimeMap),
     gateway: {
-      qps: getMetricMapValue(qpsMap, 'gateway', 'system:gateway'),
-      p95Latency: getMetricMapValue(latencyMap, 'gateway', 'system:gateway'),
-      errorRate: getMetricMapValue(errorRateMap, 'gateway', 'system:gateway'),
-      runtime: getRuntimeMetricMapValue(runtimeMap, 'gateway', 'system:gateway'),
+      qps: getMetricMapValue(qpsMap, 'gateway', 'system:gateway', granularity),
+      p95Latency: getMetricMapValue(latencyMap, 'gateway', 'system:gateway', granularity),
+      errorRate: getMetricMapValue(errorRateMap, 'gateway', 'system:gateway', granularity),
+      runtime: getRuntimeMetricMapValue(runtimeMap, 'gateway', 'system:gateway', granularity),
     },
   });
 
   const map = new Map<string, any>();
   nodes.forEach((node: any) => {
     getNodeServiceNames(node).forEach((registeredName: string) => {
-      const name = projectTrailsCatalogService(registeredName);
+      const name = granularity === 'logical' ? projectTrailsCatalogService(registeredName) : registeredName;
       if (!map.has(name)) {
         const identity = resolveSystemServiceIdentity(name);
         // Every live Node-Universe registration is an application runtime service.
         // Membership comes from the registry on every snapshot, not a client list.
         const isSystemService = true;
         const id = isDarwinSystemService(name) ? buildSystemServiceId(name) : name;
-        const qps = getMetricMapValue(qpsMap, name, id);
-        const latency = getMetricMapValue(latencyMap, name, id);
-        const errorRate = getMetricMapValue(errorRateMap, name, id);
-        const runtimeMetrics = getRuntimeMetricMapValue(runtimeMap, name, id);
+        const qps = getMetricMapValue(qpsMap, name, id, granularity);
+        const latency = getMetricMapValue(latencyMap, name, id, granularity);
+        const errorRate = getMetricMapValue(errorRateMap, name, id, granularity);
+        const runtimeMetrics = getRuntimeMetricMapValue(runtimeMap, name, id, granularity);
         map.set(name, {
           id,
           name,
@@ -538,6 +596,7 @@ export const buildServiceCatalogSnapshot = async (
   const end = start + pageSize;
   star.logger?.debug?.('metrics.catalog.service-snapshot-summary', {
     scope,
+    granularity,
     total,
     serviceSample: list.slice(0, 8).map((service: any) => ({
       id: service.id,

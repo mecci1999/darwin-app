@@ -53,7 +53,7 @@ type TrailsWorkspaceOperation =
   | 'publishing-packages.learn'
   | 'exhibitions.workspace' | 'exhibitions.mutate'
   | 'site-content.workspace' | 'site-content.draft' | 'site-content.publish' | 'site-content.unpublish'
-  | 'trips.workspace' | 'trips.draft' | 'trips.update' | 'trips.publish' | 'trips.unpublish' | 'trips.cancel'
+  | 'trips.workspace' | 'trips.draft' | 'trips.update' | 'trips.recap.save' | 'trips.publish' | 'trips.unpublish' | 'trips.cancel'
   | 'trip-registrations.summary' | 'trip-registrations.capacity'
   | 'trip-payments.workspace' | 'trip-payments.terms.save' | 'trip-payments.deposit.approve' | 'trip-payments.transition'
   | 'video-references.workspace' | 'video-references.draft' | 'video-references.update' | 'video-references.publish' | 'video-references.unpublish' | 'video-references.archive'
@@ -201,6 +201,7 @@ const TRAILS_WORKSPACE_ACTIONS: Readonly<Record<TrailsWorkspaceOperation, { acti
   'trips.workspace': { action: 'trails.v2.trips.workspace', scope: 'trails.v2.trips.workspace' },
   'trips.draft': { action: 'trails.v2.trips.workspace.draft', scope: 'trails.v2.trips.workspace.draft' },
   'trips.update': { action: 'trails.v2.trips.workspace.update', scope: 'trails.v2.trips.workspace.update' },
+  'trips.recap.save': { action: 'trails.v2.trips.workspace.recap.save', scope: 'trails.v2.trips.workspace.recap.save' },
   'trips.publish': { action: 'trails.v2.trips.workspace.publish', scope: 'trails.v2.trips.workspace.publish' },
   'trips.unpublish': { action: 'trails.v2.trips.workspace.unpublish', scope: 'trails.v2.trips.workspace.unpublish' },
   'trips.cancel': { action: 'trails.v2.trips.workspace.cancel', scope: 'trails.v2.trips.workspace.cancel' },
@@ -456,7 +457,7 @@ const registeredTrailsWorkspaceGrant = (appId: string, version: string): TrailsW
   const exact = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === appId && grant.version === version);
   if (exact) return exact;
   const prior = TRAILS_WORKSPACE_GRANTS.find((grant) => grant.appId === 'starlight-trails-workspace' && grant.version === '1.0.1');
-  if (appId === 'starlight-trails-workspace' && version === '1.0.17' && prior) return { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace', 'trails.v2.commerce.sales.workspace', 'trails.v2.commerce.sales.configuration.save', 'trails.v2.commerce.sales.products.create', 'trails.v2.commerce.sales.products.update', 'trails.v2.commerce.sales.products.transition', 'trails.v2.commerce.sales.orders.create', 'trails.v2.commerce.sales.orders.transition', 'trails.v2.trip-payments.workspace', 'trails.v2.trip-payments.terms.save', 'trails.v2.trip-payments.deposit.approve', 'trails.v2.trip-payments.transition'] };
+  if (appId === 'starlight-trails-workspace' && ['1.0.17', '1.0.18', '1.0.19', '1.0.20'].includes(version) && prior) return { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace', 'trails.v2.commerce.sales.workspace', 'trails.v2.commerce.sales.configuration.save', 'trails.v2.commerce.sales.products.create', 'trails.v2.commerce.sales.products.update', 'trails.v2.commerce.sales.products.transition', 'trails.v2.commerce.sales.orders.create', 'trails.v2.commerce.sales.orders.transition', 'trails.v2.trip-payments.workspace', 'trails.v2.trip-payments.terms.save', 'trails.v2.trip-payments.deposit.approve', 'trails.v2.trip-payments.transition', ...(version === '1.0.20' ? ['trails.v2.trips.workspace.recap.save'] : [])] };
   if (appId === 'starlight-trails-workspace' && version === '1.0.16' && prior) return { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace', 'trails.v2.commerce.sales.workspace', 'trails.v2.commerce.sales.configuration.save', 'trails.v2.commerce.sales.products.create', 'trails.v2.commerce.sales.products.update', 'trails.v2.commerce.sales.products.transition', 'trails.v2.commerce.sales.orders.create', 'trails.v2.commerce.sales.orders.transition'] };
   return appId === 'starlight-trails-workspace' && ['1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.0.8', '1.0.9', '1.0.10', '1.0.11', '1.0.12', '1.0.13', '1.0.14', '1.0.15'].includes(version) && prior
     ? { ...prior, version, scopes: [...prior.scopes, 'trails.v2.commerce.catalog.media.update', 'trails.v2.media-ingestion.upload-session', 'trails.v2.media-ingestion.complete-upload', 'trails.v2.media-ingestion.workspace'] }

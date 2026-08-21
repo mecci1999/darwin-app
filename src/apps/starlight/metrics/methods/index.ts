@@ -261,6 +261,7 @@ const metricsMethod = (star: Star, state: MetricsState) => {
       status?: string[] | string;
       keyword?: string;
       scope?: 'tenant' | 'system';
+      granularity?: 'logical' | 'runtime';
     }) {
       return await buildServiceCatalogSnapshot(
         {
@@ -269,6 +270,7 @@ const metricsMethod = (star: Star, state: MetricsState) => {
           status: params?.status,
           keyword: params?.keyword,
           scope: normalizeMetricsScope(params?.scope),
+          granularity: params?.granularity === 'runtime' ? 'runtime' : 'logical',
         },
         star,
       );

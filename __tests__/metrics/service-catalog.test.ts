@@ -278,12 +278,43 @@ describe('service catalog metrics snapshot', () => {
       } as any,
     );
 
-    expect(snapshot.services).toEqual([
+    expect(snapshot.services).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: 'trails', name: 'trails', displayName: '星迹', instances: 3, visibilityScope: 'system-admin',
+        id: 'trails', name: 'trails', displayName: '星迹', instances: 2, visibilityScope: 'system-admin',
       }),
+      expect.objectContaining({ id: 'trails-community', instances: 1 }),
+    ]));
+    expect(snapshot.services.some((service) => service.name === 'trails-durable-content')).toBe(false);
+    expect(snapshot.services.some((service) => service.name === 'trails-durable-media')).toBe(false);
+  });
+
+  it('keeps every Trails shard in the runtime catalog used by the service topology', async () => {
+    queryMetricsMock.mockResolvedValue([]);
+    const snapshot = await buildServiceCatalogSnapshot(
+      { page: 1, pageSize: 20, scope: 'system', granularity: 'runtime' },
+      {
+        registry: {
+          getNodeList: () => [
+            {
+              id: 'trails-node', hostname: 'trails.local', available: true,
+              services: [
+                { name: 'trails-durable-content' },
+                { name: 'trails-durable-media' },
+                { name: 'trails-community' },
+              ],
+            },
+          ],
+        },
+      } as any,
+    );
+
+    expect(snapshot.total).toBe(3);
+    expect(snapshot.services.map((service) => service.name).sort()).toEqual([
+      'trails-community',
+      'trails-durable-content',
+      'trails-durable-media',
     ]);
-    expect(snapshot.services.some((service) => service.name.startsWith('trails-'))).toBe(false);
+    expect(snapshot.services.every((service) => service.sourceType === 'darwin-system')).toBe(true);
   });
 
   it('includes an arbitrary live registry service without adding it to a client or system-name allowlist', async () => {

@@ -147,7 +147,7 @@ const star = new Star({
 
 ### 4.1 核对预期服务名
 
-主应用完整部署时，注册表至少应出现以下 **20** 个服务：
+主应用完整部署时，注册表至少应出现以下 **21** 个服务：
 
 ```text
 auth
@@ -164,6 +164,7 @@ subscription
 subscription-billing
 trails-durable-content
 trails-durable-media
+trails-durable-sales
 trails-durable-workspace
 trails-durable-trips
 trails-durable-site
@@ -176,8 +177,15 @@ video
 
 - `metrics-lifecycle` 与 `subscription-billing` 是容器内额外注册的真实服务；后者是 Gateway 重映射后的账单请求目标。
 - `trails` 是对外路由与目录的逻辑身份，不是实际注册服务；其动作会被 Gateway 映射到具体 shard。
-- Trails 只部署唯一的 `trails` 容器，并注册六个 `trails-durable-*` 分片；历史 action 路径由该统一实例兼容分派，不再对应独立服务或容器。
+- Trails 只部署唯一的 `trails` 容器，并注册七个 `trails-durable-*` 分片；历史 action 路径由该统一实例兼容分派，不再对应独立服务或容器。
 - 新服务上线后，以该服务实际注册的 Node-Universe 名称补充到本次发布记录；**不需要修改客户端服务列表**。
+
+### 4.2 Node-Universe 目录漂移防护验收
+
+Node-Universe 运行时以进程启动时生成的 `instanceEpoch` 区分复用固定 `NODE_INSTANCE_ID` 的新旧容器；较旧实例延迟到达的 `INFO`、heartbeat 或 `DISCONNECT` 不得覆盖新实例的服务目录或将其标为离线。
+
+- 首次部署包含该运行时的镜像，或重建任一应用服务后，必须在第 4 节探针中确认完整 **21/21** 注册表，并完成第 6 节 90 秒日志观察；不得仅以 Gateway 恢复 200 判定通过。
+- 若该变更引发注册回归，只回滚包含 Node-Universe runtime overlay 的应用镜像至上一个已验证的不可变镜像，并用 `up -d --no-deps --force-recreate <service>` 逐项恢复。不要通过改用 Docker hostname 作为 `NODE_INSTANCE_ID`、`compose down` 或重启 Kafka 来规避问题；这些做法会破坏指标身份或扩大影响范围。
 
 ---
 
@@ -192,7 +200,7 @@ video
 | `/api/metrics/v1/realtime`、目录详情兼容路由 | `metrics-compat` |
 | `/api/subscription/v1/billing/...` | `subscription-billing` |
 | `/api/trails/v1/...` | 三个旧 Trails 分片之一 |
-| `/api/trails/v2/...` | 六个 durable Trails 分片之一 |
+| `/api/trails/v2/...` | 七个 durable Trails 分片之一 |
 
 对每个本次受影响的公共路由家族，用管理员或测试账号执行一个**只读、参数合法**的请求。认证失败、权限拒绝或业务 404 不代表注册失败；但以下响应一律失败：
 

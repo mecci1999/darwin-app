@@ -1,6 +1,11 @@
 FROM node:22.14.0-bookworm-slim AS base
 WORKDIR /app
-RUN corepack enable
+# Tencent Cloud's Debian mirror is materially faster and more reliable from the production CVM.
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
+      -e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && corepack enable
 
 FROM base AS dependencies
 RUN apt-get update \
@@ -17,9 +22,12 @@ RUN pnpm run build:all
 
 FROM dependencies AS production-dependencies
 RUN pnpm prune --prod
+COPY node-universe/dist /tmp/node-universe-dist
+COPY darwin-app/docker/patch-node-universe-runtime.js /tmp/patch-node-universe-runtime.js
+RUN node /tmp/patch-node-universe-runtime.js /tmp/node-universe-dist \
+    && rm -rf /tmp/node-universe-dist /tmp/patch-node-universe-runtime.js
 
-FROM node:22.14.0-bookworm-slim AS runtime
-WORKDIR /app
+FROM base AS runtime
 ENV NODE_ENV=production
 RUN apt-get update \
     && apt-get install --no-install-recommends -y util-linux \

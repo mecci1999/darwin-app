@@ -95,6 +95,13 @@ export default function uploadAvatar(star: Starlight) {
             },
           ]);
 
+          try {
+            await star.cacher?.delete?.(`user:profile:${params.userId}:v2`);
+          } catch (cacheError) {
+            // The avatar has already been stored successfully; cache refresh can recover on the next profile read.
+            star.logger?.warn('用户头像缓存失效失败', { userId: params.userId, cacheError });
+          }
+
           star.logger?.info(`用户头像上传成功: ${params.userId}`, {
             fileId: fileInfo.fileId,
             url: fileInfo.url,

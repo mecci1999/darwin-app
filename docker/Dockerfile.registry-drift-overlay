@@ -1,0 +1,20 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+WORKDIR /app
+
+# This emergency-safe overlay replaces only the compiled Node-Universe runtime
+# and selected Gateway modules. It is intentionally built from the repository
+# root so it can use the locally verified generation-fence build.
+COPY node-universe/dist /tmp/node-universe-dist
+COPY darwin-app/docker/patch-node-universe-runtime.js /tmp/patch-node-universe-runtime.js
+COPY darwin-app/dist/core/gateway/index.js /tmp/gateway/index.js
+COPY darwin-app/dist/core/gateway/registry-readiness.js /tmp/gateway/registry-readiness.js
+COPY darwin-app/dist/core/gateway/service-discovery.js /tmp/gateway/service-discovery.js
+
+RUN node /tmp/patch-node-universe-runtime.js /tmp/node-universe-dist \
+  && cp /tmp/gateway/index.js /app/dist/core/gateway/index.js \
+  && cp /tmp/gateway/registry-readiness.js /app/dist/core/gateway/registry-readiness.js \
+  && cp /tmp/gateway/service-discovery.js /app/dist/core/gateway/service-discovery.js \
+  && rm -rf /tmp/node-universe-dist /tmp/gateway /tmp/patch-node-universe-runtime.js
