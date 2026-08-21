@@ -1,6 +1,0 @@
-ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
-
-# Grant only the packaged Trails workspace 1.0.14 catalog-media update scope.
-COPY --chown=node:node dist/apps/starlight/micro-app/actions/index.js /app/dist/apps/starlight/micro-app/actions/index.js
-COPY --chown=node:node trails-contract/index.js /shared/trails-contract/index.js

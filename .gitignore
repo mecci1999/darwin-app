@@ -13,3 +13,10 @@ redis.conf
 .vscode
 
 docs/ONLINE_OPERATIONS_AND_MAINTENANCE.md
+
+/src/apps/trails/
+/__tests__/trails/
+/__tests__/*/*trails*
+/src/db/mysql/models/trails*.ts
+/docker/*trails*
+/scripts/*trails*
