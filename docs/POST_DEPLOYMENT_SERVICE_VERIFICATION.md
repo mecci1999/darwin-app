@@ -199,8 +199,9 @@ Node-Universe 运行时以进程启动时生成的 `instanceEpoch` 区分复用�
 | 指标告警、规则、通知路由 | `metrics-alerts` |
 | `/api/metrics/v1/realtime`、目录详情兼容路由 | `metrics-compat` |
 | `/api/subscription/v1/billing/...` | `subscription-billing` |
-| `/api/trails/v1/...` | 三个旧 Trails 分片之一 |
+| `/api/trails/v1/...`（`field-record-events` 除外） | 三个旧 Trails 分片之一 |
 | `/api/trails/v2/...` | 七个 durable Trails 分片之一 |
+| `/api/trails/v2`-`v5` 的拍摄安排、`/api/trails/v2/field-records/...`、`/api/trails/v1/field-record-events/...` | `trails-durable-sales` |
 
 对每个本次受影响的公共路由家族，用管理员或测试账号执行一个**只读、参数合法**的请求。认证失败、权限拒绝或业务 404 不代表注册失败；但以下响应一律失败：
 
@@ -210,6 +211,64 @@ Service '<name>' is not registered yet
 ```
 
 不要直接探测 `/api/metrics-query/...`、`/api/metrics-alerts/...` 或 Trails shard 服务名；这些是 Gateway 明确禁止的内部路由。
+
+---
+
+### 5.1 Trails 拍摄工作台：计划、现场记录与时间线
+
+当本次发布包含“今天”页的拍摄执行能力时，除本节的通用检查外，必须用一个**仅供验收、没有真实用户内容的测试账号**执行下列只读探测。不要用管理员、员工日常账号或客户账号；这些接口均按当前登录账号隔离，管理员身份不提供跨用户读取。
+
+除现场时间线外，以下 `workspace` 请求均为 `POST {}`，只读取当前账号工作区，不创建、更新、改期、归档或删除任何数据。时间线读取必须指定一个受控测试计划编号；令牌与计划编号都不得回显、写入命令历史或发布记录：
+
+```bash
+# 仅在当前受控 shell 中提供短期测试令牌；不要把令牌值写入本手册、日志或工单。
+: "${TRAILS_VERIFY_TOKEN:?需要专用测试账号的短期访问令牌}"
+: "${TRAILS_VERIFY_FIELD_PLAN_ID:?需要专用测试账号下的活跃验收计划编号}"
+[[ "$TRAILS_VERIFY_FIELD_PLAN_ID" =~ ^[A-Za-z0-9_-]{1,160}$ ]] || { echo 'TRAILS_VERIFY_FIELD_PLAN_ID 格式无效' >&2; exit 2; }
+TRAILS_GATEWAY_ORIGIN="${TRAILS_GATEWAY_ORIGIN:-http://127.0.0.1:6670}"
+
+probe_trails_workspace() {
+  local endpoint="$1"
+  local request_body="${2-}"
+  if [ -z "$request_body" ]; then request_body='{}'; fi
+  local status
+  if ! status="$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --request POST \
+    --header "Authorization: Bearer ${TRAILS_VERIFY_TOKEN}" \
+    --header 'Content-Type: application/json' \
+    --data "$request_body" \
+    "${TRAILS_GATEWAY_ORIGIN}${endpoint}")"; then
+    printf 'FAILED: %s HTTP %s\n' "$endpoint" "${status:-transport_error}" >&2
+    return 1
+  fi
+  if [ "$status" != 200 ]; then
+    printf 'FAILED: %s HTTP %s\n' "$endpoint" "$status" >&2
+    return 1
+  fi
+  printf 'PASS: %s HTTP %s\n' "$endpoint" "$status"
+}
+
+# 当前正式客户端：v5 拍摄安排，响应包含场景、速查关联与拍后交接。
+probe_trails_workspace '/api/trails/v5/field-plans/workspace'
+
+# 已安装客户端：v3 拍摄安排，响应包含受限的 permit 用户声明。
+probe_trails_workspace '/api/trails/v3/field-plans/workspace'
+
+# 已安装旧客户端：v2 拍摄安排仍必须可读，且 v2 投影不包含 permit 字段。
+probe_trails_workspace '/api/trails/v2/field-plans/workspace'
+
+# 结构化现场文字记录当前仍是 v2 合同。
+probe_trails_workspace '/api/trails/v2/field-records/workspace'
+
+# 现场过程时间线按计划读取；只读请求不追加事件。
+probe_trails_workspace '/api/trails/v1/field-record-events/workspace' "{\"fieldPlanId\":\"${TRAILS_VERIFY_FIELD_PLAN_ID}\"}"
+```
+
+- 五个请求均应为 `HTTP 200`；`401` 或 `403` 表示测试凭据/账号配置有问题，不能作为服务通过的证据；`503`、`Service '<name>' is not registered yet` 或 `Gateway target service wait timed out` 一律按发布失败处理。
+- 移动端正式拍摄计划合同为 `v5.field-plans`，其中包含场景、速查表关联和有界的拍后交接；`v3` 仅用于已安装客户端的 `permit` 兼容性验证，`v2` 保持旧响应和请求边界。旧版本验证不能替代 `v5` 验证，不要向 `v2` 请求传 `permit`，也不要依赖 `v2` 响应存在新版字段。
+- 现场记录目前的正式公共合同是 `v2.field-records`，不存在 `/api/trails/v3/field-records/...`；不要将该路径加入探测或客户端配置。
+- `v1.field-record-events` 是只追加的现场过程时间线。上述 `workspace` 是只读验证；`append` 会写入数据，不可用于生产只读冒烟。
+- `create`、`update`、`reschedule`、`transition`、`archive`、`field-records/save`、`field-records/delete` 和 `field-record-events/append` 都会写入数据，不属于生产发布冒烟。写路径只能在隔离环境或预先批准的可清理测试数据上，按完整的 mutation/resource-version 流程验证。
 
 ---
 

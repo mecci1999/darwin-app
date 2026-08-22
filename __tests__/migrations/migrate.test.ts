@@ -316,6 +316,28 @@ describe('migration runner', () => {
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecordAudit', ['tenant_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_audit_resource' });
   });
 
+  it('adds the field-record audit owner-version index through a new retry-safe migration', async () => {
+    const migration = migrationDefinitions.migrations.find((item: { id: string }) =>
+      item.id === migrationDefinitions.TRAILS_FIELD_RECORD_AUDIT_OWNER_VERSION_INDEX_MIGRATION_ID,
+    );
+    const indexes: Array<{ name: string }> = [];
+    const queryInterface = {
+      showIndex: jest.fn(async () => indexes),
+      addIndex: jest.fn(async (_table: string, _fields: string[], options: { name: string }) => { indexes.push({ name: options.name }); }),
+    };
+
+    if (!migration) throw new Error('Field-record audit owner-version migration is not registered');
+    await migration.up({ queryInterface });
+    await migration.up({ queryInterface });
+
+    expect(queryInterface.addIndex).toHaveBeenCalledTimes(1);
+    expect(queryInterface.addIndex).toHaveBeenCalledWith(
+      'TrailsFieldRecordAudit',
+      ['tenant_id', 'owner_user_id', 'field_plan_id', 'to_version'],
+      { name: 'trails_field_record_audit_owner_version' },
+    );
+  });
+
   it('widens rendition enums without redefining existing composite primary keys', async () => {
     const migration = migrationDefinitions.migrations.find((item: { id: string }) => item.id === migrationDefinitions.TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID);
     const tables = ['TrailsMediaAssetVariant', 'TrailsMediaAssetArtifact', 'TrailsTrustedPhotoshopIngestionArtifact', 'TrailsTrustedPhotoshopStorageWriteFence'];
@@ -345,10 +367,13 @@ describe('migration runner', () => {
     };
     const sequelize = { getQueryInterface: () => queryInterface, sync: jest.fn(), query: jest.fn() };
     await migrationDefinitions.applyTrailsCategoryMigrations(sequelize);
-    expect(queryInterface.createTable).toHaveBeenCalledTimes(64);
+    expect(queryInterface.createTable).toHaveBeenCalledTimes(73);
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableExhibitionTheme', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), slug: expect.any(Object), payload_json: expect.any(Object), published_at: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsPublicDerivativePublicationJob', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), job_id: expect.objectContaining({ primaryKey: true }), lease_expires_at: expect.any(Object), status: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsRichDocument', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), subject_type: expect.objectContaining({ primaryKey: true }), subject_id: expect.objectContaining({ primaryKey: true }), document_json: expect.any(Object), revision: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsShootingKnowledge', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), kind: expect.any(Object), body: expect.any(Object), resource_version: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsShootingKnowledgeMutation', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), actor_user_id: expect.objectContaining({ primaryKey: true }), mutation_id: expect.objectContaining({ primaryKey: true }), fingerprint: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsShootingKnowledgeAudit', expect.objectContaining({ event_id: expect.objectContaining({ primaryKey: true }), knowledge_id: expect.any(Object), operation: expect.any(Object), to_version: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsRichDocumentRevision', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), subject_type: expect.objectContaining({ primaryKey: true }), subject_id: expect.objectContaining({ primaryKey: true }), revision: expect.objectContaining({ primaryKey: true }), created_by_user_id: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsPublicSiteContent', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), content_json: expect.any(Object), resource_version: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableExternalVideoReference', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), portfolio_id: expect.any(Object), payload_json: expect.any(Object), resource_version: expect.any(Object) }));
@@ -374,6 +399,9 @@ describe('migration runner', () => {
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecord', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), field_plan_id: expect.objectContaining({ primaryKey: true }), weather_note: expect.any(Object), observation: expect.any(Object), exception_reason: expect.any(Object), resource_version: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecordMutation', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), actor_user_id: expect.objectContaining({ primaryKey: true }), mutation_id: expect.objectContaining({ primaryKey: true }), fingerprint: expect.any(Object), result_json: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecordAudit', expect.objectContaining({ event_id: expect.objectContaining({ primaryKey: true }), field_plan_id: expect.any(Object), from_version: expect.any(Object), to_version: expect.any(Object), operation: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecordEvent', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), id: expect.objectContaining({ primaryKey: true }), field_plan_id: expect.any(Object), type: expect.any(Object), occurred_at: expect.any(Object), body: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecordEventMutation', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), actor_user_id: expect.objectContaining({ primaryKey: true }), mutation_id: expect.objectContaining({ primaryKey: true }), fingerprint: expect.any(Object), result_json: expect.any(Object) }));
+    expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsFieldRecordEventAudit', expect.objectContaining({ audit_id: expect.objectContaining({ primaryKey: true }), field_plan_id: expect.any(Object), field_record_event_id: expect.any(Object), mutation_id: expect.any(Object), operation: expect.any(Object), occurred_at: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsAnalyticsDaily', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), day: expect.objectContaining({ primaryKey: true }), content_type: expect.objectContaining({ primaryKey: true }), content_id: expect.objectContaining({ primaryKey: true }), event_name: expect.objectContaining({ primaryKey: true }) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsAnalyticsContentVisitorDay', expect.objectContaining({ tenant_id: expect.objectContaining({ primaryKey: true }), owner_user_id: expect.objectContaining({ primaryKey: true }), day: expect.objectContaining({ primaryKey: true }), content_type: expect.objectContaining({ primaryKey: true }), content_id: expect.objectContaining({ primaryKey: true }), visitor_digest: expect.objectContaining({ primaryKey: true }) }));
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsAnalyticsDaily', ['tenant_id', 'owner_user_id', 'day', 'content_type', 'content_id'], { name: 'trails_analytics_content_metrics' });
@@ -382,6 +410,10 @@ describe('migration runner', () => {
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldPlanAudit', ['tenant_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_plan_audit_resource' });
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecord', ['tenant_id', 'owner_user_id', 'updated_at'], { name: 'trails_field_record_owner_updated' });
     expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecordAudit', ['tenant_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_audit_resource' });
+    expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecordAudit', ['tenant_id', 'owner_user_id', 'field_plan_id', 'to_version'], { name: 'trails_field_record_audit_owner_version' });
+    expect(queryInterface.addColumn).toHaveBeenCalledWith('TrailsShootingKnowledge', 'scenes_json', expect.objectContaining({ allowNull: false, defaultValue: '[]' }));
+    expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecordEvent', ['tenant_id', 'owner_user_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_event_owner_plan_time' });
+    expect(queryInterface.addIndex).toHaveBeenCalledWith('TrailsFieldRecordEventAudit', ['tenant_id', 'owner_user_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_event_audit_owner_plan_time' });
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableTripRegistration', expect.objectContaining({ id: expect.objectContaining({ primaryKey: true }), tenant_id: expect.any(Object), trip_id: expect.any(Object), participant_user_id: expect.any(Object), status: expect.any(Object), release_version: expect.any(Object), resource_version: expect.any(Object) }));
     expect(queryInterface.createTable).toHaveBeenCalledWith('TrailsDurableTripPayment', expect.objectContaining({ id: expect.objectContaining({ primaryKey: true }), registration_id: expect.any(Object), stage: expect.any(Object), amount_minor: expect.any(Object), due_at: expect.any(Object), status: expect.any(Object) }));
     expect(queryInterface.addColumn).toHaveBeenCalledWith('TrailsGuestCommentNotification', 'delivery_id', expect.objectContaining({ allowNull: true }));

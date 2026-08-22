@@ -47,6 +47,10 @@ const TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID = '044-trails-durable-trip-paymen
 const TRAILS_OPERATIONS_ANALYTICS_MIGRATION_ID = '045-trails-operations-analytics-v1';
 const TRAILS_FIELD_PLAN_MIGRATION_ID = '046-trails-field-plan-v2';
 const TRAILS_FIELD_RECORD_MIGRATION_ID = '047-trails-field-record-v1';
+const TRAILS_SHOOTING_KNOWLEDGE_MIGRATION_ID = '048-trails-shooting-knowledge-v1';
+const TRAILS_SHOOTING_WORKBENCH_MIGRATION_ID = '049-trails-shooting-workbench-v1';
+const TRAILS_CUSTOM_SHOOTING_SCENE_MIGRATION_ID = '050-trails-custom-shooting-scenes-v1';
+const TRAILS_FIELD_RECORD_AUDIT_OWNER_VERSION_INDEX_MIGRATION_ID = '051-trails-field-record-audit-owner-version-index-v1';
 
 const getProductionModels = sequelize => {
   const distRoot = path.join(__dirname, '..', 'dist');
@@ -941,6 +945,156 @@ const migrations = [
       await ensureIndex(queryInterface, 'TrailsFieldRecordAudit', ['tenant_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_audit_resource' });
     },
   },
+  {
+    // Personal notebook and quick-reference material remains owner-private.
+    // It stores bounded text only and has no spatial, media, or public projection.
+    id: TRAILS_SHOOTING_KNOWLEDGE_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'TrailsShootingKnowledge', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        kind: { type: DataTypes.ENUM('note', 'guide'), allowNull: false },
+        title: { type: DataTypes.STRING(160), allowNull: false },
+        body: { type: DataTypes.TEXT('long'), allowNull: false },
+        category: { type: DataTypes.STRING(48), allowNull: true },
+        tags_json: { type: DataTypes.STRING(1024), allowNull: false },
+        pinned: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+        lifecycle: { type: DataTypes.ENUM('active', 'deleted'), allowNull: false },
+        resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsShootingKnowledge', ['tenant_id', 'owner_user_id', 'kind', 'lifecycle', 'pinned', 'updated_at'], { name: 'trails_shooting_knowledge_owner_list' });
+      await ensureTable(queryInterface, 'TrailsShootingKnowledgeMutation', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        fingerprint: { type: DataTypes.CHAR(64), allowNull: false },
+        result_json: { type: DataTypes.TEXT('long'), allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureTable(queryInterface, 'TrailsShootingKnowledgeAudit', {
+        event_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        knowledge_id: { type: DataTypes.STRING(160), allowNull: false },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false },
+        operation: { type: DataTypes.ENUM('create', 'update', 'delete'), allowNull: false },
+        from_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+        to_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        occurred_at: { type: DataTypes.DATE, allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsShootingKnowledgeAudit', ['tenant_id', 'owner_user_id', 'knowledge_id', 'occurred_at'], { name: 'trails_shooting_knowledge_audit_owner' });
+    },
+  },
+  {
+    // Adds bounded scene metadata and an immutable event stream without changing
+    // existing plan or note payloads. The plan data itself remains versioned JSON.
+    id: TRAILS_SHOOTING_WORKBENCH_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureColumn(queryInterface, 'TrailsShootingKnowledge', 'scenes_json', {
+        type: DataTypes.STRING(256), allowNull: false, defaultValue: '[]',
+      });
+      await ensureTable(queryInterface, 'TrailsFieldRecordEvent', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        field_plan_id: { type: DataTypes.STRING(160), allowNull: false },
+        type: { type: DataTypes.ENUM('arrival', 'departure', 'weather_change', 'light', 'observation', 'equipment', 'safety', 'abandoned', 'other'), allowNull: false },
+        occurred_at: { type: DataTypes.DATE, allowNull: false },
+        body: { type: DataTypes.STRING(800), allowNull: true },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsFieldRecordEvent', ['tenant_id', 'owner_user_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_event_owner_plan_time' });
+      await ensureTable(queryInterface, 'TrailsFieldRecordEventMutation', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        fingerprint: { type: DataTypes.CHAR(64), allowNull: false },
+        result_json: { type: DataTypes.TEXT('long'), allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureTable(queryInterface, 'TrailsFieldRecordEventAudit', {
+        audit_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        field_plan_id: { type: DataTypes.STRING(160), allowNull: false },
+        field_record_event_id: { type: DataTypes.STRING(160), allowNull: false },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false },
+        operation: { type: DataTypes.ENUM('append'), allowNull: false },
+        occurred_at: { type: DataTypes.DATE, allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsFieldRecordEventAudit', ['tenant_id', 'owner_user_id', 'field_plan_id', 'occurred_at'], { name: 'trails_field_record_event_audit_owner_plan_time' });
+    },
+  },
+  {
+    // Account-private custom shooting modes. The table stores no coordinates,
+    // routes, media, public content, or creator-space data.
+    id: TRAILS_CUSTOM_SHOOTING_SCENE_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      const { DataTypes } = require('sequelize');
+      await ensureTable(queryInterface, 'TrailsShootingScene', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        lifecycle: { type: DataTypes.ENUM('active', 'archived'), allowNull: false },
+        resource_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        payload_json: { type: DataTypes.TEXT('long'), allowNull: false },
+        archived_at: { type: DataTypes.DATE, allowNull: true },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsShootingScene', ['tenant_id', 'owner_user_id', 'lifecycle', 'updated_at'], { name: 'trails_shooting_scene_owner_lifecycle_updated' });
+      await ensureTable(queryInterface, 'TrailsShootingSceneMutation', {
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false, primaryKey: true },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        fingerprint: { type: DataTypes.CHAR(64), allowNull: false },
+        result_json: { type: DataTypes.TEXT('long'), allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureTable(queryInterface, 'TrailsShootingSceneAudit', {
+        event_id: { type: DataTypes.STRING(160), allowNull: false, primaryKey: true },
+        tenant_id: { type: DataTypes.STRING(64), allowNull: false },
+        owner_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        scene_id: { type: DataTypes.STRING(160), allowNull: false },
+        actor_user_id: { type: DataTypes.STRING(64), allowNull: false },
+        mutation_id: { type: DataTypes.STRING(160), allowNull: false },
+        operation: { type: DataTypes.ENUM('create', 'update', 'archive'), allowNull: false },
+        from_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+        to_version: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+        occurred_at: { type: DataTypes.DATE, allowNull: false },
+        created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+        updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      });
+      await ensureIndex(queryInterface, 'TrailsShootingSceneAudit', ['tenant_id', 'owner_user_id', 'scene_id', 'occurred_at'], { name: 'trails_shooting_scene_audit_owner' });
+    },
+  },
+  {
+    // Keep previously released migrations immutable. Existing deployments have
+    // already recorded 047, so this index must be introduced in a new ledger row.
+    id: TRAILS_FIELD_RECORD_AUDIT_OWNER_VERSION_INDEX_MIGRATION_ID,
+    transactional: false,
+    async up({ queryInterface }) {
+      await ensureIndex(queryInterface, 'TrailsFieldRecordAudit', ['tenant_id', 'owner_user_id', 'field_plan_id', 'to_version'], { name: 'trails_field_record_audit_owner_version' });
+    },
+  },
 ];
 
 // Numeric migration IDs are the deployment ordering authority; keep append-only migrations ordered even when their definitions are grouped by resource.
@@ -949,7 +1103,7 @@ migrations.sort((left, right) => left.id.localeCompare(right.id));
 /** Test-only schema bootstrap for the isolated Trails MySQL harness. It never uses migration ledger/locks. */
 const applyTrailsCategoryMigrations = async sequelize => {
   const queryInterface = sequelize.getQueryInterface();
-  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID, TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID, TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID, TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID, TRAILS_OPERATIONS_ANALYTICS_MIGRATION_ID, TRAILS_FIELD_PLAN_MIGRATION_ID, TRAILS_FIELD_RECORD_MIGRATION_ID];
+  const requiredIds = [TRAILS_SYNC_FOUNDATION_MIGRATION_ID, TRAILS_CATEGORY_TENANT_IDENTITY_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_MIGRATION_ID, TRAILS_DURABLE_HIKE_MIGRATION_ID, TRAILS_DURABLE_GEAR_MIGRATION_ID, TRAILS_DURABLE_PACKING_PLAN_MIGRATION_ID, TRAILS_DURABLE_FINANCE_MIGRATION_ID, TRAILS_DURABLE_FINANCE_BALANCE_SNAPSHOT_MIGRATION_ID, TRAILS_DURABLE_PUBLIC_CATEGORY_QUERY_MIGRATION_ID, TRAILS_DURABLE_MEDIA_COMMERCE_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MIGRATION_ID, TRAILS_MEDIA_ASSET_REGISTRY_MUTATION_MIGRATION_ID, TRAILS_MEDIA_ASSET_ARTIFACT_MIGRATION_ID, TRAILS_TRUSTED_PHOTOSHOP_INGESTION_OPERATION_MIGRATION_ID, TRAILS_DURABLE_PUBLISHING_PACKAGE_MIGRATION_ID, TRAILS_RICH_DOCUMENT_MIGRATION_ID, TRAILS_PUBLIC_CONTENT_AND_COMMENTS_MIGRATION_ID, TRAILS_GUEST_COMMENT_OUTBOX_MIGRATION_ID, TRAILS_GUEST_COMMENT_DELIVERY_LEASE_MIGRATION_ID, TRAILS_GUEST_COMMENT_NOTIFICATION_STATUS_MIGRATION_ID, TRAILS_DURABLE_GUIDED_TRIP_MIGRATION_ID, TRAILS_DURABLE_EXTERNAL_VIDEO_REFERENCE_MIGRATION_ID, TRAILS_DURABLE_LOCATION_CARD_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_PHOTO_TECHNICAL_METADATA_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_CONTENT_VISITOR_MIGRATION_ID, TRAILS_DURABLE_TRIP_REGISTRATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_CAPACITY_MIGRATION_ID, TRAILS_DURABLE_ANALYTICS_AUDIENCE_MIGRATION_ID, TRAILS_SHOOTING_LOCATION_MIGRATION_ID, TRAILS_CONTENT_METRICS_INDEX_MIGRATION_ID, TRAILS_DURABLE_JOURNAL_PINNING_MIGRATION_ID, TRAILS_MEDIA_RENDITION_4K_MIGRATION_ID, TRAILS_PUBLIC_DERIVATIVE_PUBLICATION_JOB_MIGRATION_ID, TRAILS_DURABLE_EXHIBITION_THEME_MIGRATION_ID, TRAILS_DURABLE_PORTFOLIO_EXHIBITION_PRESENTATION_MIGRATION_ID, TRAILS_DURABLE_TRIP_PAYMENT_MIGRATION_ID, TRAILS_OPERATIONS_ANALYTICS_MIGRATION_ID, TRAILS_FIELD_PLAN_MIGRATION_ID, TRAILS_FIELD_RECORD_MIGRATION_ID, TRAILS_SHOOTING_KNOWLEDGE_MIGRATION_ID, TRAILS_SHOOTING_WORKBENCH_MIGRATION_ID, TRAILS_CUSTOM_SHOOTING_SCENE_MIGRATION_ID, TRAILS_FIELD_RECORD_AUDIT_OWNER_VERSION_INDEX_MIGRATION_ID];
   for (const id of requiredIds) {
     const migration = migrations.find(candidate => candidate.id === id);
     if (!migration) throw new Error(`Required Trails category migration is not registered: ${id}`);
@@ -1002,6 +1156,10 @@ module.exports = {
   TRAILS_OPERATIONS_ANALYTICS_MIGRATION_ID,
   TRAILS_FIELD_PLAN_MIGRATION_ID,
   TRAILS_FIELD_RECORD_MIGRATION_ID,
+  TRAILS_SHOOTING_KNOWLEDGE_MIGRATION_ID,
+  TRAILS_SHOOTING_WORKBENCH_MIGRATION_ID,
+  TRAILS_CUSTOM_SHOOTING_SCENE_MIGRATION_ID,
+  TRAILS_FIELD_RECORD_AUDIT_OWNER_VERSION_INDEX_MIGRATION_ID,
   ALERT_DURABLE_OUTBOX_MIGRATION_ID,
   BASELINE_MIGRATION_ID,
   getModelTableNames,
