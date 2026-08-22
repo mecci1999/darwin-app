@@ -2,7 +2,7 @@ services:
   gateway:
     image: darwin-app:gateway-registry-observability-20260813.2
     environment:
-      GATEWAY_REQUIRED_SERVICES: gateway,auth,user,file,metrics,metrics-query,metrics-alerts,metrics-compat,metrics-lifecycle,logs,subscription,subscription-billing,micro-app,video,trails-durable-content,trails-durable-media,trails-durable-workspace,trails-durable-trips,trails-durable-site,trails-durable-site-public,trails-durable-sales
+      GATEWAY_REQUIRED_SERVICES: gateway,auth,user,file,metrics,metrics-query,metrics-alerts,metrics-compat,metrics-lifecycle,logs,subscription,subscription-billing,micro-app,video,trails-durable-content,trails-durable-media,trails-durable-workspace,trails-durable-trips,trails-durable-site,trails-durable-site-public,trails-durable-sales,trails-durable-field-plans,trails-durable-shooting
     healthcheck:
       test:
         - CMD-SHELL

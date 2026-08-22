@@ -1,4 +1,5 @@
 import { Starlight } from 'typings';
+import { TRAILS_SHARD_NAMES } from '../../../../shared/trails-contract';
 
 export const DEFAULT_GATEWAY_REQUIRED_SERVICES = [
   'auth',
@@ -13,13 +14,7 @@ export const DEFAULT_GATEWAY_REQUIRED_SERVICES = [
   'micro-app',
   'subscription',
   'subscription-billing',
-  'trails-durable-content',
-  'trails-durable-media',
-  'trails-durable-workspace',
-  'trails-durable-trips',
-  'trails-durable-site',
-  'trails-durable-site-public',
-  'trails-durable-sales',
+  ...TRAILS_SHARD_NAMES,
   'user',
   'video',
 ] as const;
@@ -32,13 +27,7 @@ export const DEFAULT_GATEWAY_CRITICAL_SERVICES = [
   'file',
   'gateway',
   'micro-app',
-  'trails-durable-content',
-  'trails-durable-media',
-  'trails-durable-workspace',
-  'trails-durable-trips',
-  'trails-durable-site',
-  'trails-durable-site-public',
-  'trails-durable-sales',
+  ...TRAILS_SHARD_NAMES,
   'user',
 ] as const;
 

@@ -147,7 +147,7 @@ const star = new Star({
 
 ### 4.1 核对预期服务名
 
-主应用完整部署时，注册表至少应出现以下 **21** 个服务：
+主应用完整部署时，注册表至少应出现以下 **23** 个服务：
 
 ```text
 auth
@@ -165,6 +165,8 @@ subscription-billing
 trails-durable-content
 trails-durable-media
 trails-durable-sales
+trails-durable-field-plans
+trails-durable-shooting
 trails-durable-workspace
 trails-durable-trips
 trails-durable-site
@@ -177,14 +179,14 @@ video
 
 - `metrics-lifecycle` 与 `subscription-billing` 是容器内额外注册的真实服务；后者是 Gateway 重映射后的账单请求目标。
 - `trails` 是对外路由与目录的逻辑身份，不是实际注册服务；其动作会被 Gateway 映射到具体 shard。
-- Trails 只部署唯一的 `trails` 容器，并注册七个 `trails-durable-*` 分片；历史 action 路径由该统一实例兼容分派，不再对应独立服务或容器。
+- Trails 只部署唯一的 `trails` 容器，并注册九个 `trails-durable-*` 分片；历史 action 路径由该统一实例兼容分派，不再对应独立服务或容器。
 - 新服务上线后，以该服务实际注册的 Node-Universe 名称补充到本次发布记录；**不需要修改客户端服务列表**。
 
 ### 4.2 Node-Universe 目录漂移防护验收
 
 Node-Universe 运行时以进程启动时生成的 `instanceEpoch` 区分复用固定 `NODE_INSTANCE_ID` 的新旧容器；较旧实例延迟到达的 `INFO`、heartbeat 或 `DISCONNECT` 不得覆盖新实例的服务目录或将其标为离线。
 
-- 首次部署包含该运行时的镜像，或重建任一应用服务后，必须在第 4 节探针中确认完整 **21/21** 注册表，并完成第 6 节 90 秒日志观察；不得仅以 Gateway 恢复 200 判定通过。
+- 首次部署包含该运行时的镜像，或重建任一应用服务后，必须在第 4 节探针中确认完整 **23/23** 注册表，并完成第 6 节 90 秒日志观察；不得仅以 Gateway 恢复 200 判定通过。
 - 若该变更引发注册回归，只回滚包含 Node-Universe runtime overlay 的应用镜像至上一个已验证的不可变镜像，并用 `up -d --no-deps --force-recreate <service>` 逐项恢复。不要通过改用 Docker hostname 作为 `NODE_INSTANCE_ID`、`compose down` 或重启 Kafka 来规避问题；这些做法会破坏指标身份或扩大影响范围。
 
 ---
@@ -199,9 +201,10 @@ Node-Universe 运行时以进程启动时生成的 `instanceEpoch` 区分复用�
 | 指标告警、规则、通知路由 | `metrics-alerts` |
 | `/api/metrics/v1/realtime`、目录详情兼容路由 | `metrics-compat` |
 | `/api/subscription/v1/billing/...` | `subscription-billing` |
-| `/api/trails/v1/...`（`field-record-events` 除外） | 三个旧 Trails 分片之一 |
-| `/api/trails/v2/...` | 七个 durable Trails 分片之一 |
-| `/api/trails/v2`-`v5` 的拍摄安排、`/api/trails/v2/field-records/...`、`/api/trails/v1/field-record-events/...` | `trails-durable-sales` |
+| `/api/trails/v1/...`（拍摄工作台接口除外） | 三个旧 Trails 分片之一 |
+| `/api/trails/v2/...` | 九个 durable Trails 分片之一 |
+| `/api/trails/v2`-`v5` 的拍摄安排 | `trails-durable-field-plans` |
+| `/api/trails/v2/field-records/...`、`/api/trails/v1/field-record-events/...`、拍摄模式与速查资料 | `trails-durable-shooting` |
 
 对每个本次受影响的公共路由家族，用管理员或测试账号执行一个**只读、参数合法**的请求。认证失败、权限拒绝或业务 404 不代表注册失败；但以下响应一律失败：
 
@@ -262,9 +265,13 @@ probe_trails_workspace '/api/trails/v2/field-records/workspace'
 
 # 现场过程时间线按计划读取；只读请求不追加事件。
 probe_trails_workspace '/api/trails/v1/field-record-events/workspace' "{\"fieldPlanId\":\"${TRAILS_VERIFY_FIELD_PLAN_ID}\"}"
+
+# 摄影速查资料与用户自定义场景均为只读工作区请求。
+probe_trails_workspace '/api/trails/v2/shooting-knowledge/workspace' '{"kind":"guide"}'
+probe_trails_workspace '/api/trails/v1/shooting-scenes/workspace'
 ```
 
-- 五个请求均应为 `HTTP 200`；`401` 或 `403` 表示测试凭据/账号配置有问题，不能作为服务通过的证据；`503`、`Service '<name>' is not registered yet` 或 `Gateway target service wait timed out` 一律按发布失败处理。
+- 七个请求均应为 `HTTP 200`；`401` 或 `403` 表示测试凭据/账号配置有问题，不能作为服务通过的证据；`503`、`Service '<name>' is not registered yet` 或 `Gateway target service wait timed out` 一律按发布失败处理。
 - 移动端正式拍摄计划合同为 `v5.field-plans`，其中包含场景、速查表关联和有界的拍后交接；`v3` 仅用于已安装客户端的 `permit` 兼容性验证，`v2` 保持旧响应和请求边界。旧版本验证不能替代 `v5` 验证，不要向 `v2` 请求传 `permit`，也不要依赖 `v2` 响应存在新版字段。
 - 现场记录目前的正式公共合同是 `v2.field-records`，不存在 `/api/trails/v3/field-records/...`；不要将该路径加入探测或客户端配置。
 - `v1.field-record-events` 是只追加的现场过程时间线。上述 `workspace` 是只读验证；`append` 会写入数据，不可用于生产只读冒烟。
