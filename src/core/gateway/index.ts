@@ -18,7 +18,7 @@ import { DatabaseService } from 'db/mysql';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
 import { parseCorsAllowedOrigins } from './cors';
-import { prepareGatewayDispatch } from './dispatch-meta';
+import { normalizeTrailsGatewayRequestParams, prepareGatewayDispatch } from './dispatch-meta';
 import { resolveGatewayRpcTimeout } from './rpc-timeout';
 import gatewayMethods, { createWebSocketManager } from './methods';
 
@@ -892,6 +892,10 @@ async function initializeGatewayService() {
           action = remapped.action;
           params = remapped.params;
 
+          if (rawService === 'trails') {
+            params = normalizeTrailsGatewayRequestParams(params, version, action);
+          }
+
           action = shouldPreserveSlashActionPath(service)
             ? action
             : GatewayHelper.processActionPath(action);
@@ -929,7 +933,7 @@ async function initializeGatewayService() {
           const dispatch = prepareGatewayDispatch(ctx.meta, params);
 
           // 确保 userId 被传递到 params 中，作为 ctx.meta 传递失败的兜底
-          if ((ctx.meta as any).user?.userId) {
+          if (rawService !== 'trails' && (ctx.meta as any).user?.userId) {
             params.userId = (ctx.meta as any).user.userId;
           }
 

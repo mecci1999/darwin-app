@@ -1,4 +1,6 @@
-FROM node:22.14.0-bookworm-slim AS base
+# Keep the certificate bundle in every build stage. The slim Node image does
+# not include it, which prevents apt from validating the HTTPS Tencent mirror.
+FROM node:22.14.0-bookworm AS base
 WORKDIR /app
 # Tencent Cloud's Debian mirror is materially faster and more reliable from the production CVM.
 RUN sed -i \
