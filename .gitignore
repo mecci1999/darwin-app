@@ -20,3 +20,6 @@ docs/ONLINE_OPERATIONS_AND_MAINTENANCE.md
 /src/db/mysql/models/trails*.ts
 /docker/*trails*
 /scripts/*trails*
+
+/__tests__
+/.release-staging

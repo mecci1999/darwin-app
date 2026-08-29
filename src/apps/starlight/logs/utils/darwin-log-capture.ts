@@ -11,6 +11,7 @@ import * as path from 'path';
 const SYSTEM_TENANT_ID = 'system';
 const FLUSH_INTERVAL_MS = 1000;
 const MAX_BATCH_SIZE = 100;
+const MAX_CAPTURE_QUEUE_RECORDS = 2_000;
 const FORWARD_BATCH_SIZE = 20;
 const FORWARD_FLUSH_MS = 200;
 const FORWARD_UNAVAILABLE_FALLBACK_MS = 5000;
@@ -69,6 +70,7 @@ const state: CaptureState = {
 
 const processor = new LogProcessor();
 let lastForwardFailureWarningAt = 0;
+let lastCaptureQueueWarningAt = 0;
 
 const forwardDiagnosticState = new Map<string, number>();
 
@@ -144,6 +146,17 @@ function shouldCaptureLog(level: LogLevel): boolean {
   return Object.values(LogLevel).includes(level);
 }
 
+function isHighPriorityLog(level: LogLevel): boolean {
+  return level === LogLevel.WARN || level === LogLevel.ERROR || level === LogLevel.FATAL;
+}
+
+function warnCaptureQueueOverflow() {
+  const now = Date.now();
+  if (now - lastCaptureQueueWarningAt < FORWARD_FAILURE_WARNING_INTERVAL_MS) return;
+  lastCaptureQueueWarningAt = now;
+  console.warn(`Darwin log capture queue reached ${MAX_CAPTURE_QUEUE_RECORDS}; low-priority records are being dropped`);
+}
+
 function shouldIgnoreForwardedGatewayLog(args: any[], bindings: LoggerBindings): boolean {
   const serviceName = bindings.svc || bindings.mod || '';
   if (serviceName !== 'gateway') return false;
@@ -210,7 +223,9 @@ function shouldIgnoreForwardToLogs(args: any[], bindings: LoggerBindings): boole
       arg.includes('Darwin log forwarding fell back to local capture file') ||
       arg.includes('Kafka Server Publish error') ||
       arg.includes('Timeout while acquiring lock') ||
-      arg.includes('Cleaning up excess request')
+      arg.includes('Cleaning up excess request') ||
+      arg.includes("Emit '$metrics.snapshot' event") ||
+      arg.includes("Emit 'metrics.raw' event")
     );
   });
 }
@@ -660,6 +675,18 @@ function enqueueDarwinLogRecordInternal(record: unknown, options: { requireEnabl
     nextRecord.bindings && typeof nextRecord.bindings === 'object' ? nextRecord.bindings : {},
   );
   if (!log) return false;
+
+  if (state.queue.length >= MAX_CAPTURE_QUEUE_RECORDS) {
+    if (!isHighPriorityLog(log.level)) {
+      warnCaptureQueueOverflow();
+      return false;
+    }
+
+    const lowPriorityIndex = state.queue.findIndex((queued) => !isHighPriorityLog(queued.level));
+    if (lowPriorityIndex >= 0) state.queue.splice(lowPriorityIndex, 1);
+    else state.queue.shift();
+    warnCaptureQueueOverflow();
+  }
 
   state.queue.push(log);
   broadcastToStreams(log, SYSTEM_TENANT_ID);

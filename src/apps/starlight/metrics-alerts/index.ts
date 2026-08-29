@@ -3,6 +3,7 @@ import { isTransportDebugEnabled } from 'config';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import alerts, { evaluateAlertRules } from '../metrics/actions/alerts';
 import { buildServiceCatalogSnapshot } from '../metrics/utils/service-catalog';
 import { InfluxDBHandler } from '../metrics/utils/influxdb-handler';
@@ -103,10 +104,7 @@ function createMetricsAlertsService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           KAFKA_USER && KAFKA_PASSWORD
             ? {
@@ -143,13 +141,9 @@ function createMetricsAlertsService() {
       },
     },
     logger: true,
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event',
-      },
-    },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
   installDarwinKafkaRecoveryLifecycle(star);
 

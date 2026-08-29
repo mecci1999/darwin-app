@@ -6,6 +6,7 @@ import { MetricsState, RawMetricsData, ProcessedMetricsData, MetricsBatch } from
 import { BATCH_SIZE, FLUSH_INTERVAL } from '../constants';
 import { MetricsUtils } from './metrics-utils';
 import { InfluxDBHandler } from './influxdb-handler';
+import { enqueueMetricsBatch, MAX_METRICS_QUEUE_ITEMS, metricsQueueItemCount } from './processing-queue';
 
 export class DataProcessor {
   private static processingTimer: NodeJS.Timeout | null = null;
@@ -129,11 +130,19 @@ export class DataProcessor {
         timestamp: Date.now(),
         retryCount: 0,
       };
-      state.processingQueue.push(batch);
+      if (!enqueueMetricsBatch(state, batch)) {
+        star.logger?.warn('Metrics queue is full; discarding a new batch');
+        return;
+      }
     }
 
     // 添加指标到批次
-    batch.data.push(...metrics);
+    const remainingCapacity = MAX_METRICS_QUEUE_ITEMS - metricsQueueItemCount(state.processingQueue);
+    if (remainingCapacity <= 0) {
+      star.logger?.warn('Metrics queue item limit reached; discarding metrics');
+      return;
+    }
+    batch.data.push(...metrics.slice(0, remainingCapacity));
 
     // 如果批次已满，立即处理
     if (batch.data.length >= BATCH_SIZE) {

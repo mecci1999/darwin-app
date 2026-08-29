@@ -62,7 +62,7 @@ export const normalizeTrailsGatewayRequestParams = (
   if (emptyPayloadRequests.has(key)) return {};
 
   const fieldsByRequest: Record<string, readonly string[]> = {
-    'v1:weather/forecast': ['latitude', 'longitude'],
+    'v1:weather/forecast': ['latitude', 'longitude', 'provider'],
     'v1:night-sky/forecast': ['latitude', 'longitude', 'date', 'timeZone'],
     'v2:analytics/workspace': ['from', 'to'],
     'v2:operations/workspace': ['from', 'to'],

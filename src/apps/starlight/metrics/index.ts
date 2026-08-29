@@ -36,6 +36,8 @@ import createMethods from './methods';
 import { MetricsState } from './types';
 import { AlertEngine } from './utils/alert-engine';
 import { createServiceReadiness } from 'core/readiness/service-readiness';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
+import { enqueueMetricsBatch, takeMetricsFlushBatch } from './utils/processing-queue';
 
 // 服务状态管理
 const metricsState: MetricsState = {
@@ -66,12 +68,20 @@ const metricsState: MetricsState = {
 
 import { InfluxDBHandler } from './utils/influxdb-handler';
 
+const METRICS_RETRY_MAX_ATTEMPTS = 3;
+const METRICS_RETRY_BASE_DELAY_MS = 5_000;
+const METRICS_RETRY_MAX_DELAY_MS = 60_000;
+let metricsFlushInFlight = false;
+let metricsNextFlushAt = 0;
+let metricsConsecutiveFlushFailures = 0;
+
 // 批处理指标数据
 async function processBatchedMetrics(star: Starlight) {
-  if (metricsState.processingQueue.length === 0) return;
+  if (metricsFlushInFlight || metricsState.processingQueue.length === 0 || Date.now() < metricsNextFlushAt) return;
 
-  const metricsToFlush = [...metricsState.processingQueue];
-  metricsState.processingQueue = []; // 清空队列
+  const metricsToFlush = takeMetricsFlushBatch(metricsState);
+  if (metricsToFlush.length === 0) return;
+  metricsFlushInFlight = true;
 
   try {
     // 写入 InfluxDB
@@ -80,10 +90,34 @@ async function processBatchedMetrics(star: Starlight) {
 
     metricsState.stats.processed += metricsToFlush.length;
     metricsState.lastFlushTime = Date.now();
+    metricsConsecutiveFlushFailures = 0;
+    metricsNextFlushAt = 0;
   } catch (error) {
     console.error('Failed to flush metrics:', error);
-    // 失败重试逻辑：将数据放回队列头部
-    metricsState.processingQueue.unshift(...metricsToFlush);
+    metricsConsecutiveFlushFailures += 1;
+    const delay = Math.min(
+      METRICS_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, metricsConsecutiveFlushFailures - 1),
+      METRICS_RETRY_MAX_DELAY_MS,
+    );
+    metricsNextFlushAt = Date.now() + delay;
+
+    // Retry bounded telemetry at most three times. Do not let an unavailable
+    // InfluxDB turn a monitoring service into an unbounded heap consumer.
+    let discarded = 0;
+    for (const batch of metricsToFlush) {
+      if (batch.retryCount >= METRICS_RETRY_MAX_ATTEMPTS) {
+        discarded += batch.data.length;
+        continue;
+      }
+      if (!enqueueMetricsBatch(metricsState, { ...batch, retryCount: batch.retryCount + 1 })) {
+        discarded += batch.data.length;
+      }
+    }
+    if (discarded > 0) {
+      console.warn(`Discarded ${discarded} telemetry points after bounded retry/queue protection`);
+    }
+  } finally {
+    metricsFlushInFlight = false;
   }
 }
 
@@ -103,10 +137,7 @@ function createMetricsService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           KAFKA_USER && KAFKA_PASSWORD
             ? {
@@ -143,13 +174,9 @@ function createMetricsService() {
       },
     },
     logger: true,
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event',
-      },
-    },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
     installDarwinKafkaRecoveryLifecycle(star);
   const readiness = createServiceReadiness(star, { serviceName: APP_NAME });
@@ -250,7 +277,7 @@ function createMetricsService() {
 
         // 启动批处理定时器
         const batchInterval = setInterval(
-          () => processBatchedMetrics(star), // Wrap in arrow function
+          () => void processBatchedMetrics(star),
           this.settings.processing.flushInterval,
         );
 

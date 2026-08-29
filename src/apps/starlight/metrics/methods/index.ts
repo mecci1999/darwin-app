@@ -5,6 +5,7 @@ import { MetricsState, QuotaWarningParams, RawMetricsData } from '../types';
 import { DataProcessor, InfluxDBHandler, KafkaHandler, MetricsUtils, QuotaChecker } from '../utils';
 import { buildSystemServiceId, normalizeMetricsScope } from '../utils/system-telemetry';
 import { buildServiceCatalogSnapshot } from '../utils/service-catalog';
+import { enqueueMetricsBatch } from '../utils/processing-queue';
 
 /**
  * 指标数据微服务的方法
@@ -540,7 +541,7 @@ const metricsMethod = (star: Star, state: MetricsState) => {
       star.logger?.debug(`Metrics received from ${data.source}`);
 
       // 添加到处理队列
-      state.processingQueue.push({
+      enqueueMetricsBatch(state, {
         id: `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         format: data.format,
         data: [data],

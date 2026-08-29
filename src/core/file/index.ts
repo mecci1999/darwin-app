@@ -8,6 +8,7 @@ import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import fileActions from './actions';
 
 // 导入基本类型和常量
@@ -40,6 +41,7 @@ async function initializeFileService() {
                 }
               : undefined,
           ssl: false,
+          consumer: createKafkaConsumerOptions(),
           // 心跳配置 - 解决节点超时警告
           heartbeatInterval: 3000, // 3秒发送一次心跳
           sessionTimeout: 30000, // 30秒会话超时
@@ -63,12 +65,7 @@ async function initializeFileService() {
           },
         },
       },
-      metrics: {
-        enabled: true,
-        reporter: {
-          type: 'Event',
-        },
-      },
+      metrics: createServiceMetricsOptions(),
       // 添加请求超时配置
       requestTimeout: SERVICE_CONFIG.REQUEST_TIMEOUT,
       retryPolicy: {
@@ -77,6 +74,7 @@ async function initializeFileService() {
         delay: SERVICE_CONFIG.RETRY_DELAY,
       },
     }) as Starlight;
+    stabilizeNodeUniverseInstanceId(star);
     registerDarwinLogForwarding(star);
       installDarwinKafkaRecoveryLifecycle(star);
 

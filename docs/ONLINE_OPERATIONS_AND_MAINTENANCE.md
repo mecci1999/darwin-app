@@ -17,8 +17,8 @@
 | 项目 | 配置 | 影响 |
 | --- | --- | --- |
 | 实例 | 通用型 | 适合早期单机部署，不适合高并发和高可靠生产集群 |
-| CPU | 2 核 | 不建议多副本；编译和 Elasticsearch 启动时会有明显资源竞争 |
-| 内存 | 4 GB | 必须限制 JVM、Kafka 和应用内存，并配置 Swap |
+| CPU | 2 核 | 不建议多副本；Node 微服务不可使用过小的硬 CPU 配额，否则即使宿主机空闲也会发生 CFS 节流和接口超时 |
+| 内存 | 8 GB | 必须限制 JVM、Kafka 和应用内存，并配置 Swap；Swap 仅用于偶发峰值，不应长期持续增长 |
 | 系统盘 | SSD 云硬盘 100 GB | 数据、镜像、日志和备份共用，必须设置磁盘告警和保留策略 |
 | 流量包 | 1000 GB/月 | 应用接口通常足够，图片、视频和大文件不应长期走本机带宽 |
 | 带宽 | 7 Mbps | 约 0.875 MB/s，摄影图片和视频建议使用腾讯云 COS + CDN |
@@ -49,6 +49,21 @@
 5. 生产 Compose 只发布 Gateway 的 `127.0.0.1:6670` 和 WebSocket 的 `127.0.0.1:8090`。Gateway 同时加入内部 `darwin_app_network` 和仅它使用的普通 bridge `darwin_gateway_ingress`，使 Docker 能建立回环端口转发；所有其他应用和数据服务只加入内部网络。
 
 这仍是单机 Compose 部署方案，不等同于高可用集群。必须先验证镜像、基础设施健康状态和应用的关键业务路径，再接入 Nginx 公网流量。
+
+### 0.2 2C / 8G 资源调度基线
+
+生产 Compose 使用 `cpu_shares` 而非 `cpus` 硬配额：Gateway、`auth`、`user` 和 `file` 在争抢 CPU 时优先；低频的指标、日志兼容和后台任务仍可使用空闲 CPU，但不会把前台请求锁死在 4%-25% 单核配额中。不要把 `cpus` 小数上限重新加回常驻 Node 服务。
+
+当前内存分配的原则是：Kafka、MySQL、Elasticsearch 维持明确硬上限；MySQL 需要至少 `1024m`，因为其实际 RSS 接近旧 `768m` 上限；Node 的 `NODE_OPTIONS` 是 V8 老生代上限，不能替代容器内存上限。部署后在 90 秒窗口确认：
+
+```bash
+free -h
+docker stats --no-stream
+cat /proc/pressure/cpu
+dmesg -T | grep -Ei 'out of memory|killed process|oom-kill' || true
+```
+
+`/proc/pressure/cpu` 的 `some avg60` 持续高于 50，或 Gateway 延迟/超时上升时，先检查是否有未经控制的图片、视频或索引任务；不要通过无限增大 Node 堆或长期依赖 Swap 掩盖问题。
 
 ---
 
@@ -1249,22 +1264,23 @@ docker compose --env-file .env.production -f docker/docker-compose.infra.yml log
 docker compose --env-file .env.production -f docker/docker-compose.app.yml logs --tail=200 gateway
 ```
 
-### 13.3 4GB 内存不足
+### 13.3 2C / 8G 资源或接口超时
 
 ```bash
 free -h
 docker stats --no-stream
+cat /proc/pressure/cpu
 dmesg -T | grep -i -E 'oom|killed process'
 ```
 
 处理顺序：
 
-1. 确认 Elasticsearch heap 不超过约 1GB。
-2. 确认 Kafka 没有使用 1536MB 以上的堆上限。
-3. 降低日志级别和日志保留量。
-4. 暂停不必要的开发工具和监控容器。
+1. 先检查 CPU 压力和 Gateway 的容器 CPU；宿主机空闲但 `cpu` pressure 很高时，检查是否误加了 `cpus` 硬上限。常驻服务应使用 Compose 的 `cpu_shares` 相对权重。
+2. 确认 Elasticsearch heap 不超过约 512MB，Kafka 堆不超过 512MB；这两个 Java 进程还会使用堆外内存，因此不能只看 JVM 堆值。
+3. MySQL RSS 接近 1GB、任一 Node 服务接近 `mem_limit` 或日志显示 OOM 时，先停止发布并检查具体容器；不要统一加大所有 Node 堆。
+4. 降低日志级别和日志保留量，暂停不必要的后台媒体、监控或开发容器。
 5. 将 MySQL、ES、Kafka 或 InfluxDB 迁移到腾讯云托管服务。
-6. 仍不足时升级 CVM，不要依赖 Swap 长期运行。
+6. Swap 在 15 分钟内持续增加或仍有 OOM 时，先减少并发/后台任务；不要依赖 Swap 长期运行。
 
 ### 13.4 磁盘满
 

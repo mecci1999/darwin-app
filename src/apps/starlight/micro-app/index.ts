@@ -4,6 +4,7 @@ import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import microAppActions, { requireMicroAppTicketSecret } from './actions';
 
 const APP_NAME = 'micro-app';
@@ -27,6 +28,7 @@ async function initializeMicroAppService() {
                 }
               : undefined,
           ssl: false,
+          consumer: createKafkaConsumerOptions(),
         },
       },
       serializer: { type: 'NotePack' },
@@ -42,9 +44,10 @@ async function initializeMicroAppService() {
           },
         },
       },
-      metrics: { enabled: true, reporter: { type: 'Event' } },
+      metrics: createServiceMetricsOptions(),
       requestTimeout: 30 * 1000,
     }) as Starlight;
+    stabilizeNodeUniverseInstanceId(star);
 
     registerDarwinLogForwarding(star);
       installDarwinKafkaRecoveryLifecycle(star);

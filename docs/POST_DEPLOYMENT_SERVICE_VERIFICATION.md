@@ -96,7 +96,7 @@ darwin-app-elasticsearch-1
 
 ## 4. 第二关：Gateway 实时服务注册表（强制）
 
-以下探针会启动一个临时、无 action 的 Node-Universe 观察节点，连接到同一 Kafka namespace，仅读取服务名后自动退出。它不打印环境变量、密码或 token。
+以下探针会启动一个临时、无 action 的 Node-Universe 观察节点，连接到同一 Kafka namespace，仅读取服务名后自动退出。它不打印环境变量、密码或 token。探针使用固定身份，避免每次执行创建新的 Kafka endpoint topic；同一时间只能运行一个探针实例。
 
 ```bash
 cd /opt/darwin-app/source
@@ -106,10 +106,12 @@ docker compose --env-file .env.production -f docker/docker-compose.app.yml \
   exec -T gateway node -e '
 const { Star } = require("node-universe");
 const kafka = process.env.KAFKA_BROKERS || process.env.KAFKA_HOST;
-const suffix = Date.now().toString();
+// Keep this identity stable. Node-Universe creates endpoint topics per node ID,
+// so a timestamp-based inspector would leave orphaned Kafka topics on each run.
+const inspectorId = "registry-inspector-production";
 const star = new Star({
   namespace: "darwin-app",
-  nodeID: `registry-inspector-${suffix}`,
+  nodeID: inspectorId,
   transporter: {
     type: "KAFKA",
     host: kafka,
@@ -117,8 +119,8 @@ const star = new Star({
       producer: { "linger.ms": 0, "batch.size": 0, acks: 1 },
       consumer: { "fetch.min.bytes": 1, "fetch.wait.max.ms": 100 },
       ssl: false,
-      groupId: `registry-inspector-${suffix}`,
-      clientId: `registry-inspector-${suffix}`,
+      groupId: inspectorId,
+      clientId: inspectorId,
       heartbeatInterval: 3000,
       sessionTimeout: 30000,
       requestTimeout: 60000,

@@ -17,6 +17,7 @@ import {
 import { DatabaseService } from 'db/mysql';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import { parseCorsAllowedOrigins } from './cors';
 import { normalizeTrailsGatewayRequestParams, prepareGatewayDispatch } from './dispatch-meta';
 import { resolveGatewayRpcTimeout } from './rpc-timeout';
@@ -462,10 +463,7 @@ async function initializeGatewayService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           KAFKA_USER && KAFKA_PASSWORD
             ? {
@@ -506,13 +504,9 @@ async function initializeGatewayService() {
         },
       },
     },
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event',
-      },
-    },
+    metrics: createServiceMetricsOptions(30),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
   installDarwinKafkaRecoveryLifecycle(star);
   registryObservability = createGatewayRegistryObservability(star);

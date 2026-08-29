@@ -64,13 +64,32 @@ export type KafkaRecoveryLifecycleOptions = {
 const MAX_INSTANCE_ID_LENGTH = 160;
 const MAX_SERVICE_NAME_LENGTH = 96;
 const MAX_REASON_LENGTH = 64;
-const REGISTRY_RECONCILIATION_INTERVAL_MS = 30_000;
+const positiveIntegerFromEnvironment = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const productionInterval = (developmentValue: number, productionValue: number, environmentValue: string | undefined) =>
+  positiveIntegerFromEnvironment(environmentValue, process.env.NODE_ENV === 'production' ? productionValue : developmentValue);
+
+// Recovery events still trigger immediately. These are only healthy-state
+// reconciliation probes, so a small host does not need to run them per node
+// every few seconds.
+const REGISTRY_RECONCILIATION_INTERVAL_MS = productionInterval(
+  30_000,
+  120_000,
+  process.env.DARWIN_REGISTRY_RECONCILIATION_INTERVAL_MS,
+);
 const RECOVERY_PROBE_DELAY_MS = 4_000;
 const RECOVERY_PROBE_ATTEMPTS = 3;
 const RECOVERY_PROBE_TIMEOUT_MS = 5_000;
 const RECOVERY_PROBE_RETRY_DELAY_MS = 2_000;
 const TRANSPORT_WATCHDOG_INITIAL_DELAY_MS = 60_000;
-const TRANSPORT_WATCHDOG_INTERVAL_MS = 60_000;
+const TRANSPORT_WATCHDOG_INTERVAL_MS = productionInterval(
+  60_000,
+  180_000,
+  process.env.DARWIN_KAFKA_WATCHDOG_INTERVAL_MS,
+);
 const TRANSPORT_WATCHDOG_FAILURE_THRESHOLD = 3;
 const EVENT_KINDS: Record<string, KafkaRecoveryLifecycleKind> = {
   '$transporter.consumer.recovery.scheduled': 'scheduled',

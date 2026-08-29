@@ -13,7 +13,10 @@ x-app: &app-defaults
   restart: unless-stopped
   networks: [app_network]
   mem_limit: 80m
-  cpus: 0.04
+  # On a two-core host tiny CFS quotas leave idle host CPU unusable while
+  # request workers are throttled. Shares retain priority under contention
+  # without imposing a hard ceiling during ordinary, low-traffic operation.
+  cpu_shares: 256
   pids_limit: 128
   init: true
   logging: *default-logging
@@ -30,12 +33,13 @@ services:
     image: ${GATEWAY_IMAGE:-${APP_IMAGE:?APP_IMAGE is required}}
     environment:
       NODE_INSTANCE_ID: gateway
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "30"
       # Node's automatic heap limit is larger than this container. Reserve
       # native/Kafka buffers explicitly so the gateway never swaps itself out.
       NODE_OPTIONS: --max-old-space-size=144
     command: ["node", "dist/core/gateway/index.js"]
     mem_limit: 224m
-    cpus: 0.20
+    cpu_shares: 1024
     networks: [app_network, ingress_network]
     ports:
       - "127.0.0.1:6670:6670"
@@ -53,11 +57,12 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: auth
-      NODE_OPTIONS: --max-old-space-size=64
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "60"
+      NODE_OPTIONS: --max-old-space-size=80
     image: ${AUTH_IMAGE:?AUTH_IMAGE is required}
     command: ["node", "dist/core/auth/index.js"]
-    mem_limit: 112m
-    cpus: 0.15
+    mem_limit: 128m
+    cpu_shares: 768
     networks: [app_network, auth_egress_network]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
@@ -70,10 +75,11 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: user
-      NODE_OPTIONS: --max-old-space-size=72
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "60"
+      NODE_OPTIONS: --max-old-space-size=80
     command: ["node", "dist/core/user/index.js"]
-    mem_limit: 128m
-    cpus: 0.08
+    mem_limit: 144m
+    cpu_shares: 640
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 20s
@@ -85,10 +91,11 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: file
-      NODE_OPTIONS: --max-old-space-size=72
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "60"
+      NODE_OPTIONS: --max-old-space-size=80
     command: ["node", "dist/core/file/index.js"]
-    mem_limit: 128m
-    cpus: 0.08
+    mem_limit: 144m
+    cpu_shares: 512
     volumes:
       - uploads_data:/app/uploads
 
@@ -96,10 +103,14 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: metrics
-      NODE_OPTIONS: --max-old-space-size=88
+      # Keep the dashboard's process/OS cards populated without restoring
+      # high-frequency telemetry across every low-priority service.
+      DARWIN_SERVICE_METRICS: "true"
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "60"
+      NODE_OPTIONS: --max-old-space-size=96
     command: ["node", "dist/apps/starlight/metrics/index.js"]
-    mem_limit: 144m
-    cpus: 0.25
+    mem_limit: 160m
+    cpu_shares: 128
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:6699/readyz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 20s
@@ -111,54 +122,58 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: metrics-query
-      NODE_OPTIONS: --max-old-space-size=72
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=80
     command: ["node", "dist/apps/starlight/metrics-query/index.js"]
-    mem_limit: 128m
-    cpus: 0.10
+    mem_limit: 136m
+    cpu_shares: 96
 
   metrics-alerts:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: metrics-alerts
-      NODE_OPTIONS: --max-old-space-size=72
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=80
     networks: [app_network, auth_egress_network]
     command: ["node", "dist/apps/starlight/metrics-alerts/index.js"]
-    mem_limit: 128m
-    cpus: 0.12
+    mem_limit: 136m
+    cpu_shares: 96
 
   metrics-compat:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: metrics-compat
-      NODE_OPTIONS: --max-old-space-size=64
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=72
     command: ["node", "dist/apps/starlight/metrics-compat/index.js"]
-    mem_limit: 112m
-    # Compatibility calls still need enough event-loop time to receive Kafka
-    # responses; 2% caused false request timeouts under normal control-plane load.
-    cpus: 0.04
+    mem_limit: 120m
+    cpu_shares: 64
 
   logs:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: logs
-      NODE_OPTIONS: --max-old-space-size=104
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=120
     command: ["node", "dist/apps/starlight/logs/index.js"]
     # Log capture is part of the control plane. Keep enough headroom for
     # batched remote records so logging cannot delay Kafka heartbeats.
-    mem_limit: 192m
-    cpus: 0.25
+    mem_limit: 224m
+    cpu_shares: 128
 
   video:
     <<: *app-defaults
     image: ${VIDEO_IMAGE:?VIDEO_IMAGE is required}
     environment:
       NODE_INSTANCE_ID: video
-      NODE_OPTIONS: --max-old-space-size=64
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=72
     command: ["node", "dist/apps/starlight/video/index.js"]
     # The default 1% CPU cap could not start the Node-based liveness probe
-    # within five seconds under normal host load.
-    mem_limit: 112m
-    cpus: 0.05
+    # within five seconds under normal host load. Use a low relative weight
+    # instead so it can use idle CPU but cannot outrank request services.
+    mem_limit: 120m
+    cpu_shares: 64
     healthcheck:
       test: ["CMD-SHELL", "node -e 'process.kill(1, 0)'"]
       interval: 30s
@@ -170,20 +185,22 @@ services:
     <<: *app-defaults
     environment:
       NODE_INSTANCE_ID: subscription
-      NODE_OPTIONS: --max-old-space-size=64
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=72
     command: ["node", "dist/apps/starlight/subscription/index.js"]
-    mem_limit: 112m
-    cpus: 0.06
+    mem_limit: 120m
+    cpu_shares: 64
 
   micro-app:
     <<: *app-defaults
     image: ${MICRO_APP_IMAGE:-${APP_IMAGE:?APP_IMAGE is required}}
     environment:
       NODE_INSTANCE_ID: micro-app
-      NODE_OPTIONS: --max-old-space-size=72
+      DARWIN_SERVICE_METRICS: "false"
+      NODE_OPTIONS: --max-old-space-size=80
     command: ["node", "dist/apps/starlight/micro-app/index.js"]
-    mem_limit: 128m
-    cpus: 0.10
+    mem_limit: 136m
+    cpu_shares: 96
 
   trails:
     <<: *app-defaults
@@ -191,6 +208,7 @@ services:
     environment:
       NODE_INSTANCE_ID: trails
       NODE_PATH: /app/dist
+      DARWIN_SERVICE_METRICS_INTERVAL_SECONDS: "30"
       NODE_OPTIONS: --max-old-space-size=512
     # COS-backed ingestion needs outbound access while service discovery stays on app_network.
     networks: [app_network, trails_cos_egress_network]
@@ -198,7 +216,7 @@ services:
     # 4K derivative encoding holds source and output buffers concurrently.
     # Reserve a bounded burst budget so it completes before the desktop bridge expires.
     mem_limit: 768m
-    cpus: 0.80
+    cpu_shares: 384
 
 networks:
   app_network:

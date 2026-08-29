@@ -5,6 +5,7 @@ import { DatabaseService } from 'db/mysql/index';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import { LogLevel } from 'apps/starlight/logs/types';
 import userActions from './actions';
 
@@ -29,10 +30,7 @@ async function initializeUserService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           process.env.KAFKA_USER && process.env.KAFKA_PASSWORD
             ? {
@@ -65,13 +63,9 @@ async function initializeUserService() {
         },
       },
     },
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event',
-      },
-    },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
     installDarwinKafkaRecoveryLifecycle(star);
   const readiness = createServiceReadiness(star, { serviceName: APP_NAME });

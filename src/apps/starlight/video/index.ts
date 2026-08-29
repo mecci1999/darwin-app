@@ -3,6 +3,7 @@ import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from 'apps/starlight/logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import '../../../utils/loadEnv';
 import videoActions from './actions';
 import {
@@ -33,7 +34,7 @@ export function createVideoService() {
       host: KAFKA_BROKERS,
       options: {
         producer: { 'linger.ms': 0, 'batch.size': 0, acks: 1 },
-        consumer: { 'fetch.min.bytes': 1, 'fetch.wait.max.ms': 100 },
+        consumer: createKafkaConsumerOptions(),
         sasl: KAFKA_USER && KAFKA_PASSWORD ? { mechanism: 'plain', username: KAFKA_USER, password: KAFKA_PASSWORD } : undefined,
         ssl: false,
         groupId: `${KAFKA_GROUP_ID}-${process.env.NODE_ENV === 'development' ? Math.floor(Math.random() * 100000) : 'prod'}`,
@@ -51,8 +52,9 @@ export function createVideoService() {
       options: { redis: { port: REDIS_PORT, host: REDIS_HOST, password: REDIS_PASSWORD, db: REDIS_DB } },
     },
     logger: { type: 'Console', options: { level: 'info', categories: DEFAULT_LOG_CATEGORY_ENABLED } },
-    metrics: { enabled: true, reporter: { type: 'Event' } },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
     installDarwinKafkaRecoveryLifecycle(star);
 

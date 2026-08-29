@@ -17,7 +17,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 160m
-    cpus: 0.10
+    cpu_shares: 128
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo ruok > /dev/tcp/127.0.0.1/2181'"]
@@ -49,7 +49,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 1536m
-    cpus: 0.60
+    cpu_shares: 384
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
@@ -70,8 +70,10 @@ services:
       - mysql_data:/var/lib/mysql
     networks: [app_network]
     restart: unless-stopped
-    mem_limit: 768m
-    cpus: 0.15
+    # Production RSS is close to 768 MB despite a small InnoDB buffer pool;
+    # leave enough bounded headroom to avoid an avoidable database OOM kill.
+    mem_limit: 1024m
+    cpu_shares: 512
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -90,7 +92,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 96m
-    cpus: 0.03
+    cpu_shares: 64
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
@@ -114,7 +116,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 384m
-    cpus: 0.40
+    cpu_shares: 128
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "influx ping --host http://localhost:8086 >/dev/null 2>&1"]
@@ -135,7 +137,7 @@ services:
     networks: [app_network]
     restart: unless-stopped
     mem_limit: 1280m
-    cpus: 0.12
+    cpu_shares: 128
     logging: *default-logging
     ulimits:
       nofile:

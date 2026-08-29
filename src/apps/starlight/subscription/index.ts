@@ -9,6 +9,7 @@ import { Context, Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { registerDarwinLogForwarding } from '../logs/utils/darwin-log-capture';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import '../../../utils/loadEnv';
 import createActions from './actions';
 import billingActions from './actions/billing';
@@ -84,10 +85,7 @@ function createSubscriptionService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           KAFKA_CONFIG.USERNAME && KAFKA_CONFIG.PASSWORD
             ? {
@@ -124,13 +122,9 @@ function createSubscriptionService() {
       },
     },
     logger: true,
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event'
-      },
-    },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   registerDarwinLogForwarding(star);
     installDarwinKafkaRecoveryLifecycle(star);
 

@@ -8,6 +8,7 @@ import { DEFAULT_LOG_CATEGORY_ENABLED, isTransportDebugEnabled } from 'config';
 import { Star } from 'node-universe';
 import { Starlight } from 'typings';
 import { installDarwinKafkaRecoveryLifecycle } from 'core/kafka-recovery-lifecycle';
+import { createKafkaConsumerOptions, createServiceMetricsOptions, stabilizeNodeUniverseInstanceId } from 'core/runtime-observability';
 import '../../../utils/loadEnv';
 import createActions from './actions';
 import {
@@ -89,10 +90,7 @@ function createLogsService() {
           'batch.size': 0,
           acks: 1,
         },
-        consumer: {
-          'fetch.min.bytes': 1,
-          'fetch.wait.max.ms': 100,
-        },
+        consumer: createKafkaConsumerOptions(),
         sasl:
           KAFKA_USER && KAFKA_PASSWORD
             ? {
@@ -136,13 +134,9 @@ function createLogsService() {
       },
     },
     middlewares: [createDarwinLogCaptureMiddleware()],
-    metrics: {
-      enabled: true,
-      reporter: {
-        type: 'Event'
-      }
-    },
+    metrics: createServiceMetricsOptions(),
   }) as Starlight;
+  stabilizeNodeUniverseInstanceId(star);
   installDarwinKafkaRecoveryLifecycle(star);
 
   // 创建日志处理服务

@@ -11,6 +11,7 @@ import {
   buildSystemServiceId,
   resolveSystemServiceIdentity,
 } from '../utils/system-telemetry';
+import { enqueueMetricsBatch } from '../utils/processing-queue';
 
 export const queueGatewayTopologyMetric = (ctx: any) => {
   const { metricsState } = ctx.service as { metricsState: MetricsState };
@@ -125,7 +126,7 @@ export const queueGatewayTopologyMetric = (ctx: any) => {
     },
   ];
 
-  metricsState.processingQueue.push({
+  enqueueMetricsBatch(metricsState, {
     id: `${SYSTEM_TENANT_ID}-gateway-topology-${targetService}-${timestamp}`,
     format: 'system',
     data,
@@ -230,7 +231,7 @@ const queueSystemMetricsBatch = (ctx: any) => {
     return;
   }
 
-  metricsState.processingQueue.push({
+  enqueueMetricsBatch(metricsState, {
     id: `${SYSTEM_TENANT_ID}-${identity.serviceId}-${emittedAt}`,
     format: 'system',
     data: enrichedData,
@@ -288,7 +289,7 @@ export default {
           serviceId: item?.serviceId || item?.tags?.serviceId || ctx.service.fullName,
         }));
 
-        metricsState.processingQueue.push({
+        enqueueMetricsBatch(metricsState, {
           id: `${tenantId}-${Date.now()}`,
           format: Array.isArray(data) ? 'custom' : data.format || 'custom',
           data: enrichedData,
