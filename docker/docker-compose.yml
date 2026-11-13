@@ -1,7 +1,7 @@
 services:
   # Zookeeper Service
   zookeeper:
-    image: bitnami/zookeeper:latest
+    image: soldevelo/zookeeper:latest
     container_name: zookeeper
     ports:
       - "2181:2181"
@@ -13,7 +13,7 @@ services:
 
   # Kafka Service
   kafka:
-    image: bitnami/kafka:latest
+    image: soldevelo/kafka:3.9
     container_name: kafka
     ports:
       - "9092:9092"
